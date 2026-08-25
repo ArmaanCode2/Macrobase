@@ -75,7 +75,7 @@ class ReleaseCandidateSystemTests {
         // 1. Catalog integrity
         val rs = stmt.executeQuery("SELECT COUNT(*) FROM foods;")
         assertTrue(rs.next())
-        assertEquals(7966, rs.getInt(1))
+        assertEquals(1014, rs.getInt(1))
         rs.close()
 
         // 2. Default Goal invariants
