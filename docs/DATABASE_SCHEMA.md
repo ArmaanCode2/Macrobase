@@ -54,7 +54,10 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 | `loggedProtein` | `REAL` | `NOT NULL` | Scaled protein snapshot (g) |
 | `loggedCarbs` | `REAL` | `NOT NULL` | Scaled carbs snapshot (g) |
 | `loggedFat` | `REAL` | `NOT NULL` | Scaled fat snapshot (g) |
-| `createdAt` | `INTEGER` | `NOT NULL` | Timestamp |
+| `loggedFiber` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled dietary fiber snapshot (g) [Added v3] |
+| `loggedSugar` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled sugars snapshot (g) [Added v3] |
+| `loggedSodium` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled sodium snapshot (mg) [Added v3] |
+| `createdAt` | `INTEGER` | `NOT NULL` | Creation timestamp |
 
 #### 2.1.2. `custom_foods`
 | Column | Type | Constraints | Description |
@@ -64,7 +67,8 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 | `name` | `TEXT` | `NOT NULL, INDEXED` | Food title |
 | `brand` | `TEXT` | `NULL` | Optional brand |
 | `servingSize` | `REAL` | `NOT NULL` | Portion quantity |
-| `servingUnit` | `TEXT` | `NOT NULL` | Serving unit label |
+| `servingUnit` | `TEXT` | `NOT NULL` | Serving unit enum name |
+| `customUnitName` | `TEXT` | `NULL` | Freeform custom portion unit label [Added v2] |
 | `calories` | `REAL` | `NOT NULL` | Calories |
 | `proteinGrams` | `REAL` | `NOT NULL` | Protein in grams |
 | `carbsGrams` | `REAL` | `NOT NULL` | Carbs in grams |
@@ -75,7 +79,7 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 | `potassiumMg` | `REAL` | `NULL` | Potassium (nullable) |
 | `calciumMg` | `REAL` | `NULL` | Calcium (nullable) |
 | `ironMg` | `REAL` | `NULL` | Iron (nullable) |
-| `createdAt` | `INTEGER` | `NOT NULL` | Timestamp |
+| `createdAt` | `INTEGER` | `NOT NULL` | Creation timestamp |
 
 #### 2.1.3. `recipes`
 | Column | Type | Constraints | Description |
@@ -112,6 +116,34 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 
 ## 3. Versioning & Migration Strategy
 
-- **Built-in Database**: Versioned via `database_metadata` (`database_version: 1.0.0`, `schema_version: 1`). Upgrades are atomic file replacements managed by `BuiltInDatabaseManager`.
-- **User Database**: Versioned via Room schema migrations (`MIGRATION_1_2` infrastructure). Non-destructive migration guarantees zero user data loss.
-- **Stable Food Identity Strategy**: Diary entries record the food reference (`foodId`, `uuid`) and snapshot immutable nutrition and portion descriptions, ensuring that older diary entries remain readable and accurate across future database updates.
+### 3.1. Built-in Database Versioning
+- **Database Version**: Tracked in `database_metadata` (`database_version: 1.0.0`, `schema_version: 1`).
+- **Update Mechanism**: Asset database updates are handled atomically via `BuiltInDatabaseManager`. The database is opened strictly in read-only mode (`SQLiteDatabase.OPEN_READONLY`).
+
+### 3.2. User Database Schema & Migration History
+The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 3`. All schema modifications are strictly non-destructive:
+
+- **Version 1 (Initial Release)**:
+  - Base schema with `diary_entries`, `custom_foods`, `recipes`, `weight_entries`, and `water_logs`.
+- **Version 2 (`MIGRATION_1_2`)**:
+  - Added support for freeform custom serving unit names (e.g., "roti", "scoop", "chapati").
+  ```sql
+  ALTER TABLE custom_foods ADD COLUMN customUnitName TEXT
+  ```
+- **Version 3 (`MIGRATION_2_3`)**:
+  - Persisted secondary micronutrients in historical diary logs to prevent data loss upon diary insertion.
+  ```sql
+  ALTER TABLE diary_entries ADD COLUMN loggedFiber REAL NOT NULL DEFAULT 0.0;
+  ALTER TABLE diary_entries ADD COLUMN loggedSugar REAL NOT NULL DEFAULT 0.0;
+  ALTER TABLE diary_entries ADD COLUMN loggedSodium REAL NOT NULL DEFAULT 0.0;
+  ```
+- **Room Builder Configuration** (`DiModules.kt`):
+  ```kotlin
+  Room.databaseBuilder(get(), UserDatabase::class.java, DatabaseConfig.USER_DATABASE_NAME)
+      .addMigrations(UserDatabase.MIGRATION_1_2, UserDatabase.MIGRATION_2_3)
+      .fallbackToDestructiveMigration()
+      .build()
+  ```
+
+### 3.3. Stable Food Identity Strategy
+Diary entries record the food reference (`foodId`, `uuid`) and snapshot immutable nutrition and portion descriptions (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`, `loggedFiber`, `loggedSugar`, `loggedSodium`, `servingDescription`, `gramWeight`). This guarantees that older diary entries remain readable and mathematically accurate across future database updates, custom food mutations, or food deletions.

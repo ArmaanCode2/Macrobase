@@ -12,7 +12,7 @@
    - **Built-in Food Data (`built_in_foods.db`)**: Read-only static catalog loaded from bundled asset storage (`app/src/main/assets/databases/built_in_foods.db`). Never mutated by user actions.
    - **User Data (`macrobase_user.db`) & Preferences (DataStore)**: Read/write user personal data (meal diary, custom foods, recipes, body weight logs, water intake) stored in AndroidX Room; user preferences and daily macro/calorie goals persisted via AndroidX DataStore.
 4. **Historical Correctness for Diary Entries (Hybrid Snapshot Strategy)**:
-   - When a user logs a food or recipe to their diary, `DiaryEntryEntity` stores the stable food reference (`foodId`, `uuid`, `sourceName`) **and** snapshots the calculated nutritional values (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`) and portion description (`servingDescription`, `gramWeight`, `userQuantity`). If `built_in_foods.db` is updated, or if a custom food / recipe / daily goal is later edited or deleted, historical diary logs remain 100% immutable, readable, and accurate.
+   - When a user logs a food or recipe to their diary, `DiaryEntryEntity` stores the stable food reference (`foodId`, `uuid`) **and** snapshots the calculated nutritional values (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`, `loggedFiber`, `loggedSugar`, `loggedSodium`) and portion description (`servingDescription`, `gramWeight`, `userQuantity`). If `built_in_foods.db` is updated, or if a custom food / recipe / daily goal is later edited or deleted, historical diary logs remain 100% immutable, readable, and accurate.
 5. **No Direct Storage Access in UI**: Composables observe immutable `StateFlow<UiState>` emitted by ViewModels. UI never queries SQLite, Room, or DataStore directly.
 6. **Explicit Nullability for Missing Nutrients**: Unanalyzed or missing micronutrient data points are represented as nullable (`null`), never silently coerced to `0.0`.
 
@@ -54,6 +54,56 @@
 | (`built_in_foods.db`) | | Diary, CustomFood, Recipe | | Daily goals, metrics  |
 +───────────────────────+ +───────────────────────────+ +───────────────────────+
 ```
+
+### 2.1. Dependency Injection & Modular Topology (Koin)
+
+MacroBase leverages **Koin** for dependency injection. All modules are declared in `app/src/main/java/com/macrobase/app/core/di/DiModules.kt`:
+
+1. **`databaseModule`**:
+   - `UserDatabase`: Built via `Room.databaseBuilder` with `DatabaseConfig.USER_DATABASE_NAME`, registering `UserDatabase.MIGRATION_1_2` and `UserDatabase.MIGRATION_2_3`.
+   - DAOs: `diaryDao()`, `customFoodDao()`, `recipeDao()`, `weightDao()`, `waterDao()`.
+   - Static Asset DB: `BuiltInDatabaseManager(get())` and `LocalFoodDatabaseProvider(get())` (`FoodDataProvider`).
+2. **`repositoryModule`**:
+   - `PreferencesRepository` $\rightarrow$ `PreferencesRepositoryImpl` (DataStore)
+   - `GoalsRepository` $\rightarrow$ `GoalsRepositoryImpl` (DataStore)
+   - `DiaryRepository` $\rightarrow$ `DiaryRepositoryImpl` (Room DAOs, Goals, Preferences)
+   - `FoodRepository` $\rightarrow$ `FoodRepositoryImpl` (Built-in SQLite + Custom Food Room DAO)
+   - `RecipeRepository` $\rightarrow$ `RecipeRepositoryImpl` (Room Recipe DAO)
+   - `WeightRepository` $\rightarrow$ `WeightRepositoryImpl` (Room Weight DAO)
+   - `WaterRepository` $\rightarrow$ `WaterRepositoryImpl` (Room Water DAO)
+   - `StatisticsRepository` $\rightarrow$ `StatisticsRepositoryImpl`
+   - `PortabilityRepository` $\rightarrow$ `PortabilityRepositoryImpl`
+   - `BasketRepository` $\rightarrow$ `InMemoryBasketRepository` (In-memory staging singleton)
+   - `RankRepository` $\rightarrow$ `RankRepositoryImpl` (Lifestyle ranking & scoring)
+3. **`useCaseModule`**:
+   - Domain operations registered as singletons via `singleOf(::...)` (e.g. `SearchFoodsUseCase`, `GetFoodDetailsUseCase`, `CalculateNutritionForServingUseCase`, `LogFoodUseCase`, `CommitBasketUseCase`, etc.).
+   - Scanner pipeline: `ImageQualityChecker`, `ImagePreprocessor`, `NutritionLabelParser`.
+4. **`viewModelModule`**:
+   - Screen ViewModels registered via `viewModelOf(::...)` (e.g. `HomeViewModel`, `SearchViewModel`, `FoodDetailViewModel`, `CalendarViewModel`, `BasketViewModel`, `RankViewModel`, etc.).
+
+---
+
+### 2.2. Immutable Historical Snapshot Strategy
+
+When food is logged to the user's diary, `diary_entries` stores both the referenced food ID and the **materialized nutritional and portion values** at the exact moment of logging:
+
+```sql
+loggedCalories REAL NOT NULL,
+loggedProtein REAL NOT NULL,
+loggedCarbs REAL NOT NULL,
+loggedFat REAL NOT NULL,
+loggedFiber REAL NOT NULL DEFAULT 0.0,
+loggedSugar REAL NOT NULL DEFAULT 0.0,
+loggedSodium REAL NOT NULL DEFAULT 0.0,
+servingDescription TEXT NOT NULL,
+gramWeight REAL NOT NULL,
+userQuantity REAL NOT NULL
+```
+
+#### Why Snapshots Are Essential:
+1. **Built-in Database Updates**: If a future application release updates the nutritional values in `built_in_foods.db` (e.g., USDA revises the protein density of eggs), historical logs from previous weeks/months must not change.
+2. **Custom Food & Recipe Edits**: If a user creates a custom smoothie recipe with 300 kcal and logs it to their diary, and later changes the recipe to 500 kcal, past diary logs MUST retain the 300 kcal snapshot.
+3. **Food Deletions**: If a user deletes a custom food from their catalog, historical entries remain 100% readable and aggregatable because they carry their own copy of the food name, portion label, and nutrition.
 
 ---
 

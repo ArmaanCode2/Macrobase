@@ -34,3 +34,33 @@ When "Log Food" is triggered:
 
 ## Recipe Handling
 Recipes are treated as composite entities but are logged as a single atomic `BasketItem`. The nutritional scaling occurs during the `AddFoodToBasketUseCase` phase. Recipes do not dump their individual constituent ingredients into the basket or diary; they log a single flattened `Food` item representing the recipe.
+
+---
+
+## Unified Food Logging Lifecycle
+
+```
+[Search / Scanner / Custom Foods]
+               │ Select Food
+               ▼
+      [FoodDetailScreen]
+         │          │
+ [New Food Mode] [Edit Diary Mode]
+         │          │
+         ▼          ▼
+   [BasketScreen] [DiaryRepository.updateEntry]
+         │          │
+  Commit │          │ Direct Room UPDATE
+         ▼          ▼
+       [macrobase_user.db (Room)]
+                    │
+                    ▼
+          [Flow<DailyNutritionSummary>]
+                    │
+                    ▼
+          [Home Dashboard Screen]
+```
+
+### New Food Logging vs. Diary Entry Edit Mode
+- **New Food Logging Mode**: Food selected from search, catalog, or scanner has `entryId == null`. Tapping "Add to Basket" stages the item in `InMemoryBasketRepository`. The item can be bulk-edited or cancelled before atomic commit.
+- **Diary Entry Edit Mode**: Existing diary entry clicked from the home dashboard has `entryId > 0`. Bypasses the basket completely and updates the existing entry directly in `DiaryRepositoryImpl`.

@@ -5,7 +5,7 @@
 MacroBase was designed and verified under an **offline-first, zero-cloud, privacy-by-design** architecture. 
 
 - **Platform**: Android (minSdk 26, targetSdk 35)
-- **Networking**: **Zero network requests**, **Zero network permissions** (`INTERNET` permission absent).
+- **Networking**: **Zero network requests**. `INTERNET` is stripped from the merged manifest and the build fails if it returns. `ACCESS_NETWORK_STATE` (connectivity status only, no network access) remains, added by ML Kit's datatransport library, whose CCT upload backend is unregistered.
 - **Storage Isolation**:
   - `built_in_foods.db`: 45.8 MB immutable, read-only USDA SQLite database.
   - `macrobase_user.db`: Application-private Room SQLite database (`/data/data/com.macrobase.app/databases/macrobase_user.db`).
@@ -62,13 +62,12 @@ MacroBase was designed and verified under an **offline-first, zero-cloud, privac
 ---
 
 ## 5. Android Permissions & Component Exposure
-
-- **Declared Permissions**: **NONE**.
-  - No `android.permission.INTERNET`
-  - No `android.permission.READ_EXTERNAL_STORAGE`
-  - No `android.permission.WRITE_EXTERNAL_STORAGE`
-  - No `android.permission.ACCESS_NETWORK_STATE`
-- **Storage Access Framework (SAF)**: Export and import use native `ActivityResultContracts.CreateDocument` and `ActivityResultContracts.OpenDocument`, providing strict user-mediated file access without requiring broad storage permissions.
+- **Hardware Permissions**:
+  - `android.permission.CAMERA`: Declared with `android.hardware.camera` (`required="false"`). Strictly requested at runtime only when the user explicitly opens the on-device nutrition label scanner. Captured image frames are processed in-memory on-device and are never persisted or transmitted.
+- **Network Permissions**:
+  - **NONE**. `android.permission.INTERNET` is absent from `AndroidManifest.xml`. The app has zero network attack surface and makes zero outbound HTTP/HTTPS requests.
+- **Storage Access Framework (SAF)**:
+  - Database export and import use Android's native `ActivityResultContracts.CreateDocument` and `ActivityResultContracts.OpenDocument`. No broad storage permissions (`READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE`) are requested.
 - **Component Exposure**:
   - `MainActivity`: Only exported component (`android:exported="true"`) solely because it possesses the `MAIN` + `LAUNCHER` intent filter.
   - Services: None.

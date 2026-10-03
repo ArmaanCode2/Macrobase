@@ -72,3 +72,60 @@ Adding a new food provider (e.g. Open Food Facts or Indian Food Database) adhere
           ▼
 [ Existing Use Cases & UI — ZERO CODE CHANGES ]
 ```
+
+---
+
+## 4. Unified Food Logging Pipeline & Journey
+
+```
++─────────────────────────────────────────────────────────────────────────+
+|                           FOOD DISCOVERY                                |
+|   Built-in FTS Search  •  On-Device Label OCR  •  Custom Foods & Recipes|
++────────────────────────────────────┬────────────────────────────────────+
+                                     │ Food Selected (foodId / draft)
+                                     ▼
++─────────────────────────────────────────────────────────────────────────+
+|                          FoodDetailScreen                               |
+|   Select portion unit & enter quantity -> Live nutrition calculation    |
++───────────────────┬─────────────────────────────────┬───────────────────+
+                    │ [NEW FOOD / STAGING MODE]       │ [EDIT MODE]
+                    │ (foodId > 0, entryId == null)   │ (entryId > 0)
+                    ▼                                 ▼
++───────────────────────────────────────+ +───────────────────────────────+
+|           BasketScreen                | |       DiaryRepository         |
+|   - Staging in InMemoryBasketRepo     | |   - updateDiaryEntryUseCase() |
+|   - Bulk edit: meal type, date, qty   | |   - Direct Room UPDATE        |
+|   - Review total macros & calories    | +───────────────────────────────+
++───────────────────┬───────────────────+
+                    │ User taps "Log All Foods"
+                    ▼
++───────────────────────────────────────+
+|          CommitBasketUseCase          |
+|   - Converts BasketItems -> Entries   |
+|   - Transactional Room batch INSERT   |
+|   - Clears InMemoryBasketRepository   |
++───────────────────┬───────────────────+
+                    │
+                    ▼
++─────────────────────────────────────────────────────────────────────────+
+|                   macrobase_user.db (Room: diary_entries)               |
+|   - Snapshots: calories, macros, secondary nutrients, portion & weight  |
++───────────────────┬─────────────────────────────────────────────────────+
+                    │ Reactive Flow observation
+                    ▼
++─────────────────────────────────────────────────────────────────────────+
+|                      Home Dashboard Screen                              |
+|   - DailyNutritionSummary: intake, remaining balance, macro strips      |
++─────────────────────────────────────────────────────────────────────────+
+```
+
+### 4.1. New Food Logging Mode vs. Diary Entry Edit Mode
+- **New Food Logging Mode**:
+  - Activated when opening a food from Search, Recents, Favorites, Scanner, or Custom Foods (`entryId == null`).
+  - The item CANNOT be committed directly to Room from `FoodDetailScreen`. Instead, tapping "Add to Basket" routes into `InMemoryBasketRepository`.
+  - The user can queue multiple foods, modify their portion quantities, align their meal slots or dates, and review aggregated nutrition before atomic commit via `CommitBasketUseCase`.
+- **Diary Entry Edit Mode**:
+  - Activated when tapping an existing logged meal row on the Home Dashboard (`entryId > 0`).
+  - Bypasses the Basket. Saving updates the existing `diary_entries` row in Room via `UpdateDiaryEntryUseCase`.
+  - Dynamically recalculates missing secondary nutrients if older logs lack fiber/sugar/sodium while catalog data is present.
+
