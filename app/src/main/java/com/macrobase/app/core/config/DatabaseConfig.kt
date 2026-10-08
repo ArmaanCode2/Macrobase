@@ -11,7 +11,7 @@ object DatabaseConfig {
 
     // User Data Room Database (Diary logs, custom foods, recipes, weight, water)
     const val USER_DATABASE_NAME = "macrobase_user.db"
-    const val USER_DATABASE_VERSION = 2
+    const val USER_DATABASE_VERSION = 3
 
     // Search Configuration
     const val SEARCH_DEBOUNCE_MILLIS = 250L
