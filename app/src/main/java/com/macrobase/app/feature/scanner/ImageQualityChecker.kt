@@ -21,6 +21,11 @@ class ImageQualityChecker {
     /**
      * Inspects bitmap quality and returns a Pass or Fail with actionable user guidance.
      */
+    private val analyzer = NutritionLabelImageQualityAnalyzer()
+
+    /**
+     * Inspects bitmap quality and returns a Pass or Fail with actionable user guidance.
+     */
     fun evaluate(bitmap: Bitmap): QualityCheckResult {
         if (bitmap.isRecycled) {
             return QualityCheckResult.Fail(
@@ -42,33 +47,10 @@ class ImageQualityChecker {
             )
         }
 
-        val stepX = (width / 120).coerceAtLeast(1)
-        val stepY = (height / 120).coerceAtLeast(1)
-        val sampleCols = (width / stepX).coerceAtLeast(2)
-        val sampleRows = (height / stepY).coerceAtLeast(2)
-
-        var totalLuminance = 0.0
-        val lumGrid = Array(sampleRows) { DoubleArray(sampleCols) }
-
-        for (r in 0 until sampleRows) {
-            val y = (r * stepY).coerceAtMost(height - 1)
-            for (c in 0 until sampleCols) {
-                val x = (c * stepX).coerceAtMost(width - 1)
-                val p = bitmap.getPixel(x, y)
-                val red = (p shr 16) and 0xFF
-                val green = (p shr 8) and 0xFF
-                val blue = p and 0xFF
-                val lum = 0.299 * red + 0.587 * green + 0.114 * blue
-                lumGrid[r][c] = lum
-                totalLuminance += lum
-            }
-        }
-
-        val totalPixels = sampleRows * sampleCols
-        val avgLuminance = if (totalPixels > 0) totalLuminance / totalPixels else 128.0
+        val analysis = analyzer.analyze(bitmap)
 
         // 2. Severe Darkness Check
-        if (avgLuminance < 28.0) {
+        if (analysis.luminance < 28.0) {
             return QualityCheckResult.Fail(
                 title = "Image is too dark",
                 message = "The nutrition label is poorly illuminated.",
@@ -77,7 +59,7 @@ class ImageQualityChecker {
         }
 
         // 3. Severe Overexposure / Glare Check
-        if (avgLuminance > 240.0) {
+        if (analysis.luminance > 240.0) {
             return QualityCheckResult.Fail(
                 title = "Image is washed out",
                 message = "Severe glare or overexposure detected on the label.",
@@ -85,27 +67,8 @@ class ImageQualityChecker {
             )
         }
 
-        // 4. Blur / Sharpness Check via gradient differences
-        var gradientSum = 0.0
-        var count = 0
-
-        for (r in 0 until sampleRows - 1) {
-            for (c in 0 until sampleCols - 1) {
-                val current = lumGrid[r][c]
-                val right = lumGrid[r][c + 1]
-                val down = lumGrid[r + 1][c]
-
-                val dx = right - current
-                val dy = down - current
-                val gradMag = sqrt(dx * dx + dy * dy)
-                gradientSum += gradMag
-                count++
-            }
-        }
-
-        val avgGradient = if (count > 0) gradientSum / count else 0.0
-
-        if (avgGradient < 2.5) {
+        // 4. Featureless / completely blurry check
+        if (analysis.sharpnessScore < 5.0 && analysis.contrastScore < 10.0) {
             return QualityCheckResult.Fail(
                 title = "Image is blurry",
                 message = "The camera was out of focus or moved during capture.",

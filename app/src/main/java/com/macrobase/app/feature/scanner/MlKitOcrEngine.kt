@@ -69,11 +69,6 @@ class MlKitOcrEngine(
             val pass1 = processImagePass(bitmap, passIndex = 1)
             passes.add(pass1)
 
-            // Early exit if Pass 1 already detected extensive text (e.g. 10+ lines and 120+ chars)
-            if (pass1.lines.size >= 10 && pass1.fullText.length >= 120) {
-                return@withContext passes
-            }
-
             // Pass 2: Grayscale & Contrast-enhanced variant
             val enhancedBitmap = preprocessor.enhanceContrast(bitmap)
             try {
@@ -85,16 +80,14 @@ class MlKitOcrEngine(
                 }
             }
 
-            // Pass 3: Adaptive high-contrast binarized variant (only if still sparse)
-            if (passes.maxOfOrNull { it.lines.size } ?: 0 < 6) {
-                val binarized = preprocessor.createBinarizedVariant(bitmap)
-                try {
-                    val pass3 = processImagePass(binarized, passIndex = 3)
-                    passes.add(pass3)
-                } finally {
-                    if (binarized != bitmap && !binarized.isRecycled) {
-                        binarized.recycle()
-                    }
+            // Pass 3: Adaptive local threshold variant
+            val binarized = preprocessor.createAdaptiveThresholdVariant(bitmap)
+            try {
+                val pass3 = processImagePass(binarized, passIndex = 3)
+                passes.add(pass3)
+            } finally {
+                if (binarized != bitmap && !binarized.isRecycled) {
+                    binarized.recycle()
                 }
             }
 
@@ -106,11 +99,13 @@ class MlKitOcrEngine(
     }
 
     /**
-     * Executes single/multi-pass on-device OCR on the captured bitmap.
+     * Executes single-pass on-device OCR on the provided bitmap variant.
      */
     override suspend fun recognizeText(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
-        val passes = recognizeAllPasses(bitmap)
-        return@withContext passes.maxByOrNull { it.lines.size } ?: passes.first()
+        if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) {
+            return@withContext OcrResult(fullText = "", blocks = emptyList(), lines = emptyList(), passIndex = 1)
+        }
+        return@withContext processImagePass(bitmap, passIndex = 1)
     }
 
     /**
