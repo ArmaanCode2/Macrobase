@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.statistics
 
+import kotlin.math.roundToInt
 import android.app.DatePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.CalendarPerformanceConfig
+import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.feature.calendar.CalendarViewModel
 import com.macrobase.app.feature.calendar.FoodLoggingCalendar
@@ -83,6 +85,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -120,7 +123,8 @@ data class StatisticsUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatisticsViewModel(
     private val getStatisticsUseCase: GetStatisticsUseCase,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val clock: Clock = DeviceClock
 ) : ViewModel() {
 
     private val _selectedTab = MutableStateFlow(0)
@@ -129,8 +133,8 @@ class StatisticsViewModel(
     private val _weightInterval = MutableStateFlow(WeightTimeInterval.LAST_30_DAYS)
     val weightInterval: StateFlow<WeightTimeInterval> = _weightInterval.asStateFlow()
 
-    private val _weightCustomFrom = MutableStateFlow(LocalDate.now().minusDays(30))
-    private val _weightCustomTo = MutableStateFlow(LocalDate.now())
+    private val _weightCustomFrom = MutableStateFlow(LocalDate.now(clock).minusDays(30))
+    private val _weightCustomTo = MutableStateFlow(LocalDate.now(clock))
 
     private val _consistencyInterval = MutableStateFlow(ConsistencyInterval.DAYS_30)
     val consistencyInterval: StateFlow<ConsistencyInterval> = _consistencyInterval.asStateFlow()
@@ -143,7 +147,7 @@ class StatisticsViewModel(
         combine(_weightCustomTo, _consistencyInterval, _macroInterval) { wTo, cInt, mInt -> Triple(wTo, cInt, mInt) }
     ) { (tab, wInt, wFrom), (wTo, cInt, mInt) ->
         val (weightFrom, weightTo) = calculateWeightDateRange(wInt, wFrom, wTo)
-        val today = LocalDate.now()
+        val today = LocalDate.now(clock)
         val cFrom = today.minusDays(cInt.days)
         val mFrom = today.minusDays(mInt.days)
 
@@ -193,7 +197,7 @@ class StatisticsViewModel(
         customFrom: LocalDate,
         customTo: LocalDate
     ): Pair<LocalDate, LocalDate> {
-        val today = LocalDate.now()
+        val today = LocalDate.now(clock)
         return when (interval) {
             WeightTimeInterval.LAST_30_DAYS -> today.minusDays(30) to today
             WeightTimeInterval.LAST_3_MONTHS -> today.minusMonths(3) to today
@@ -659,10 +663,10 @@ private fun NutritionConsistencyTab(
                     } else if (cell.caloriesLogged <= 0.0) {
                         Text("No food logged on this day.", style = AppTypography.Body2, color = AppColors.TextSecondary)
                         Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text("Daily Goal: ${cell.dailyGoalCalories.toInt()} kcal", style = AppTypography.Caption, color = AppColors.TextMuted)
+                        Text("Daily Goal: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Caption, color = AppColors.TextMuted)
                     } else {
-                        Text("Calories Logged: ${cell.caloriesLogged.toInt()} kcal", style = AppTypography.Body1)
-                        Text("Daily Target: ${cell.dailyGoalCalories.toInt()} kcal", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                        Text("Calories Logged: ${cell.caloriesLogged.roundToInt()} kcal", style = AppTypography.Body1)
+                        Text("Daily Target: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Body2, color = AppColors.TextSecondary)
                         Spacer(modifier = Modifier.height(AppSpacing.xs))
                         Text("Adherence: ${cell.percentageOfGoal}% of Goal", style = AppTypography.Body2, color = CalendarPerformanceConfig.getColorForCategory(cell.category))
                     }
@@ -759,7 +763,7 @@ private fun MacroAveragesTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${stats.averageCalories.toInt()}", style = AppTypography.Header2, color = AppColors.CalorieText)
+                            Text(text = "${stats.averageCalories.roundToInt()}", style = AppTypography.Header2, color = AppColors.CalorieText)
                             Text(text = "kcal / day", style = AppTypography.Caption, color = AppColors.TextSecondary)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {

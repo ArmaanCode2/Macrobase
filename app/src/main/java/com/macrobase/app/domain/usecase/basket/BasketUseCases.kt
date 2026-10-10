@@ -8,7 +8,10 @@ import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.basket.BasketItem
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.basket.BasketRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
 
@@ -75,30 +78,65 @@ class ClearBasketUseCase(
     }
 }
 
+/**
+ * One basket commit at a time, app-wide (BUG-011). A second tap waits for the first commit and
+ * then finds its items already gone, so nothing is logged twice.
+ */
+internal object BasketCommitLock {
+    val mutex = Mutex()
+}
+
+/** The basket item to log no longer exists (removed elsewhere, or already logged). */
+class BasketItemMissingException : IllegalStateException("This item is no longer in the basket, so nothing was logged.")
+
+/** A basket item has an amount of 0 or less; nothing is logged until it is fixed (BUG-012). */
+class InvalidBasketQuantityException : IllegalArgumentException("Enter an amount above 0 before logging.")
+
+/** Like runCatching, but cancellation still cancels the caller instead of becoming a failure. */
+private inline fun <T> commitCatching(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Exception) {
+    Result.failure(e)
+}
+
+/**
+ * The diary entry for a basket item takes the item's id as its uuid. diary_entries.uuid is unique
+ * and inserts REPLACE, so if a logged item ever comes back (the app died before the basket file
+ * recorded its removal) logging it again replaces that entry instead of adding a duplicate.
+ */
+private fun BasketItem.toDiaryEntry(): DiaryEntry {
+    if (!(quantity.isFinite() && quantity > 0.0)) throw InvalidBasketQuantityException()
+    return DiaryEntry(
+        id = 0L,
+        uuid = id,
+        date = date,
+        mealType = mealType,
+        food = food.copy(
+            name = foodNameSnapshot,
+            brand = brandSnapshot
+        ),
+        serving = serving,
+        quantity = quantity,
+        calculatedNutrition = calculatedNutrition,
+        loggedAt = Instant.now()
+    )
+}
+
 class CommitSingleBasketItemUseCase(
     private val basketRepository: BasketRepository,
     private val diaryRepository: DiaryRepository
 ) {
-    suspend operator fun invoke(itemId: String): Result<Unit> = runCatching {
+    suspend operator fun invoke(itemId: String): Result<Unit> = BasketCommitLock.mutex.withLock {
+        commitCatching { commit(itemId) }
+    }
+
+    private suspend fun commit(itemId: String) {
         val items = basketRepository.items.value
-        val item = items.firstOrNull { it.id == itemId } ?: return@runCatching
-        
-        val entry = DiaryEntry(
-            id = 0L,
-            uuid = java.util.UUID.randomUUID().toString(),
-            date = item.date,
-            mealType = item.mealType,
-            food = item.food.copy(
-                name = item.foodNameSnapshot,
-                brand = item.brandSnapshot
-            ),
-            serving = item.serving,
-            quantity = item.quantity,
-            calculatedNutrition = item.calculatedNutrition,
-            loggedAt = Instant.now()
-        )
-        
-        diaryRepository.addEntries(listOf(entry))
+        val item = items.firstOrNull { it.id == itemId } ?: throw BasketItemMissingException()
+
+        diaryRepository.addEntries(listOf(item.toDiaryEntry()))
         basketRepository.removeItem(itemId)
     }
 }
@@ -107,34 +145,21 @@ class CommitBasketUseCase(
     private val basketRepository: BasketRepository,
     private val diaryRepository: DiaryRepository
 ) {
-    suspend operator fun invoke(): Result<Unit> = runCatching {
-        val items = basketRepository.items.value
-        if (items.isEmpty()) return@runCatching
+    /** Logs every basket item in one insert; returns how many entries were logged. */
+    suspend operator fun invoke(): Result<Int> = BasketCommitLock.mutex.withLock {
+        commitCatching { commitAll() }
+    }
 
-        // Transactionally insert all entries.
-        // Currently DiaryRepository might only have insertDiaryEntry(entry: DiaryEntry)
-        // We will loop through them. If there's an issue, it might not be a real SQL transaction
-        // unless we modify DiaryRepository to have an insertAll transaction.
-        // For now, let's map them to DiaryEntry and insert them.
-        // Wait, DiaryRepository handles Room transactions if we provide a method. Let's add insertDiaryEntries to DiaryRepository.
-        val entries = items.map { item ->
-            DiaryEntry(
-                id = 0L,
-                uuid = java.util.UUID.randomUUID().toString(),
-                date = item.date,
-                mealType = item.mealType,
-                food = item.food.copy(
-                    name = item.foodNameSnapshot,
-                    brand = item.brandSnapshot
-                ),
-                serving = item.serving,
-                quantity = item.quantity,
-                calculatedNutrition = item.calculatedNutrition,
-                loggedAt = Instant.now()
-            )
-        }
-        
+    private suspend fun commitAll(): Int {
+        val items = basketRepository.items.value
+        if (items.isEmpty()) return 0
+
+        val entries = items.map { it.toDiaryEntry() }
+
+        // One Room insert for all entries; then remove exactly the committed items, so anything
+        // added to the basket while this ran is kept
         diaryRepository.addEntries(entries)
-        basketRepository.clearBasket()
+        basketRepository.removeItems(items.map { it.id }.toSet())
+        return items.size
     }
 }

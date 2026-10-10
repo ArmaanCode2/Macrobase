@@ -111,8 +111,8 @@ class PerformanceAndStressTests {
             if (rs.next()) totalServings = rs.getInt(1)
         }
 
-        assertEquals(7966, totalFoods)
-        assertEquals(14641, totalServings)
+        assertEquals(1014, totalFoods)
+        assertEquals(1877, totalServings)
 
         // 4. Verify FTS5 virtual table queries and ranking
         val ftsQuery = "SELECT food_id, name FROM foods_fts WHERE foods_fts MATCH 'chicken*' ORDER BY rank LIMIT 10;"

@@ -2,6 +2,7 @@ package com.macrobase.app.feature.calendar
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,9 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -265,7 +271,7 @@ fun FoodLoggingCalendar(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(AppSpacing.md)) {
-                // 1. Month Navigation Header
+                // 1. Month Navigation Header (Buttons & Month/Year Title - NOT swipable)
                 CalendarMonthHeader(
                     yearMonth = uiState.displayedYearMonth,
                     onPreviousMonth = onPreviousMonth,
@@ -274,32 +280,67 @@ fun FoodLoggingCalendar(
 
                 Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-                // 2. Sunday–Saturday Weekday Headers
-                CalendarWeekHeader()
+                // ======================================================================
+                // 2 & 3. Isolated Calendar Grid Area (STRICTLY handles horizontal swipes)
+                // ======================================================================
+                var dragOffsetX by remember { mutableFloatStateOf(0f) }
+                val density = LocalDensity.current
+                val swipeThresholdPx = remember(density) { with(density) { 48.dp.toPx() } }
 
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                // 3. 7-Column Calendar Grid
-                val rows = uiState.dayCells.chunked(7)
-                rows.forEach { rowCells ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = Dimensions.CalendarCellSpacing / 2),
-                        horizontalArrangement = Arrangement.SpaceAround
-                    ) {
-                        rowCells.forEach { cell ->
-                            CalendarDayCell(
-                                cell = cell,
-                                onClick = { onDateClick(cell.date) }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(uiState.displayedYearMonth) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { dragOffsetX = 0f },
+                                onDragCancel = { dragOffsetX = 0f },
+                                onDragEnd = {
+                                    if (dragOffsetX < -swipeThresholdPx) {
+                                        // Swiped left -> advance to Next Month
+                                        onNextMonth()
+                                    } else if (dragOffsetX > swipeThresholdPx) {
+                                        // Swiped right -> go back to Previous Month
+                                        onPreviousMonth()
+                                    }
+                                    dragOffsetX = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    dragOffsetX += dragAmount
+                                    // Consume pointer change once horizontal intent is confirmed
+                                    if (kotlin.math.abs(dragOffsetX) > 10f) {
+                                        change.consume()
+                                    }
+                                }
                             )
+                        }
+                ) {
+                    // Sunday–Saturday Weekday Headers
+                    CalendarWeekHeader()
+
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+
+                    // 7-Column Calendar Grid (Day cells)
+                    val rows = uiState.dayCells.chunked(7)
+                    rows.forEach { rowCells ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = Dimensions.CalendarCellSpacing / 2),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            rowCells.forEach { cell ->
+                                CalendarDayCell(
+                                    cell = cell,
+                                    onClick = { onDateClick(cell.date) }
+                                )
+                            }
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))
 
-                // 4. Centered 5-Step Performance Legend
+                // 4. Centered 5-Step Performance Legend (NOT swipable)
                 CalendarLegend(modifier = Modifier.align(Alignment.CenterHorizontally))
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))

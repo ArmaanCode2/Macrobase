@@ -6,10 +6,12 @@ import com.macrobase.app.domain.model.BackupRecordCountsDto
 import com.macrobase.app.domain.model.CustomFoodBackupDto
 import com.macrobase.app.domain.model.DiaryEntryBackupDto
 import com.macrobase.app.domain.model.GoalBackupDto
+import com.macrobase.app.domain.model.GoalTransitionBackupDto
 import com.macrobase.app.domain.model.RecipeBackupDto
 import com.macrobase.app.domain.model.UserPreferencesBackupDto
 import com.macrobase.app.domain.model.WaterLogBackupDto
 import com.macrobase.app.domain.model.WeightEntryBackupDto
+import java.util.Locale
 
 /**
  * Pure Kotlin JSON Serializer & Parser for Backup DTOs.
@@ -114,6 +116,14 @@ object BackupJsonSerializer {
     "loggedProtein": ${e.loggedProtein},
     "loggedCarbs": ${e.loggedCarbs},
     "loggedFat": ${e.loggedFat},
+    "loggedFiber": ${e.loggedFiber ?: "null"},
+    "loggedSugar": ${e.loggedSugar ?: "null"},
+    "loggedSodium": ${e.loggedSodium ?: "null"},
+    "loggedSaturatedFat": ${e.loggedSaturatedFat ?: "null"},
+    "loggedTransFat": ${e.loggedTransFat ?: "null"},
+    "loggedCholesterol": ${e.loggedCholesterol ?: "null"},
+    "customFoodUuid": ${e.customFoodUuid?.let { "\"${escapeJson(it)}\"" } ?: "null"},
+    "recipeUuid": ${e.recipeUuid?.let { "\"${escapeJson(it)}\"" } ?: "null"},
     "createdAt": ${e.createdAt}
   }"""
         }
@@ -138,9 +148,47 @@ object BackupJsonSerializer {
                 loggedProtein = obj.getDouble("loggedProtein") ?: 0.0,
                 loggedCarbs = obj.getDouble("loggedCarbs") ?: 0.0,
                 loggedFat = obj.getDouble("loggedFat") ?: 0.0,
-                createdAt = obj.getLong("createdAt") ?: System.currentTimeMillis()
+                createdAt = obj.getLong("createdAt") ?: System.currentTimeMillis(),
+                loggedFiber = obj.getDouble("loggedFiber"),
+                loggedSugar = obj.getDouble("loggedSugar"),
+                loggedSodium = obj.getDouble("loggedSodium"),
+                loggedSaturatedFat = obj.getDouble("loggedSaturatedFat"),
+                loggedTransFat = obj.getDouble("loggedTransFat"),
+                loggedCholesterol = obj.getDouble("loggedCholesterol"),
+                customFoodUuid = obj.getString("customFoodUuid"),
+                recipeUuid = obj.getString("recipeUuid")
             )
         }
+    }
+
+    /**
+     * Backups before format 1.3.0 were written from diary columns that stored 0.0 when a nutrient
+     * was not known, so their 0.0 fiber, sugar or sodium means "unknown" (BUG-037). Newer backups
+     * write null for unknown and are returned unchanged.
+     */
+    fun legacyZerosAsUnknown(entries: List<DiaryEntryBackupDto>, backupVersion: String): List<DiaryEntryBackupDto> {
+        if (!isFormatBefore(backupVersion, "1.3.0")) return entries
+        fun Double?.unknownIfZero() = this?.takeIf { it != 0.0 }
+        return entries.map {
+            it.copy(
+                loggedFiber = it.loggedFiber.unknownIfZero(),
+                loggedSugar = it.loggedSugar.unknownIfZero(),
+                loggedSodium = it.loggedSodium.unknownIfZero()
+            )
+        }
+    }
+
+    /** True when [version] ("major.minor.patch") is older than [other]. Unreadable parts count as 0. */
+    fun isFormatBefore(version: String, other: String): Boolean {
+        fun parts(v: String) = v.split(".").map { it.trim().toIntOrNull() ?: 0 }
+        val a = parts(version)
+        val b = parts(other)
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x < y
+        }
+        return false
     }
 
     // ==========================================
@@ -155,6 +203,7 @@ object BackupJsonSerializer {
     "brand": ${f.brand?.let { "\"${escapeJson(it)}\"" } ?: "null"},
     "servingSize": ${f.servingSize},
     "servingUnit": "${escapeJson(f.servingUnit)}",
+    "customUnitName": ${f.customUnitName?.let { "\"${escapeJson(it)}\"" } ?: "null"},
     "calories": ${f.calories},
     "proteinGrams": ${f.proteinGrams},
     "carbsGrams": ${f.carbsGrams},
@@ -181,6 +230,7 @@ object BackupJsonSerializer {
                 brand = obj.getString("brand"),
                 servingSize = obj.getDouble("servingSize") ?: 1.0,
                 servingUnit = obj.getString("servingUnit") ?: "serving",
+                customUnitName = obj.getString("customUnitName"),
                 calories = obj.getDouble("calories") ?: 0.0,
                 proteinGrams = obj.getDouble("proteinGrams") ?: 0.0,
                 carbsGrams = obj.getDouble("carbsGrams") ?: 0.0,
@@ -225,7 +275,8 @@ object BackupJsonSerializer {
                 uuid = obj.getString("uuid") ?: java.util.UUID.randomUUID().toString(),
                 name = obj.getString("name") ?: "",
                 servingsProduced = obj.getInt("servingsProduced") ?: 1,
-                ingredientsJson = obj.getString("ingredientsJson") ?: "[]",
+                // Truncating would corrupt the ingredient list of large recipes
+                ingredientsJson = obj.getStringUncapped("ingredientsJson") ?: "[]",
                 caloriesPerServing = obj.getDouble("caloriesPerServing") ?: 0.0,
                 proteinPerServing = obj.getDouble("proteinPerServing") ?: 0.0,
                 carbsPerServing = obj.getDouble("carbsPerServing") ?: 0.0,
@@ -300,23 +351,63 @@ object BackupJsonSerializer {
     // ==========================================
 
     fun serializeGoals(goal: GoalBackupDto): String {
+        val transitions = goal.transitions?.joinToString(",\n", prefix = "[\n", postfix = "\n  ]") { t ->
+            """    {
+      "effectiveDate": "${escapeJson(t.effectiveDate)}",
+      "fitnessGoal": "${escapeJson(t.fitnessGoal)}",
+      "maintenanceCalories": ${t.maintenanceCalories},
+      "dailyCalorieGoal": ${t.dailyCalorieGoal},
+      "carbPercentage": ${t.carbPercentage},
+      "proteinPercentage": ${t.proteinPercentage},
+      "fatPercentage": ${t.fatPercentage}
+    }"""
+        } ?: "null"
         return """{
   "dailyCalorieGoal": ${goal.dailyCalorieGoal},
   "carbPercentage": ${goal.carbPercentage},
   "proteinPercentage": ${goal.proteinPercentage},
-  "fatPercentage": ${goal.fatPercentage}
+  "fatPercentage": ${goal.fatPercentage},
+  "fitnessGoal": ${jsonStringOrNull(goal.fitnessGoal)},
+  "maintenanceCalories": ${goal.maintenanceCalories ?: "null"},
+  "scheduledFitnessGoal": ${jsonStringOrNull(goal.scheduledFitnessGoal)},
+  "scheduledMaintenanceCalories": ${goal.scheduledMaintenanceCalories ?: "null"},
+  "scheduledEffectiveDate": ${jsonStringOrNull(goal.scheduledEffectiveDate)},
+  "transitions": $transitions
 }"""
     }
 
     fun parseGoals(json: String): GoalBackupDto {
         val obj = SimpleJsonParser.parseObject(json)
+        // Format 1.2.0 fields; absent (null) in older backups
+        val transitions = obj.getArray("transitions")?.mapNotNull { raw ->
+            val t = raw as? JsonObject ?: return@mapNotNull null
+            GoalTransitionBackupDto(
+                effectiveDate = t.getString("effectiveDate") ?: return@mapNotNull null,
+                fitnessGoal = t.getString("fitnessGoal") ?: return@mapNotNull null,
+                maintenanceCalories = t.getDouble("maintenanceCalories") ?: return@mapNotNull null,
+                dailyCalorieGoal = t.getDouble("dailyCalorieGoal") ?: return@mapNotNull null,
+                carbPercentage = t.getDouble("carbPercentage") ?: return@mapNotNull null,
+                proteinPercentage = t.getDouble("proteinPercentage") ?: return@mapNotNull null,
+                fatPercentage = t.getDouble("fatPercentage") ?: return@mapNotNull null
+            )
+        }
+        // Every version wrote all four targets; a missing one means a damaged file, not a default
+        fun target(key: String) = obj.getDouble(key) ?: throw IllegalArgumentException("goals.json has no valid $key")
         return GoalBackupDto(
-            dailyCalorieGoal = obj.getDouble("dailyCalorieGoal") ?: 2000.0,
-            carbPercentage = obj.getDouble("carbPercentage") ?: 50.0,
-            proteinPercentage = obj.getDouble("proteinPercentage") ?: 25.0,
-            fatPercentage = obj.getDouble("fatPercentage") ?: 25.0
+            dailyCalorieGoal = target("dailyCalorieGoal"),
+            carbPercentage = target("carbPercentage"),
+            proteinPercentage = target("proteinPercentage"),
+            fatPercentage = target("fatPercentage"),
+            fitnessGoal = obj.getString("fitnessGoal"),
+            maintenanceCalories = obj.getDouble("maintenanceCalories"),
+            scheduledFitnessGoal = obj.getString("scheduledFitnessGoal"),
+            scheduledMaintenanceCalories = obj.getDouble("scheduledMaintenanceCalories"),
+            scheduledEffectiveDate = obj.getString("scheduledEffectiveDate"),
+            transitions = transitions
         )
     }
+
+    private fun jsonStringOrNull(value: String?): String = value?.let { "\"${escapeJson(it)}\"" } ?: "null"
 
     // ==========================================
     // USER PREFERENCES
@@ -362,7 +453,7 @@ object BackupJsonSerializer {
                 '\t' -> sb.append("\\t")
                 else -> {
                     if (c.code < 0x20) {
-                        sb.append(String.format("\\u%04x", c.code))
+                        sb.append(String.format(Locale.US, "\\u%04x", c.code))
                     } else {
                         sb.append(c)
                     }
@@ -381,6 +472,8 @@ class JsonObject(val map: Map<String, Any?>) {
         val str = map[key] as? String ?: return null
         return if (str.length > 50000) str.substring(0, 50000) else str
     }
+    /** For structured payloads (e.g. recipe ingredients) that must never be cut short. */
+    fun getStringUncapped(key: String): String? = map[key] as? String
     fun getInt(key: String): Int? = (map[key] as? Number)?.toInt()
     fun getLong(key: String): Long? = (map[key] as? Number)?.toLong()
     fun getDouble(key: String): Double? {
@@ -411,6 +504,11 @@ object SimpleJsonParser {
 
     private class StringParser(private val text: String) {
         private var pos = 0
+        private var depth = 0
+
+        companion object {
+            private const val MAX_JSON_DEPTH = 32
+        }
 
         private fun skipWhitespace() {
             while (pos < text.length && text[pos].isWhitespace()) {
@@ -420,12 +518,30 @@ object SimpleJsonParser {
 
         private fun peek(): Char = if (pos < text.length) text[pos] else '\u0000'
 
+        private fun checkDepth() {
+            if (depth >= MAX_JSON_DEPTH) {
+                throw IllegalArgumentException("Exceeded maximum JSON nesting depth ($MAX_JSON_DEPTH)")
+            }
+        }
+
         fun parseValue(): Any? {
             skipWhitespace()
             if (pos >= text.length) return null
             return when (val c = peek()) {
-                '{' -> parseObject()
-                '[' -> parseArray()
+                '{' -> {
+                    checkDepth()
+                    depth++
+                    val res = parseObject()
+                    depth--
+                    res
+                }
+                '[' -> {
+                    checkDepth()
+                    depth++
+                    val res = parseArray()
+                    depth--
+                    res
+                }
                 '"' -> parseString()
                 't', 'f' -> parseBoolean()
                 'n' -> parseNull()
@@ -511,7 +627,8 @@ object SimpleJsonParser {
                         'u' -> {
                             if (pos + 4 > text.length) throw IllegalArgumentException("Invalid unicode escape at pos $pos")
                             val hex = text.substring(pos, pos + 4)
-                            sb.append(hex.toInt(16).toChar())
+                            val charCode = hex.toIntOrNull(16) ?: throw IllegalArgumentException("Invalid hex character in unicode escape: '\\u$hex'")
+                            sb.append(charCode.toChar())
                             pos += 4
                         }
                         else -> sb.append(esc)
@@ -530,10 +647,13 @@ object SimpleJsonParser {
                 pos++
             }
             val numStr = text.substring(start, pos)
+            if (numStr == "-" || numStr.isEmpty()) {
+                throw IllegalArgumentException("Malformed number token '$numStr' at pos $start")
+            }
             return if (numStr.contains('.') || numStr.contains('e') || numStr.contains('E')) {
-                numStr.toDouble()
+                numStr.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid floating-point number: '$numStr'")
             } else {
-                numStr.toLongOrNull() ?: numStr.toDouble()
+                numStr.toLongOrNull() ?: numStr.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid integer number: '$numStr'")
             }
         }
 

@@ -60,6 +60,7 @@ import com.macrobase.app.domain.model.Meal
 import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.usecase.DeleteDiaryEntryUseCase
 import com.macrobase.app.domain.usecase.GetDailyDiaryUseCase
+import com.macrobase.app.domain.usecase.GetFoodDetailsUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -69,10 +70,13 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import com.macrobase.app.core.util.DashboardDateFormatter
+import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.domain.model.WeightEntry
 import com.macrobase.app.domain.usecase.GetWeightForDateUseCase
+import java.time.Clock
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -94,15 +98,21 @@ import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.MealConfiguration
 import androidx.compose.foundation.layout.defaultMinSize
 
+/** A day total of a nutrient that may be unknown: "12.5g", or "-" when no entry states it. */
+internal fun formatOptionalTotal(value: Double?, unit: String): String =
+    value?.let { "${String.format(Locale.US, "%.1f", it)}$unit" } ?: "-"
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(
     private val getDailyDiaryUseCase: GetDailyDiaryUseCase,
     private val deleteDiaryEntryUseCase: DeleteDiaryEntryUseCase,
     private val addFoodToBasketUseCase: com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase,
-    private val getWeightForDateUseCase: GetWeightForDateUseCase? = null
+    private val getFoodDetailsUseCase: GetFoodDetailsUseCase? = null,
+    private val getWeightForDateUseCase: GetWeightForDateUseCase? = null,
+    private val clock: Clock = DeviceClock
 ) : ViewModel() {
 
-    private val _selectedDate = MutableStateFlow(LocalDate.now(ZoneId.systemDefault()))
+    private val _selectedDate = MutableStateFlow(LocalDate.now(clock))
     val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
 
     private val _revealedEntryId = MutableStateFlow<Long?>(null)
@@ -113,7 +123,7 @@ class HomeViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = DailyNutritionSummary(date = LocalDate.now(ZoneId.systemDefault()))
+        initialValue = DailyNutritionSummary(date = LocalDate.now(clock))
     )
 
     val selectedDateWeight: StateFlow<WeightEntry?> = _selectedDate.flatMapLatest { date ->
@@ -139,9 +149,9 @@ class HomeViewModel(
         _selectedDate.value = date
     }
 
-    fun resetToToday(zoneId: ZoneId = ZoneId.systemDefault()) {
+    fun resetToToday(zoneId: ZoneId = clock.zone) {
         _revealedEntryId.value = null
-        _selectedDate.value = LocalDate.now(zoneId)
+        _selectedDate.value = LocalDate.now(clock.withZone(zoneId))
     }
 
     fun setRevealedEntry(entryId: Long?) {
@@ -157,14 +167,21 @@ class HomeViewModel(
 
     fun copyEntry(entry: DiaryEntry) {
         _revealedEntryId.value = null
-        addFoodToBasketUseCase(
-            food = entry.food,
-            serving = entry.serving,
-            quantity = entry.quantity,
-            calculatedNutrition = entry.calculatedNutrition,
-            date = entry.date,
-            mealType = entry.mealType
-        )
+        viewModelScope.launch {
+            val fullFood = getFoodDetailsUseCase?.invoke(entry.food.id)
+                ?.takeIf { it.isSameFoodAs(entry.food) && it.canScale(it.resolveLoggedServing(entry.serving)) }
+                ?: entry.food
+            val matchedServing = fullFood.resolveLoggedServing(entry.serving)
+
+            addFoodToBasketUseCase(
+                food = fullFood,
+                serving = matchedServing,
+                quantity = entry.quantity,
+                calculatedNutrition = entry.calculatedNutrition,
+                date = entry.date,
+                mealType = entry.mealType
+            )
+        }
     }
 }
 
@@ -239,17 +256,17 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "${summary.totalCaloriesIntake.toInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
+                Text(text = "${summary.totalCaloriesIntake.roundToInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
                 Text(text = "Intake", style = AppTypography.Caption, color = AppColors.TextSecondary)
             }
             Box(modifier = Modifier.size(width = 1.dp, height = 24.dp).background(AppColors.Divider))
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "${summary.totalCaloriesBurned.toInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
+                Text(text = "${summary.totalCaloriesBurned.roundToInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
                 Text(text = "Burned", style = AppTypography.Caption, color = AppColors.TextSecondary)
             }
             Box(modifier = Modifier.size(width = 1.dp, height = 24.dp).background(AppColors.Divider))
             Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                val balance = summary.calorieBalance.toInt()
+                val balance = summary.displayedCalorieBalance
                 Text(
                     text = "${kotlin.math.abs(balance)}",
                     style = AppTypography.Header3,
@@ -360,7 +377,7 @@ fun HomeScreen(
                 Text(text = "Water", style = AppTypography.Body1)
             }
             Text(
-                text = "${summary.totalWaterMl.toInt()} / ${summary.waterGoalMl.toInt()} mL",
+                text = "${summary.totalWaterMl.roundToInt()} / ${summary.waterGoalMl.roundToInt()} mL",
                 style = AppTypography.Body2,
                 color = AppColors.WaterCyan
             )
@@ -402,10 +419,59 @@ fun HomeScreen(
             title = { Text("${meal.type.displayName} Nutrition", style = AppTypography.Header2) },
             text = {
                 Column {
-                    Text("Calories: ${meal.totalCalories.toInt()} kcal", style = AppTypography.Body1)
-                    Text("Protein: ${String.format("%.1f", meal.totalProtein)}g", style = AppTypography.Body1, color = AppColors.MacroProtein)
-                    Text("Carbs: ${String.format("%.1f", meal.totalCarbs)}g", style = AppTypography.Body1, color = AppColors.MacroCarbs)
-                    Text("Fat: ${String.format("%.1f", meal.totalFat)}g", style = AppTypography.Body1, color = AppColors.MacroFat)
+                    Text("Calories: ${meal.totalCalories.roundToInt()} kcal", style = AppTypography.Header3)
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroProtein)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Protein: ${String.format(Locale.US, "%.1f", meal.totalProtein)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroProtein
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroCarbs)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Carbs: ${String.format(Locale.US, "%.1f", meal.totalCarbs)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroCarbs
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroFat)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Fat: ${String.format(Locale.US, "%.1f", meal.totalFat)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroFat
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -425,14 +491,88 @@ fun HomeScreen(
             title = { Text("Daily Nutrition", style = AppTypography.Header2) },
             text = {
                 Column {
-                    Text("Intake: ${summary.totalCaloriesIntake.toInt()} / ${summary.calorieGoal.toInt()} kcal", style = AppTypography.Header3)
+                    Text(
+                        text = "Intake: ${summary.totalCaloriesIntake.roundToInt()} / ${summary.calorieGoal.roundToInt()} kcal",
+                        style = AppTypography.Header3
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.md))
+
+                    // Core Macros
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroProtein)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Protein: ${String.format(Locale.US, "%.1f", summary.totalProteinGrams)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroProtein
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroCarbs)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Carbohydrates: ${String.format(Locale.US, "%.1f", summary.totalCarbsGrams)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroCarbs
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = AppSpacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AppColors.MacroFat)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.sm))
+                        Text(
+                            text = "Fat: ${String.format(Locale.US, "%.1f", summary.totalFatGrams)}g",
+                            style = AppTypography.Body1,
+                            color = AppColors.MacroFat
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Text("â€¢ Protein: ${String.format("%.1f", summary.totalProteinGrams)}g", style = AppTypography.Body1, color = AppColors.MacroProtein)
-                    Text("â€¢ Carbohydrates: ${String.format("%.1f", summary.totalCarbsGrams)}g", style = AppTypography.Body1, color = AppColors.MacroCarbs)
-                    Text("â€¢ Fat: ${String.format("%.1f", summary.totalFatGrams)}g", style = AppTypography.Body1, color = AppColors.MacroFat)
-                    Text("â€¢ Fiber: ${String.format("%.1f", summary.totalFiberGrams)}g", style = AppTypography.Body2)
-                    Text("â€¢ Sugars: ${String.format("%.1f", summary.totalSugarGrams)}g", style = AppTypography.Body2)
-                    Text("â€¢ Sodium: ${String.format("%.1f", summary.totalSodiumMg)}mg", style = AppTypography.Body2)
+                    HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+
+                    // Secondary Nutrients
+                    Text(
+                        text = "Dietary Fiber: ${formatOptionalTotal(summary.totalFiberGrams, "g")}",
+                        style = AppTypography.Body2,
+                        color = AppColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
+                    )
+                    Text(
+                        text = "Total Sugars: ${formatOptionalTotal(summary.totalSugarGrams, "g")}",
+                        style = AppTypography.Body2,
+                        color = AppColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
+                    )
+                    Text(
+                        text = "Sodium: ${formatOptionalTotal(summary.totalSodiumMg, "mg")}",
+                        style = AppTypography.Body2,
+                        color = AppColors.TextSecondary,
+                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
+                    )
                 }
             },
             confirmButton = {
@@ -458,7 +598,7 @@ fun DashboardMealSection(
     onCopyEntry: (DiaryEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val sectionCalories = meal.totalCalories.toInt()
+    val sectionCalories = meal.totalCalories.roundToInt()
 
     Column(modifier = modifier.fillMaxWidth()) {
         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
@@ -723,7 +863,7 @@ fun DashboardFoodItemRow(
 
             // Calories
             Text(
-                text = "${entry.calculatedNutrition.calories.toInt()}",
+                text = "${entry.calculatedNutrition.calories.roundToInt()}",
                 style = AppTypography.Body1,
                 color = AppColors.CalorieText
             )

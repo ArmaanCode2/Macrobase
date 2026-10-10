@@ -78,17 +78,18 @@ sealed class Screen(
     data object EditRecipe : Screen("edit_recipe?recipeId={recipeId}", "Edit Recipe") {
         fun createRoute(recipeId: Long? = null) = if (recipeId != null) "edit_recipe?recipeId=$recipeId" else "edit_recipe"
     }
-    data object DailyGoals : Screen("daily_goals", "Daily Goals", Icons.Default.Flag, isDrawerItem = true)
+    data object DailyGoals : Screen("daily_goals", "Daily Goals", Icons.Default.Flag, isDrawerItem = false)
     data object Preferences : Screen("preferences", "Preferences", Icons.Default.Settings, isBottomNavTab = true, isDrawerItem = true)
     data object ImportExport : Screen("import_export", "Data & Backup", Icons.Default.ImportExport, isDrawerItem = true)
+    data object Rank : Screen("rank", "Rank", Icons.Default.Flag, isBottomNavTab = true)
 
     data object Basket : Screen("basket", "Basket")
 
     companion object {
         val bottomNavScreens: List<Screen>
-            get() = listOf(Home, Calendar, Statistics, Preferences)
+            get() = listOf(Home, Statistics, Rank, Preferences)
 
         val drawerScreens: List<Screen>
-            get() = listOf(Home, DailyGoals, CustomFoods, Recipes, Weight, Water, ImportExport, Preferences)
+            get() = listOf(Home, CustomFoods, Recipes, Weight, Water, ImportExport, Preferences)
     }
 }

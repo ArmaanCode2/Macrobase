@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon plate behind the transparent logo; matches the logo artwork's own light background. -->
+    <color name="ic_launcher_background">#F9FDF5</color>
+</resources>

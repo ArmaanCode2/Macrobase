@@ -53,6 +53,8 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.macrobase.app.feature.detail.formatQuantityForInput
+import com.macrobase.app.feature.detail.parseQuantityInput
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,6 +105,9 @@ fun BasketScreen(
     val commonMealType by viewModel.commonMealType.collectAsState()
     val loggingMode by viewModel.loggingMode.collectAsState()
     val revealedItemId by viewModel.revealedItemId.collectAsState()
+    val invalidQuantityIds by viewModel.invalidQuantityIds.collectAsState()
+    val isSubmitting by viewModel.isSubmitting.collectAsState()
+    val submitError by viewModel.submitError.collectAsState()
 
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -166,7 +171,9 @@ fun BasketScreen(
                             },
                             onDelete = {
                                 viewModel.removeItem(item.id)
-                            }
+                            },
+                            isQuantityInvalid = item.id in invalidQuantityIds,
+                            onQuantityTextReset = { viewModel.onQuantityTextReset(item.id) }
                         )
                         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                     }
@@ -195,7 +202,7 @@ fun BasketScreen(
                             color = AppColors.TextPrimary
                         )
                         Text(
-                            text = "${totalCalories.toInt()}",
+                            text = "${totalCalories.roundToInt()}",
                             style = AppTypography.Header2.copy(fontWeight = FontWeight.Bold),
                             color = AppColors.CalorieText
                         )
@@ -216,7 +223,7 @@ fun BasketScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "${totalProtein.toInt()}g Protein",
+                                text = "${totalProtein.roundToInt()}g Protein",
                                 style = AppTypography.Body2.copy(fontWeight = FontWeight.Medium),
                                 color = Color(0xFF5C93FF)
                             )
@@ -227,7 +234,7 @@ fun BasketScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "${totalCarbs.toInt()}g Carb",
+                                text = "${totalCarbs.roundToInt()}g Carb",
                                 style = AppTypography.Body2.copy(fontWeight = FontWeight.Medium),
                                 color = Color(0xFF4DD0E1)
                             )
@@ -238,7 +245,7 @@ fun BasketScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "${totalFat.toInt()}g Fat",
+                                text = "${totalFat.roundToInt()}g Fat",
                                 style = AppTypography.Body2.copy(fontWeight = FontWeight.Medium),
                                 color = Color(0xFFFF7043)
                             )
@@ -516,13 +523,28 @@ fun BasketScreen(
 
                 // 7. Primary Action Button: "Log X Foods"
                 val logButtonLabel = "Log ${items.size} Food${if (items.size > 1) "s" else ""}"
+                val logBlockedMessage = if (invalidQuantityIds.isNotEmpty()) {
+                    "Enter an amount above 0 for the highlighted items."
+                } else {
+                    submitError
+                }
+                logBlockedMessage?.let { error ->
+                    Text(
+                        error,
+                        style = AppTypography.Body2,
+                        color = AppColors.AlertRed,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs)
+                    )
+                }
                 Button(
                     onClick = {
                         viewModel.submitBasket(
                             onSuccess = onNavigateToDashboard,
-                            onError = { /* show error */ }
+                            // Shown above the button from viewModel.submitError
+                            onError = {}
                         )
                     },
+                    enabled = !isSubmitting && invalidQuantityIds.isEmpty(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -573,7 +595,9 @@ fun BasketItemRow(
     onServingChange: (Serving) -> Unit,
     onInfoClick: () -> Unit,
     onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isQuantityInvalid: Boolean = false,
+    onQuantityTextReset: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     val deleteActionWidth = 80.dp
@@ -582,11 +606,16 @@ fun BasketItemRow(
     val coroutineScope = rememberCoroutineScope()
 
     var showServingMenu by remember { mutableStateOf(false) }
-    var quantityInputText by remember(item.quantity) {
-        mutableStateOf(
-            if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString()
-            else String.format(java.util.Locale.US, "%.1f", item.quantity)
-        )
+    // Exact quantity (0.25 stays "0.25"); the typed text is only replaced when the quantity
+    // changes from outside this field, so partial input like "0.0" is never reset mid-typing
+    var quantityInputText by remember(item.id) { mutableStateOf(formatQuantityForInput(item.quantity)) }
+    // A recreated field shows the stored amount, so an error for text typed earlier no longer applies
+    LaunchedEffect(item.id) { onQuantityTextReset() }
+    LaunchedEffect(item.quantity) {
+        if (parseQuantityInput(quantityInputText) != item.quantity) {
+            quantityInputText = formatQuantityForInput(item.quantity)
+            onQuantityTextReset()
+        }
     }
 
     LaunchedEffect(isRevealed) {
@@ -698,7 +727,7 @@ fun BasketItemRow(
                         .height(34.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(AppColors.SurfaceAlt)
-                        .border(1.dp, AppColors.Divider, RoundedCornerShape(2.dp))
+                        .border(1.dp, if (isQuantityInvalid) AppColors.AlertRed else AppColors.Divider, RoundedCornerShape(2.dp))
                         .padding(horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -714,7 +743,7 @@ fun BasketItemRow(
                             textAlign = TextAlign.Center
                         ),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         cursorBrush = SolidColor(AppColors.Primary)
                     )
                 }
@@ -755,7 +784,7 @@ fun BasketItemRow(
                     ) {
                         availableServings.forEach { s ->
                             DropdownMenuItem(
-                                text = { Text(s.description) },
+                                text = { Text(item.food.servingLabel(s)) },
                                 onClick = {
                                     onServingChange(s)
                                     showServingMenu = false
@@ -785,7 +814,7 @@ fun BasketItemRow(
                 // Calories Column
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "${item.calculatedNutrition.calories.toInt()}",
+                        text = "${item.calculatedNutrition.calories.roundToInt()}",
                         style = AppTypography.Body1.copy(fontWeight = FontWeight.Bold),
                         color = AppColors.CalorieText
                     )
@@ -811,13 +840,21 @@ fun BasketItemRow(
     }
 }
 
-private fun extractUnitDescription(description: String): String {
+/**
+ * Unit text shown after the quantity field. "1 plate" reads as "plate"; any other leading
+ * amount stays visible ("\u00D7 100 g"), so a quantity of 1 never looks like "1 g".
+ */
+internal fun extractUnitDescription(description: String): String {
     val trimmed = description.trim()
     val regex = Regex("""^(\d+(?:\.\d+)?)\s*(.*)$""")
     val match = regex.find(trimmed)
     return if (match != null) {
         val unit = match.groupValues[2].trim()
-        if (unit.isNotBlank()) unit else trimmed
+        when {
+            unit.isBlank() -> trimmed
+            match.groupValues[1].toDouble() == 1.0 -> unit
+            else -> "\u00D7 $trimmed"
+        }
     } else {
         trimmed
     }

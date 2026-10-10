@@ -2,6 +2,7 @@ package com.macrobase.app.domain.repository
 
 import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.Goal
+import com.macrobase.app.domain.model.GoalBackupDto
 import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.UserPreferences
@@ -64,6 +65,34 @@ interface GoalsRepository {
     suspend fun getGoals(): Goal
     fun observeGoals(): Flow<Goal>
     suspend fun updateGoals(goals: Goal)
+    suspend fun getGoalForDate(date: LocalDate): Goal = getGoals()
+
+    /** [getGoalForDate] for many days at once, in the same order. */
+    suspend fun getGoalsForDates(dates: List<LocalDate>): List<Goal> = dates.map { getGoalForDate(it) }
+
+    /** Everything a backup needs to restore goals exactly, including the strategy history. */
+    suspend fun exportGoalBackup(): GoalBackupDto = GoalBackupDto.from(getGoals())
+
+    /**
+     * Replaces this device's goals with a backup's as they were: nothing is scheduled and no
+     * history is added (BUG-016). A backup older than format 1.2.0 has only the calorie and macro
+     * targets; the strategy, scheduled change and history on this device then stay as they are.
+     * This default only sets the targets; GoalsRepositoryImpl restores the full state.
+     */
+    suspend fun restoreGoalBackup(backup: GoalBackupDto) {
+        val current = getGoals()
+        updateGoals(
+            current.copy(
+                dailyCalorieGoal = backup.dailyCalorieGoal,
+                carbPercentage = backup.carbPercentage,
+                proteinPercentage = backup.proteinPercentage,
+                fatPercentage = backup.fatPercentage
+            )
+        )
+    }
+
+    /** False on a device where goals were never saved, such as right after installing. */
+    suspend fun hasSavedGoals(): Boolean = true
 }
 
 /**
@@ -73,6 +102,9 @@ interface PreferencesRepository {
     suspend fun getPreferences(): UserPreferences
     fun observePreferences(): Flow<UserPreferences>
     suspend fun updatePreferences(preferences: UserPreferences)
+
+    /** False on a device where the profile was never saved, such as right after installing. */
+    suspend fun hasSavedPreferences(): Boolean = true
 }
 
 /**

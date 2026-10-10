@@ -5,8 +5,6 @@ import com.macrobase.app.data.database.entity.CustomFoodEntity
 import com.macrobase.app.data.provider.FoodDataProvider
 import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.Food
-import com.macrobase.app.domain.model.FoodSource
-import com.macrobase.app.domain.model.FoodType
 import com.macrobase.app.domain.model.Nutrition
 import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.ServingUnit
@@ -25,6 +23,18 @@ class FoodRepositoryImpl(
 
     companion object {
         const val CUSTOM_FOOD_ID_OFFSET = 100_000_000L
+
+        /**
+         * Food id for a restored custom-food diary entry whose food could not be identified.
+         * It resolves to no food, so the entry is always shown from its own snapshot.
+         */
+        const val UNLINKED_CUSTOM_FOOD_ID = CUSTOM_FOOD_ID_OFFSET
+
+        /** Room row id for a food id in the custom range, or null for any other food id. */
+        fun customRowIdOrNull(foodId: Long): Long? =
+            if (foodId > CUSTOM_FOOD_ID_OFFSET && foodId < com.macrobase.app.domain.model.Recipe.FOOD_ID_OFFSET) {
+                foodId - CUSTOM_FOOD_ID_OFFSET
+            } else null
     }
 
     override suspend fun searchFoods(query: String, limit: Int): List<Food> {
@@ -38,16 +48,15 @@ class FoodRepositoryImpl(
     }
 
     override suspend fun getFoodById(id: Long): Food? {
-        if (id >= CUSTOM_FOOD_ID_OFFSET) {
-            val customId = id - CUSTOM_FOOD_ID_OFFSET
-            val custom = customFoodDao.getCustomFoodById(customId)
-            return custom?.toDomainFood()
+        val builtInFood = localDatabaseProvider.getFoodById(id)
+        if (builtInFood != null) {
+            return builtInFood
         }
-        val custom = customFoodDao.getCustomFoodById(id)
-        if (custom != null) {
-            return custom.toDomainFood()
-        }
-        return localDatabaseProvider.getFoodById(id)
+
+        // Only ids in the custom range are custom foods. Smaller ids are recipes or foods from
+        // earlier catalogs logged by older versions, never a raw custom-food row id.
+        val customId = customRowIdOrNull(id) ?: return null
+        return customFoodDao.getCustomFoodById(customId)?.toDomainFood()
     }
 
     override suspend fun getFoodByBarcode(barcode: String): Food? {
@@ -55,16 +64,13 @@ class FoodRepositoryImpl(
     }
 
     override suspend fun getFoodServings(foodId: Long): List<Serving> {
-        if (foodId >= CUSTOM_FOOD_ID_OFFSET) {
-            val customId = foodId - CUSTOM_FOOD_ID_OFFSET
-            val custom = customFoodDao.getCustomFoodById(customId)
-            return custom?.toDomainFood()?.servings ?: emptyList()
+        val builtInServings = localDatabaseProvider.getFoodServings(foodId)
+        if (builtInServings.isNotEmpty()) {
+            return builtInServings
         }
-        val custom = customFoodDao.getCustomFoodById(foodId)
-        if (custom != null) {
-            return custom.toDomainFood().servings
-        }
-        return localDatabaseProvider.getFoodServings(foodId)
+
+        val customId = customRowIdOrNull(foodId) ?: return emptyList()
+        return customFoodDao.getCustomFoodById(customId)?.toDomainFood()?.servings ?: emptyList()
     }
 
     override suspend fun getRecentFoods(limit: Int): List<Food> {
@@ -104,10 +110,16 @@ class FoodRepositoryImpl(
             sodiumMg = food.nutritionPerServing.sodiumMg,
             potassiumMg = food.nutritionPerServing.potassiumMg,
             calciumMg = food.nutritionPerServing.calciumMg,
-            ironMg = food.nutritionPerServing.ironMg
+            ironMg = food.nutritionPerServing.ironMg,
+            createdAt = food.createdAt.toEpochMilli()
         )
         val insertedId = customFoodDao.insertCustomFood(entity)
         return CUSTOM_FOOD_ID_OFFSET + insertedId
+    }
+
+    override suspend fun getCustomFood(id: Long): CustomFood? {
+        val actualId = if (id >= CUSTOM_FOOD_ID_OFFSET) id - CUSTOM_FOOD_ID_OFFSET else id
+        return customFoodDao.getCustomFoodById(actualId)?.toCustomFood()
     }
 
     override suspend fun deleteCustomFood(id: Long) {
@@ -115,43 +127,27 @@ class FoodRepositoryImpl(
         customFoodDao.deleteCustomFood(actualId)
     }
 
-    private fun CustomFoodEntity.toDomainFood(): Food {
+    private fun CustomFoodEntity.toDomainFood(): Food =
+        toCustomFood().toFood()
+
+    /** Domain custom food; [CustomFood.id] carries the offset id used across the app. */
+    private fun CustomFoodEntity.toCustomFood(): CustomFood {
         val unit = try {
             ServingUnit.valueOf(servingUnit)
         } catch (ex: Exception) {
             ServingUnit.fromString(servingUnit)
         }
         val customName = customUnitName ?: if (unit == ServingUnit.CUSTOM && servingUnit != "CUSTOM" && servingUnit != "unit" && servingUnit != "Custom...") servingUnit else null
-        val unitLabel = if (unit == ServingUnit.CUSTOM && !customName.isNullOrBlank()) {
-            customName
-        } else {
-            unit.displayName
-        }
 
-        val serving = Serving(
-            id = 1,
-            description = "$servingSize $unitLabel",
-            unit = unit,
-            customUnitName = customName,
-            quantity = servingSize,
-            gramWeight = when (unit) {
-                ServingUnit.GRAMS -> servingSize
-                ServingUnit.KILOGRAMS -> servingSize * 1000.0
-                else -> 0.0
-            },
-            isDefault = true
-        )
-
-        return Food(
+        return CustomFood(
             id = CUSTOM_FOOD_ID_OFFSET + id,
             uuid = uuid,
-            source = FoodSource.CUSTOM_USER,
             name = name,
             brand = brand,
-            category = "Custom Foods",
-            foodType = FoodType.CUSTOM,
-            isUserOwned = true,
-            nutrition = Nutrition(
+            servingSize = servingSize,
+            servingUnit = unit,
+            customUnitName = customName,
+            nutritionPerServing = Nutrition(
                 calories = calories,
                 proteinGrams = proteinGrams,
                 carbsGrams = carbsGrams,
@@ -163,7 +159,7 @@ class FoodRepositoryImpl(
                 calciumMg = calciumMg,
                 ironMg = ironMg
             ),
-            servings = listOf(serving)
+            createdAt = java.time.Instant.ofEpochMilli(createdAt)
         )
     }
 }

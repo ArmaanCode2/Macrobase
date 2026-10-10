@@ -41,6 +41,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -79,9 +81,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.macrobase.app.feature.detail.QUANTITY_INPUT_ERROR
+import com.macrobase.app.feature.detail.parsePositiveQuantity
 import java.time.Instant
 import java.time.LocalDate
+import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 import androidx.compose.material3.CircularProgressIndicator
 import kotlinx.coroutines.flow.SharingStarted
@@ -96,7 +103,9 @@ data class RecipesListUiState(
 class RecipesViewModel(
     private val recipeRepository: RecipeRepository,
     private val foodRepository: com.macrobase.app.domain.repository.FoodRepository,
-    private val addFoodToBasketUseCase: com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase
+    private val addFoodToBasketUseCase: com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase,
+    private val commitSingleBasketItemUseCase: com.macrobase.app.domain.usecase.basket.CommitSingleBasketItemUseCase,
+    private val removeBasketItemUseCase: com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase
 ) : ViewModel() {
 
     val uiState: StateFlow<RecipesListUiState> = recipeRepository.observeRecipes().map { list ->
@@ -113,12 +122,22 @@ class RecipesViewModel(
     val recipes: StateFlow<List<Recipe>> = recipeRepository.observeRecipes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Set from the first Save tap; a second tap must not create the recipe twice (BUG-011). */
+    private var saveInFlight = false
+
     fun saveRecipe(recipe: Recipe, onComplete: () -> Unit) {
+        if (saveInFlight) return
+        saveInFlight = true
         viewModelScope.launch {
-            if (recipe.id > 0) {
-                recipeRepository.updateRecipe(recipe)
-            } else {
-                recipeRepository.createRecipe(recipe)
+            try {
+                if (recipe.id > 0) {
+                    recipeRepository.updateRecipe(recipe)
+                } else {
+                    recipeRepository.createRecipe(recipe)
+                }
+            } catch (e: Exception) {
+                saveInFlight = false
+                throw e
             }
             onComplete()
         }
@@ -131,25 +150,61 @@ class RecipesViewModel(
         }
     }
 
+    /** Loads a saved recipe straight from storage (the list flow may not be collected yet). */
+    suspend fun getRecipe(recipeId: Long): Recipe? = recipeRepository.getRecipeById(recipeId)
+
     suspend fun searchFoodsForIngredient(query: String): List<Food> {
         return foodRepository.searchFoods(query, limit = 20)
     }
 
-    fun logRecipeToDiary(recipe: Recipe, mealType: MealType, date: LocalDate, servingsToLog: Double = 1.0, onComplete: () -> Unit) {
-        viewModelScope.launch {
-            val perServing = recipe.nutritionPerServing
-            val scaledNutrition = perServing.scale(servingsToLog)
+    /** Puts [servings] of the recipe in the basket and returns the basket item id. */
+    private fun stageRecipe(recipe: Recipe, mealType: MealType, date: LocalDate, servings: Double): String {
+        // The recipe's own default serving ("Serving", as in diary entries logged by earlier
+        // versions) so basket edits scale it; a recipe serving has no gram weight
+        val recipeFood = recipe.toFood()
+        return addFoodToBasketUseCase(
+            food = recipeFood,
+            serving = recipeFood.servings.first().copy(gramWeight = 0.0),
+            quantity = servings,
+            calculatedNutrition = recipe.nutritionPerServing.scale(servings),
+            date = date,
+            mealType = mealType
+        )
+    }
 
-            addFoodToBasketUseCase(
-                food = recipe.toFood(),
-                serving = Serving(description = "Serving", gramWeight = 0.0, isDefault = true),
-                quantity = servingsToLog,
-                calculatedNutrition = scaledNutrition,
-                date = date,
-                mealType = mealType
-            )
-            onComplete()
+    /**
+     * "Log to Diary": logs the recipe now. Like Food Detail's Log button it passes through the
+     * basket (AGENTS.md section 5) and is committed at once (BUG-015).
+     */
+    fun logRecipeToDiary(
+        recipe: Recipe,
+        mealType: MealType,
+        date: LocalDate,
+        servingsToLog: Double = 1.0,
+        onComplete: () -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        if (!servingsToLog.isFinite() || servingsToLog <= 0.0) {
+            onError(com.macrobase.app.feature.detail.QUANTITY_INPUT_ERROR)
+            return
         }
+        viewModelScope.launch {
+            val itemId = stageRecipe(recipe, mealType, date, servingsToLog)
+            commitSingleBasketItemUseCase(itemId)
+                .onSuccess { onComplete() }
+                .onFailure {
+                    // Not logged: take the staged copy back out, so a retry cannot leave a duplicate behind
+                    removeBasketItemUseCase(itemId)
+                    onError("Couldn't log this recipe. Please try again.")
+                }
+        }
+    }
+
+    /** "Add to Basket": stages the recipe so it can be logged together with other foods. */
+    fun addRecipeToBasket(recipe: Recipe, mealType: MealType, date: LocalDate, servings: Double, onComplete: () -> Unit) {
+        if (!servings.isFinite() || servings <= 0.0) return
+        stageRecipe(recipe, mealType, date, servings)
+        onComplete()
     }
 }
 
@@ -163,8 +218,11 @@ fun RecipesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var recipeToLog by remember { mutableStateOf<Recipe?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onCreateClick,
@@ -233,9 +291,14 @@ fun RecipesScreen(
     recipeToLog?.let { recipe ->
         var selectedMeal by remember { mutableStateOf(MealType.LUNCH) }
         var servingsCount by remember { mutableStateOf("1") }
+        // One action per dialog: a second tap before it closes must not log twice (BUG-011)
+        var submitted by remember { mutableStateOf(false) }
+        var logError by remember { mutableStateOf<String?>(null) }
+        val servings = parsePositiveQuantity(servingsCount)
 
         AlertDialog(
-            onDismissRequest = { recipeToLog = null },
+            // Stays open while logging, so a failure is shown here rather than lost
+            onDismissRequest = { if (!submitted) recipeToLog = null },
             title = { Text("Log Recipe: ${recipe.name}", style = AppTypography.Header2) },
             text = {
                 Column {
@@ -271,15 +334,26 @@ fun RecipesScreen(
                         value = servingsCount,
                         onValueChange = { servingsCount = it },
                         label = { Text("Number of Servings") },
+                        isError = servings == null,
+                        supportingText = if (servings == null) {
+                            { Text(QUANTITY_INPUT_ERROR) }
+                        } else null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    logError?.let { error ->
+                        Spacer(modifier = Modifier.height(AppSpacing.xs))
+                        Text(error, style = AppTypography.Body2, color = AppColors.AlertRed)
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val qty = servingsCount.toDoubleOrNull() ?: 1.0
+                        val qty = servings
+                        if (submitted || qty == null) return@Button
+                        submitted = true
+                        logError = null
                         viewModel.logRecipeToDiary(
                             recipe = recipe,
                             mealType = selectedMeal,
@@ -288,17 +362,39 @@ fun RecipesScreen(
                             onComplete = {
                                 recipeToLog = null
                                 onLogSuccess()
+                            },
+                            onError = { message ->
+                                submitted = false
+                                logError = message
                             }
                         )
                     },
+                    enabled = !submitted && servings != null,
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
                 ) {
                     Text("Log to Diary")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { recipeToLog = null }) {
-                    Text("Cancel", color = AppColors.TextSecondary)
+                Row {
+                    TextButton(onClick = { recipeToLog = null }, enabled = !submitted) {
+                        Text("Cancel", color = AppColors.TextSecondary)
+                    }
+                    TextButton(
+                        onClick = {
+                            val qty = servings
+                            if (submitted || qty == null) return@TextButton
+                            submitted = true
+                            val recipeName = recipe.name
+                            viewModel.addRecipeToBasket(recipe, selectedMeal, LocalDate.now(), qty) {
+                                recipeToLog = null
+                                snackbarScope.launch { snackbarHostState.showSnackbar("$recipeName added to basket") }
+                            }
+                        },
+                        enabled = !submitted && servings != null
+                    ) {
+                        Text("Add to Basket", color = AppColors.Primary)
+                    }
                 }
             },
             containerColor = AppColors.SurfaceAlt
@@ -337,14 +433,14 @@ fun RecipeCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${recipe.servingsProduced} servings • ${recipe.ingredients.size} ingredients",
+                        text = "${recipe.servingsProduced} servings \u2022 ${recipe.ingredients.size} ingredients",
                         style = AppTypography.Caption,
                         color = AppColors.TextSecondary
                     )
                 }
 
                 Text(
-                    text = "${perServing.calories.toInt()} cal/srv",
+                    text = "${perServing.calories.roundToInt()} cal/srv",
                     style = AppTypography.ValueMd,
                     color = AppColors.CalorieText
                 )
@@ -357,9 +453,9 @@ fun RecipeCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
             ) {
-                Text(text = "P: ${String.format("%.1f", perServing.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
-                Text(text = "C: ${String.format("%.1f", perServing.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
-                Text(text = "F: ${String.format("%.1f", perServing.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
+                Text(text = "P: ${String.format(Locale.US, "%.1f", perServing.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
+                Text(text = "C: ${String.format(Locale.US, "%.1f", perServing.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
+                Text(text = "F: ${String.format(Locale.US, "%.1f", perServing.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
             }
 
             Spacer(modifier = Modifier.height(AppSpacing.md))
@@ -405,7 +501,7 @@ fun EditRecipeScreen(
 
     LaunchedEffect(recipeId) {
         if (recipeId > 0L) {
-            val found = viewModel.recipes.value.firstOrNull { it.id == recipeId }
+            val found = viewModel.getRecipe(recipeId)
             if (found != null) {
                 existingRecipe = found
                 name = found.name
@@ -421,7 +517,8 @@ fun EditRecipeScreen(
         uuid = existingRecipe?.uuid ?: UUID.randomUUID().toString(),
         name = name,
         servingsProduced = servingsCount,
-        ingredients = ingredients
+        ingredients = ingredients,
+        savedNutritionPerServing = existingRecipe?.savedNutritionPerServing
     )
 
     val totalNutr = tempRecipe.totalNutrition
@@ -471,16 +568,16 @@ fun EditRecipeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = "Calories", style = AppTypography.Header2)
-                    Text(text = "${perServingNutr.calories.toInt()} kcal", style = AppTypography.ValueLg, color = AppColors.CalorieText)
+                    Text(text = "${perServingNutr.calories.roundToInt()} kcal", style = AppTypography.ValueLg, color = AppColors.CalorieText)
                 }
                 Spacer(modifier = Modifier.height(AppSpacing.xs))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(text = "Protein: ${String.format("%.1f", perServingNutr.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
-                    Text(text = "Carbs: ${String.format("%.1f", perServingNutr.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
-                    Text(text = "Fat: ${String.format("%.1f", perServingNutr.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
+                    Text(text = "Protein: ${String.format(Locale.US, "%.1f", perServingNutr.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
+                    Text(text = "Carbs: ${String.format(Locale.US, "%.1f", perServingNutr.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
+                    Text(text = "Fat: ${String.format(Locale.US, "%.1f", perServingNutr.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
                 }
             }
         }
@@ -515,7 +612,13 @@ fun EditRecipeScreen(
                     .padding(AppSpacing.md),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "No ingredients added yet. Tap '+ Add Ingredient' above.", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                val emptyText = if (existingRecipe?.ingredients?.isEmpty() == true) {
+                    // Recipes saved by older versions kept only their per-serving totals
+                    "This recipe's ingredient list was not saved by an older version, so it shows its stored totals. Add all of its ingredients again; saving replaces those totals."
+                } else {
+                    "No ingredients added yet. Tap '+ Add Ingredient' above."
+                }
+                Text(text = emptyText, style = AppTypography.Body2, color = AppColors.TextSecondary)
             }
         } else {
             ingredients.forEachIndexed { index, ing ->
@@ -529,9 +632,9 @@ fun EditRecipeScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = ing.food.name, style = AppTypography.Body1, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(text = "${String.format("%.1f", ing.quantity)} × ${ing.serving.description}", style = AppTypography.Caption, color = AppColors.TextSecondary)
+                        Text(text = "${String.format(Locale.US, "%.1f", ing.quantity)} \u00D7 ${ing.serving.description}", style = AppTypography.Caption, color = AppColors.TextSecondary)
                     }
-                    Text(text = "${ing.nutrition.calories.toInt()} cal", style = AppTypography.Header3, color = AppColors.CalorieText)
+                    Text(text = "${ing.nutrition.calories.roundToInt()} cal", style = AppTypography.Header3, color = AppColors.CalorieText)
                     IconButton(onClick = {
                         ingredients = ingredients.filterIndexed { i, _ -> i != index }
                     }) {
@@ -594,7 +697,7 @@ fun EditRecipeScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(text = food.name, style = AppTypography.Body2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text(text = "${food.nutrition.calories.toInt()} cal", style = AppTypography.Caption, color = AppColors.CalorieText)
+                                    Text(text = "${food.nutrition.calories.roundToInt()} cal ${food.nutritionBasisLabel}", style = AppTypography.Caption, color = AppColors.CalorieText)
                                 }
                                 HorizontalDivider(color = AppColors.Divider)
                             }
@@ -603,10 +706,15 @@ fun EditRecipeScreen(
                         Text(text = selectedFood!!.name, style = AppTypography.Header3)
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
 
+                        val ingredientQtyValid = parsePositiveQuantity(qtyInput) != null
                         OutlinedTextField(
                             value = qtyInput,
                             onValueChange = { qtyInput = it },
                             label = { Text("Quantity") },
+                            isError = !ingredientQtyValid,
+                            supportingText = if (!ingredientQtyValid) {
+                                { Text(QUANTITY_INPUT_ERROR) }
+                            } else null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -618,9 +726,11 @@ fun EditRecipeScreen(
             },
             confirmButton = {
                 if (selectedFood != null) {
+                    val ingredientQty = parsePositiveQuantity(qtyInput)
                     Button(
+                        enabled = ingredientQty != null,
                         onClick = {
-                            val q = qtyInput.toDoubleOrNull() ?: 1.0
+                            val q = ingredientQty ?: return@Button
                             val ing = RecipeIngredient(
                                 id = 0L,
                                 food = selectedFood!!,

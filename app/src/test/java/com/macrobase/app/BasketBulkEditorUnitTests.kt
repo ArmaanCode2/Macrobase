@@ -355,6 +355,40 @@ class BasketBulkEditorUnitTests {
         assertEquals(LoggingMode.SINGLE_FOOD_RECIPE, viewModel.loggingMode.value)
     }
 
+    @Test
+    fun test14_basketStateFlow_emptyBasketResetsDateMealOverrideFlag() = runTest(testDispatcher) {
+        val f1 = createSampleFood(1L, "F1", 100.0, 1.0, 1.0, 1.0)
+        val f2 = createSampleFood(2L, "F2", 200.0, 2.0, 2.0, 2.0)
+        val date1 = LocalDate.of(2026, 8, 20)
+        val date2 = LocalDate.of(2026, 8, 25)
+
+        // 1. Add first item with date1 and BREAKFAST
+        addFoodToBasketUseCase(f1, f1.servings[0], 100.0, calculateNutritionUseCase(f1, f1.servings[0], 100.0), date1, MealType.BREAKFAST)
+        advanceUntilIdle()
+        assertEquals(date1, viewModel.commonDate.value)
+        assertEquals(MealType.BREAKFAST, viewModel.commonMealType.value)
+
+        // 2. User overrides date and meal
+        viewModel.setCommonDate(date1.plusDays(1))
+        viewModel.setCommonMealType(MealType.DINNER)
+        advanceUntilIdle()
+        assertEquals(date1.plusDays(1), viewModel.commonDate.value)
+        assertEquals(MealType.DINNER, viewModel.commonMealType.value)
+
+        // 3. Clear basket
+        viewModel.clearBasket()
+        advanceUntilIdle()
+        assertTrue(viewModel.items.value.isEmpty())
+
+        // 4. Add a new item with date2 and SNACK
+        addFoodToBasketUseCase(f2, f2.servings[0], 100.0, calculateNutritionUseCase(f2, f2.servings[0], 100.0), date2, MealType.SNACK)
+        advanceUntilIdle()
+
+        // 5. Verify the new item's date and meal are picked up instead of being stuck on DINNER
+        assertEquals(date2, viewModel.commonDate.value)
+        assertEquals(MealType.SNACK, viewModel.commonMealType.value)
+    }
+
     // Fake Diary Repository
     private class FakeDiaryRepository : DiaryRepository {
         val storedEntries = mutableListOf<DiaryEntry>()

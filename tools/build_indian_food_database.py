@@ -326,8 +326,10 @@ def build_database():
         food_count += 1
 
         # 2. Insert Servings
-        # Baseline: 100g metric serving
-        has_custom_serving = bool(row['servingUnit'].strip())
+        # Baseline: 100g metric serving, always the default. Nutrition is per 100 g,
+        # so a household portion is only usable when its gram weight is known.
+        s_weight = parse_float_or_null(row['servingWeightG']) or 0.0
+        has_custom_serving = bool(row['servingUnit'].strip()) and s_weight > 0.0
         cursor.execute("""
             INSERT INTO servings (food_id, description, unit_type, quantity, gram_weight, is_default, sequence)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -335,19 +337,18 @@ def build_database():
             food_id,
             "100 g",
             "g",
+            1.0,  # 1 portion unit = 100g
             100.0,
-            100.0,
-            1 if not has_custom_serving else 0,
+            1,
             0
         ))
         serving_count += 1
 
-        # Custom/Portion Serving from CSV if present
+        # Household portion from CSV (weights derived from Anuvaad INDB unit servings)
         if has_custom_serving:
             s_unit = row['servingUnit'].strip()
             s_qty = parse_float_or_null(row['servingQuantity']) or 1.0
             s_desc = row['servingDescription'].strip() or f"{s_qty:g} {s_unit}"
-            s_weight = parse_float_or_null(row['servingWeightG']) or 0.0
 
             cursor.execute("""
                 INSERT INTO servings (food_id, description, unit_type, quantity, gram_weight, is_default, sequence)
@@ -358,7 +359,7 @@ def build_database():
                 s_unit,
                 s_qty,
                 s_weight,
-                1,
+                0,
                 1
             ))
             serving_count += 1
@@ -410,11 +411,11 @@ def build_database():
 
     # 5. Insert Database Metadata
     metadata = [
-        ("database_version", "2.0.0"),
+        ("database_version", "2.1.0"),
         ("schema_version", "1"),
         ("pipeline_version", "2026.2"),
         ("dataset_name", "macrobase_indian_foods_canonical"),
-        ("dataset_version", "2026-08"),
+        ("dataset_version", "2026-10"),
         ("build_timestamp", datetime.now(timezone.utc).isoformat()),
         ("total_foods", str(food_count)),
         ("total_servings", str(serving_count)),

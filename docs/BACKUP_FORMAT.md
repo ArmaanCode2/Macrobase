@@ -93,10 +93,22 @@ Stores historical meal logs with immutable nutrition snapshots.
     "loggedProtein": 10.5,
     "loggedCarbs": 54.0,
     "loggedFat": 4.5,
+    "loggedFiber": 6.0,
+    "loggedSugar": 12.0,
+    "loggedSodium": 0.0,
+    "loggedSaturatedFat": null,
+    "loggedTransFat": null,
+    "loggedCholesterol": null,
+    "customFoodUuid": null,
+    "recipeUuid": null,
     "createdAt": 1787121996830
   }
 ]
 ```
+
+Secondary nutrients: `null` means the food did not state the value, and `0.0` means it has none.
+- Format 1.1.0 added `loggedFiber`, `loggedSugar`, `loggedSodium` and the custom food and recipe uuids. Backups from 1.0.0 lack them and restore them as `null`.
+- Format 1.3.0 added `loggedSaturatedFat`, `loggedTransFat` and `loggedCholesterol`, and writes `null` for an unknown value. Formats 1.1.0 and 1.2.0 were written from columns that stored `0.0` for "unknown", so on restore their `0.0` fiber, sugar and sodium are read as `null` (`BackupJsonSerializer.legacyZerosAsUnknown`, BUG-037).
 
 ### 4.2. Custom Foods (`custom_foods.json`)
 ```json

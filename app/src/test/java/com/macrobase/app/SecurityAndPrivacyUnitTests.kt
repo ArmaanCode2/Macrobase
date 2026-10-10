@@ -135,7 +135,7 @@ class SecurityAndPrivacyUnitTests {
         val stmt = conn.createStatement()
         val rs = stmt.executeQuery("SELECT COUNT(*) FROM foods;")
         assertTrue(rs.next())
-        assertEquals(7966, rs.getInt(1))
+        assertEquals(1014, rs.getInt(1))
         rs.close()
     }
 
@@ -187,5 +187,112 @@ class SecurityAndPrivacyUnitTests {
         // The snapshot remains untouched
         assertEquals(150.0, snapshottedCalories, 0.001)
         assertEquals(190.0, updatedFood.nutrition.calories, 0.001)
+    }
+
+    // =========================================================================
+    // 7. INPUT BOUNDS, RECURSION LIMITS & OFFLINE-ONLY SECURITY
+    // =========================================================================
+
+    @Test
+    fun jsonParsing_recursionDepthExceeded_throwsException() {
+        // Construct 40-level deep nested JSON object: {"nested":{"nested":...}}
+        val sb = StringBuilder()
+        for (i in 1..40) {
+            sb.append("""{"nested":""")
+        }
+        sb.append("1")
+        for (i in 1..40) {
+            sb.append("}")
+        }
+        val deepJson = sb.toString()
+
+        val result = runCatching {
+            SimpleJsonParser.parseObject(deepJson)
+        }
+        assertTrue("Deeply nested JSON must fail parsing", result.isFailure)
+        val ex = result.exceptionOrNull()
+        assertTrue("Exception must be IllegalArgumentException", ex is IllegalArgumentException)
+        assertTrue("Message must indicate nesting depth exceeded", ex?.message?.contains("nesting depth") == true)
+    }
+
+    @Test
+    fun jsonParsing_malformedNumbers_throwsIllegalArgumentException() {
+        val malformedJson1 = """{"val": -}"""
+        val result1 = runCatching {
+            SimpleJsonParser.parseObject(malformedJson1)
+        }
+        assertTrue(result1.isFailure)
+        assertTrue(result1.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(result1.exceptionOrNull()?.message?.contains("Malformed number") == true)
+
+        val malformedJson2 = """{"val": 1.2.3}"""
+        val result2 = runCatching {
+            SimpleJsonParser.parseObject(malformedJson2)
+        }
+        assertTrue(result2.isFailure)
+        assertTrue(result2.exceptionOrNull() is IllegalArgumentException)
+    }
+
+    @Test
+    fun jsonParsing_malformedUnicodeEscape_throwsIllegalArgumentException() {
+        val badHexJson = """{"val": "\u12G4"}"""
+        val result = runCatching {
+            SimpleJsonParser.parseObject(badHexJson)
+        }
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(result.exceptionOrNull()?.message?.contains("Invalid hex character") == true)
+    }
+
+    @Test
+    fun streamBoundedReading_archiveExceedingMaxLimit_abortedSafely() {
+        // Provide a stream that yields > 50 MB without allocating 50MB in memory
+        val limitPlusOne = 50L * 1024 * 1024 + 1024
+        var bytesRead = 0L
+        val largeStream = object : java.io.InputStream() {
+            override fun read(): Int {
+                return if (bytesRead < limitPlusOne) {
+                    bytesRead++
+                    0
+                } else {
+                    -1
+                }
+            }
+
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (bytesRead >= limitPlusOne) return -1
+                val toRead = kotlin.math.min(len.toLong(), limitPlusOne - bytesRead).toInt()
+                bytesRead += toRead
+                java.util.Arrays.fill(b, off, off + toRead, 0.toByte())
+                return toRead
+            }
+        }
+
+        val result = BackupArchiveManager.extractAndValidateBackup(largeStream)
+        assertFalse("Archive exceeding max size must be rejected", result.isValid)
+        assertTrue("Error must indicate rejection",
+            result.errorMessage?.contains("empty or invalid") == true ||
+            result.errorMessage?.contains("maximum permitted size") == true
+        )
+        assertTrue("Stream must abort early without consuming entire 50MB stream", bytesRead < limitPlusOne)
+    }
+
+    @Test
+    fun scannerPackage_strictlyZeroNetworkImports() {
+        val candidates = listOf(
+            File("src/main/java/com/macrobase/app/feature/scanner"),
+            File("app/src/main/java/com/macrobase/app/feature/scanner"),
+            File("../app/src/main/java/com/macrobase/app/feature/scanner")
+        )
+        val scannerDir = candidates.firstOrNull { it.exists() }
+        assertNotNull("Scanner directory must exist", scannerDir)
+        val kotlinFiles = scannerDir!!.walkTopDown().filter { it.extension == "kt" }.toList()
+        assertTrue("Scanner files must exist", kotlinFiles.isNotEmpty())
+        for (file in kotlinFiles) {
+            val text = file.readText()
+            assertFalse("File ${file.name} must not import HttpURLConnection", text.contains("HttpURLConnection"))
+            assertFalse("File ${file.name} must not import java.net.URL", text.contains("java.net.URL"))
+            assertFalse("File ${file.name} must not use GlobalScope", text.contains("GlobalScope"))
+        }
     }
 }

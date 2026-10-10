@@ -13,6 +13,11 @@ import javax.inject.Singleton
 
 @Singleton
 class InMemoryBasketRepository @Inject constructor() : BasketRepository {
+    /** Starts with [initialItems], e.g. a basket restored from disk. */
+    constructor(initialItems: List<BasketItem>) : this() {
+        _items.value = initialItems
+    }
+
     private val _items = MutableStateFlow<List<BasketItem>>(emptyList())
     override val items: StateFlow<List<BasketItem>> = _items.asStateFlow()
 
@@ -25,6 +30,12 @@ class InMemoryBasketRepository @Inject constructor() : BasketRepository {
     override fun removeItem(itemId: String) {
         _items.update { current ->
             current.filter { it.id != itemId }
+        }
+    }
+
+    override fun removeItems(itemIds: Set<String>) {
+        _items.update { current ->
+            current.filter { it.id !in itemIds }
         }
     }
 

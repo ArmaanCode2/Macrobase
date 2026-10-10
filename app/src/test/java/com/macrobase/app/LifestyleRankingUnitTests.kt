@@ -438,7 +438,12 @@ class LifestyleRankingUnitTests {
         val dayB = today.minusDays(1)
         val dayC = today
 
-        val aggregations = listOf(
+        // 12 ordinary days before the three under test: the rating is replayed from the diary,
+        // so the 15 logged days the statistics fake reports must be in the diary too (BUG-023)
+        val earlierDays = (14 downTo 3).map { daysAgo ->
+            DailyMacroAggregation(date = today.minusDays(daysAgo.toLong()), calories = 2000.0, proteinGrams = 125.0, carbsGrams = 250.0, fatGrams = 55.0)
+        }
+        val aggregations = earlierDays + listOf(
             DailyMacroAggregation(date = dayA, calories = 2000.0, proteinGrams = 150.0, carbsGrams = 200.0, fatGrams = 65.0),
             DailyMacroAggregation(date = dayB, calories = 6000.0, proteinGrams = 350.0, carbsGrams = 700.0, fatGrams = 220.0),
             DailyMacroAggregation(date = dayC, calories = 2200.0, proteinGrams = 140.0, carbsGrams = 230.0, fatGrams = 75.0)
@@ -889,21 +894,24 @@ class LifestyleRankingUnitTests {
         assertEquals(FitnessGoal.BULKING, goalTomorrow.fitnessGoal)
         assertEquals(2500.0, goalTomorrow.maintenanceCalories, 0.001)
 
-        // Invariant: Past evaluations and today (<= T) MUST remain 100% immutable
+        // Invariant: past evaluations (< T) remain 100% immutable. Today keeps its strategy and
+        // maintenance, but calorie and macro targets apply as soon as they are saved, as on the
+        // dashboard (BUG-024), so today's macro score follows the new targets.
         val profileAfter = rankRepo.getRankProfile()
-        assertEquals(profileBefore.currentRating, profileAfter.currentRating)
-        assertEquals(profileBefore.rankTier, profileAfter.rankTier)
-        assertEquals(profileBefore.tierRR, profileAfter.tierRR)
         assertEquals(profileBefore.recentHistory.size, profileAfter.recentHistory.size)
 
         for (i in profileBefore.recentHistory.indices) {
             val entryBefore = profileBefore.recentHistory[i]
             val entryAfter = profileAfter.recentHistory[i]
             assertEquals(entryBefore.date, entryAfter.date)
-            assertEquals(entryBefore.overallRating, entryAfter.overallRating)
-            assertEquals(entryBefore.rrDelta, entryAfter.rrDelta)
             assertEquals(entryBefore.calorieScore, entryAfter.calorieScore, 0.001)
-            assertEquals(entryBefore.macroScore, entryAfter.macroScore, 0.001)
+            if (entryBefore.date.isBefore(today)) {
+                assertEquals(entryBefore.overallRating, entryAfter.overallRating)
+                assertEquals(entryBefore.rrDelta, entryAfter.rrDelta)
+                assertEquals(entryBefore.macroScore, entryAfter.macroScore, 0.001)
+            } else {
+                assertTrue("today is scored against the new targets", entryAfter.macroScore < entryBefore.macroScore)
+            }
         }
     }
 
@@ -1248,6 +1256,8 @@ class LifestyleRankingUnitTests {
             if (date.isAfter(simulatedToday) && scheduledGoal != null && !date.isBefore(scheduledGoal!!.first)) {
                 return scheduledGoal!!.second
             }
+            // As GoalsRepositoryImpl: today is the goal in force now, targets included
+            if (!date.isBefore(simulatedToday)) return goalsFlow.value
             val match = history.filter { !it.first.isAfter(date) }.maxByOrNull { it.first }
             return match?.second ?: goalsFlow.value
         }

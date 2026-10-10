@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
+import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
@@ -77,8 +78,11 @@ import com.macrobase.app.domain.usecase.UpdateDiaryEntryUseCase
 import com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase
 import com.macrobase.app.domain.usecase.basket.GetBasketItemsUseCase
 import com.macrobase.app.domain.usecase.basket.UpdateBasketItemUseCase
+import com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase
 import com.macrobase.app.domain.usecase.basket.CommitSingleBasketItemUseCase
+import com.macrobase.app.domain.usecase.basket.BasketItemMissingException
 import com.macrobase.app.domain.model.basket.BasketItem
+import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -94,6 +98,32 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.text.style.TextAlign
+
+fun formatQuantityForInput(value: Double, tolerance: Double = 0.0001): String {
+    if (!value.isFinite()) return "0"
+    val rounded = kotlin.math.round(value)
+    return if (kotlin.math.abs(value - rounded) < tolerance) {
+        rounded.toLong().toString()
+    } else {
+        // Plain decimal without float noise or exponent: 0.1 + 0.2 shows "0.3", 1e7 shows "10000000"
+        java.math.BigDecimal(value).setScale(6, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+    }
+}
+
+/** Quantity typed by the user; accepts a comma decimal separator ("1,5") as many keyboards insert. */
+fun parseQuantityInput(text: String): Double? = parseDecimalInput(text)
+
+/**
+ * A quantity that may be logged (BUG-012): "1,5" and "1.5" are accepted; blank, zero,
+ * negative and non-finite input is rejected so it can never log 0 or negative calories.
+ */
+fun parsePositiveQuantity(text: String): Double? =
+    parseQuantityInput(text)?.takeIf { it.isFinite() && it > 0.0 }
+
+/** Shown next to a quantity field whose text [parsePositiveQuantity] rejects. */
+const val QUANTITY_INPUT_ERROR = "Enter an amount above 0"
 
 class FoodDetailViewModel(
     private val getFoodDetailsUseCase: GetFoodDetailsUseCase,
@@ -101,6 +131,7 @@ class FoodDetailViewModel(
     private val addFoodToBasketUseCase: AddFoodToBasketUseCase,
     private val getBasketItemsUseCase: GetBasketItemsUseCase,
     private val updateBasketItemUseCase: UpdateBasketItemUseCase,
+    private val removeBasketItemUseCase: RemoveBasketItemUseCase,
     private val commitSingleBasketItemUseCase: CommitSingleBasketItemUseCase,
     private val updateDiaryEntryUseCase: UpdateDiaryEntryUseCase,
     private val deleteDiaryEntryUseCase: DeleteDiaryEntryUseCase,
@@ -113,32 +144,47 @@ class FoodDetailViewModel(
     private var editingEntryId: Long? = null
     private var editingBasketItemId: String? = null
 
+    /**
+     * True from the first tap of Log/Save/Keep/Delete/Remove until it fails; after success the
+     * screen closes. Taps arrive on the main thread, so a second tap always sees it (BUG-011).
+     */
+    private var actionInFlight = false
+
+    private fun startAction(requiresValidQuantity: Boolean = true): Boolean {
+        if (actionInFlight) return false
+        if (requiresValidQuantity && _uiState.value.quantityError != null) return false
+        actionInFlight = true
+        _uiState.update { it.copy(isSaving = true, actionError = null) }
+        return true
+    }
+
+    private fun actionFailed(message: String) {
+        actionInFlight = false
+        _uiState.update { it.copy(isSaving = false, actionError = message) }
+    }
+
     fun loadFood(foodId: Long, mealType: MealType? = null, date: LocalDate? = null, entryId: Long? = null, basketItemId: String? = null) {
         editingEntryId = if (entryId != null && entryId > 0L) entryId else null
         editingBasketItemId = basketItemId
-        
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, quantityError = null, actionError = null) }
 
             // 1. Check if editing an existing diary entry (EDIT MODE)
-            if (editingEntryId != null && editingEntryId!! > 0L) {
-                val diaryEntry = getDiaryEntryUseCase(editingEntryId!!)
+            val currentEditingEntryId = editingEntryId
+            if (currentEditingEntryId != null && currentEditingEntryId > 0L) {
+                val diaryEntry = getDiaryEntryUseCase(currentEditingEntryId)
                 if (diaryEntry != null) {
-                    val catalogFood = getFoodDetailsUseCase(diaryEntry.food.id) ?: getFoodDetailsUseCase(foodId)
+                    // Trust a looked-up food only if it is the one this entry logged; otherwise
+                    // keep the entry's own snapshot so Save never rewrites it with another food.
+                    val catalogFood = getFoodDetailsUseCase(diaryEntry.food.id)
+                        ?.takeIf { it.isSameFoodAs(diaryEntry.food) && it.canScale(it.resolveLoggedServing(diaryEntry.serving)) }
                     val food = catalogFood ?: diaryEntry.food
                     val catalogServings = catalogFood?.servings ?: emptyList()
 
                     // Match existing serving against catalog servings
-                    val matchedServing = catalogServings.firstOrNull {
-                        it.description.equals(diaryEntry.serving.description, ignoreCase = true)
-                    } ?: if (diaryEntry.serving.gramWeight > 0.0) {
-                        catalogServings.firstOrNull {
-                            it.gramWeight > 0.0 && kotlin.math.abs(it.gramWeight - diaryEntry.serving.gramWeight) < 0.001
-                        }
-                    } else null
-
-                    val selectedServing = matchedServing ?: diaryEntry.serving
-                    val availableServings = if (catalogServings.any { it.description.equals(selectedServing.description, ignoreCase = true) }) {
+                    val selectedServing = catalogFood?.resolveLoggedServing(diaryEntry.serving) ?: diaryEntry.serving
+                    val availableServings = if (selectedServing in catalogServings) {
                         catalogServings
                     } else if (catalogServings.isNotEmpty()) {
                         listOf(selectedServing) + catalogServings
@@ -147,8 +193,37 @@ class FoodDetailViewModel(
                     }
 
                     val initialQty = diaryEntry.quantity
-                    val initialQtyText = if (initialQty == initialQty.toLong().toDouble()) initialQty.toLong().toString() else initialQty.toString()
-                    val calculated = diaryEntry.calculatedNutrition
+                    val initialQtyText = formatQuantityForInput(initialQty)
+                    val rawCalculated = diaryEntry.calculatedNutrition
+                    val catalogNutrition = catalogFood?.nutrition
+                    // Only null means "not recorded"; a logged 0.0 is a real zero and stays (BUG-037)
+                    fun missing(logged: Double?, catalog: Double?) = logged == null && (catalog ?: 0.0) > 0.0
+                    val hasMissingSecondaryNutrients = catalogNutrition != null && (
+                        missing(rawCalculated.fiberGrams, catalogNutrition.fiberGrams) ||
+                        missing(rawCalculated.sugarGrams, catalogNutrition.sugarGrams) ||
+                        missing(rawCalculated.sodiumMg, catalogNutrition.sodiumMg) ||
+                        missing(rawCalculated.saturatedFatGrams, catalogNutrition.saturatedFatGrams) ||
+                        missing(rawCalculated.transFatGrams, catalogNutrition.transFatGrams) ||
+                        missing(rawCalculated.cholesterolMg, catalogNutrition.cholesterolMg)
+                    )
+                    // Fill in only the secondary nutrients older versions did not record; calories
+                    // and macros stay the logged snapshot even if the food changed since (AGENTS.md 1.4).
+                    // Each nutrient follows the same rule as the check above, never a catalog 0.0.
+                    val calculated = if (hasMissingSecondaryNutrients) {
+                        val current = calculateNutritionForServingUseCase(food, selectedServing, initialQty)
+                        fun fill(logged: Double?, catalog: Double?, recalculated: Double?) =
+                            if (missing(logged, catalog)) recalculated else logged
+                        rawCalculated.copy(
+                            fiberGrams = fill(rawCalculated.fiberGrams, catalogNutrition?.fiberGrams, current.fiberGrams),
+                            sugarGrams = fill(rawCalculated.sugarGrams, catalogNutrition?.sugarGrams, current.sugarGrams),
+                            sodiumMg = fill(rawCalculated.sodiumMg, catalogNutrition?.sodiumMg, current.sodiumMg),
+                            saturatedFatGrams = fill(rawCalculated.saturatedFatGrams, catalogNutrition?.saturatedFatGrams, current.saturatedFatGrams),
+                            transFatGrams = fill(rawCalculated.transFatGrams, catalogNutrition?.transFatGrams, current.transFatGrams),
+                            cholesterolMg = fill(rawCalculated.cholesterolMg, catalogNutrition?.cholesterolMg, current.cholesterolMg)
+                        )
+                    } else {
+                        rawCalculated
+                    }
                     val split = MacroCalorieSplit.fromNutrition(calculated)
                     val targetDate = diaryEntry.date
                     val targetMealType = diaryEntry.mealType
@@ -165,18 +240,33 @@ class FoodDetailViewModel(
                             targetMealType = targetMealType,
                             targetDate = targetDate,
                             isLoading = false,
-                            errorMessage = null
+                            errorMessage = null,
+                            // An entry an older version logged with 0 or less: Save waits for a real amount
+                            quantityError = loadedQuantityError(initialQty)
                         )
                     }
+                    return@launch
+                } else {
+                    _uiState.update { it.copy(food = null, isLoading = false, errorMessage = "Diary entry not found") }
                     return@launch
                 }
             }
 
             // 2. Otherwise NEW FOOD or BASKET ITEM MODE
-            val item = getFoodDetailsUseCase(foodId)
+            // If editing basket item, load its state
+            val basketItem = editingBasketItemId?.let { id -> getBasketItemsUseCase().value.firstOrNull { it.id == id } }
+
+            // A basket item keeps the food it was added with (possibly a diary snapshot, e.g. a
+            // copied recipe entry). Use a looked-up food only if it is that same food.
+            val lookedUp = getFoodDetailsUseCase(foodId)
+            val item = if (basketItem != null) {
+                lookedUp?.takeIf { it.isSameFoodAs(basketItem.food) && it.canScale(basketItem.serving) } ?: basketItem.food
+            } else {
+                lookedUp
+            }
 
             if (item == null) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = "Food record not found") }
+                _uiState.update { it.copy(food = null, isLoading = false, errorMessage = "Food record not found") }
                 return@launch
             }
 
@@ -186,9 +276,6 @@ class FoodDetailViewModel(
                 listOf(Serving(description = "100 g", gramWeight = 100.0, isDefault = true))
             }
 
-            // If editing basket item, load its state
-            val basketItem = editingBasketItemId?.let { id -> getBasketItemsUseCase().value.firstOrNull { it.id == id } }
-            
             val defaultServing = basketItem?.serving ?: (servings.firstOrNull { it.isDefault } ?: servings.first())
             val initialQty = basketItem?.quantity ?: 1.0
             
@@ -198,59 +285,55 @@ class FoodDetailViewModel(
             val targetDate = basketItem?.date ?: (date ?: LocalDate.now())
             val targetMealType = basketItem?.mealType ?: (mealType ?: MealType.BREAKFAST)
 
-            if (editingBasketItemId == null && editingEntryId == null) {
-                val newId = addFoodToBasketUseCase(
-                    food = item,
-                    serving = defaultServing,
-                    quantity = initialQty,
-                    calculatedNutrition = calculated,
-                    date = targetDate,
-                    mealType = targetMealType
-                )
-                editingBasketItemId = newId
-            }
-
             _uiState.update {
                 it.copy(
                     food = item,
                     availableServings = servings,
                     selectedServing = defaultServing,
                     enteredQuantity = initialQty,
-                    quantityInputText = if (initialQty == initialQty.toLong().toDouble()) initialQty.toLong().toString() else initialQty.toString(),
+                    quantityInputText = formatQuantityForInput(initialQty),
                     calculatedNutrition = calculated,
                     macroCalorieSplit = split,
                     targetMealType = targetMealType,
                     targetDate = targetDate,
                     isLoading = false,
-                    errorMessage = null
+                    errorMessage = null,
+                    quantityError = loadedQuantityError(initialQty)
                 )
             }
         }
     }
 
+    private fun loadedQuantityError(quantity: Double): String? =
+        if (quantity.isFinite() && quantity > 0.0) null else QUANTITY_INPUT_ERROR
+
     private fun saveCurrentStateToBasket() {
-        if (editingBasketItemId != null) {
-            val state = _uiState.value
-            val food = state.food ?: return
-            val serving = state.selectedServing ?: return
-            val existingItem = getBasketItemsUseCase().value.firstOrNull { it.id == editingBasketItemId }
-            if (existingItem != null) {
-                val updatedItem = existingItem.copy(
-                    quantity = state.enteredQuantity,
-                    serving = serving,
-                    calculatedNutrition = state.calculatedNutrition,
-                    date = state.targetDate,
-                    mealType = state.targetMealType
-                )
-                updateBasketItemUseCase(updatedItem)
-            }
+        val currentId = editingBasketItemId ?: return
+        val state = _uiState.value
+        val food = state.food ?: return
+        val serving = state.selectedServing ?: return
+        val existingItem = getBasketItemsUseCase().value.firstOrNull { it.id == currentId }
+        if (existingItem != null) {
+            val updatedItem = existingItem.copy(
+                quantity = state.enteredQuantity,
+                serving = serving,
+                calculatedNutrition = state.calculatedNutrition,
+                date = state.targetDate,
+                mealType = state.targetMealType
+            )
+            updateBasketItemUseCase(updatedItem)
         }
     }
 
     fun onQuantityChange(newQuantityText: String) {
-        val qty = newQuantityText.toDoubleOrNull() ?: 0.0
         val food = _uiState.value.food ?: return
         val serving = _uiState.value.selectedServing ?: return
+        val qty = parsePositiveQuantity(newQuantityText)
+        if (qty == null) {
+            // Keep the last valid amount and its numbers; Log/Save stay disabled until it is fixed
+            _uiState.update { it.copy(quantityInputText = newQuantityText, quantityError = QUANTITY_INPUT_ERROR) }
+            return
+        }
 
         val calculated = calculateNutritionForServingUseCase(food, serving, qty)
         val split = MacroCalorieSplit.fromNutrition(calculated)
@@ -260,7 +343,8 @@ class FoodDetailViewModel(
                 enteredQuantity = qty,
                 quantityInputText = newQuantityText,
                 calculatedNutrition = calculated,
-                macroCalorieSplit = split
+                macroCalorieSplit = split,
+                quantityError = null
             )
         }
         saveCurrentStateToBasket()
@@ -297,42 +381,102 @@ class FoodDetailViewModel(
         val state = _uiState.value
         val food = state.food ?: return
         val serving = state.selectedServing ?: return
+        if (!startAction()) return
 
         viewModelScope.launch {
-            if (editingEntryId != null && editingEntryId!! > 0L) {
-                val entry = DiaryEntry(
-                    id = editingEntryId ?: 0L,
-                    uuid = UUID.randomUUID().toString(),
-                    date = state.targetDate,
-                    mealType = state.targetMealType,
+            val currentEditingEntryId = editingEntryId
+            val currentBasketItemId = editingBasketItemId
+            val result: Result<Unit> = if (currentEditingEntryId != null && currentEditingEntryId > 0L) {
+                runCatching {
+                    val existingEntry = getDiaryEntryUseCase(currentEditingEntryId)
+                    val entry = DiaryEntry(
+                        id = currentEditingEntryId,
+                        uuid = existingEntry?.uuid ?: UUID.randomUUID().toString(),
+                        date = state.targetDate,
+                        mealType = state.targetMealType,
+                        food = food,
+                        serving = serving,
+                        quantity = state.enteredQuantity,
+                        calculatedNutrition = state.calculatedNutrition,
+                        loggedAt = existingEntry?.loggedAt ?: Instant.now()
+                    )
+                    updateDiaryEntryUseCase(entry)
+                }
+            } else if (currentBasketItemId != null) {
+                saveCurrentStateToBasket()
+                commitSingleBasketItemUseCase(currentBasketItemId)
+            } else {
+                // New logs pass through the basket (AGENTS.md section 5), then commit at once
+                val newBasketItemId = addFoodToBasketUseCase(
                     food = food,
                     serving = serving,
                     quantity = state.enteredQuantity,
                     calculatedNutrition = state.calculatedNutrition,
-                    loggedAt = Instant.now()
+                    date = state.targetDate,
+                    mealType = state.targetMealType
                 )
-                updateDiaryEntryUseCase(entry)
-            } else if (editingBasketItemId != null) {
-                saveCurrentStateToBasket()
-                commitSingleBasketItemUseCase(editingBasketItemId!!)
+                commitSingleBasketItemUseCase(newBasketItemId).onFailure {
+                    // Not logged: take the staged copy back out, so a retry cannot leave a duplicate behind
+                    removeBasketItemUseCase(newBasketItemId)
+                }
             }
 
-            _uiState.update { it.copy(isSavedSuccess = true) }
-            onSuccess()
+            result.onSuccess {
+                _uiState.update { it.copy(isSavedSuccess = true) }
+                onSuccess()
+            }.onFailure { error ->
+                actionFailed(
+                    when {
+                        error is BasketItemMissingException -> error.message ?: "Nothing was logged."
+                        currentEditingEntryId != null -> "Couldn't save this entry. Please try again."
+                        currentBasketItemId != null -> "Couldn't log this food. It is still in your basket."
+                        else -> "Couldn't log this food. Please try again."
+                    }
+                )
+            }
         }
     }
     
     fun keepInBasket(onSuccess: () -> Unit) {
-        saveCurrentStateToBasket()
+        val state = _uiState.value
+        val food = state.food ?: return
+        val serving = state.selectedServing ?: return
+        if (!startAction()) return
+        val currentBasketItemId = editingBasketItemId
+        if (currentBasketItemId == null) {
+            addFoodToBasketUseCase(
+                food = food,
+                serving = serving,
+                quantity = state.enteredQuantity,
+                calculatedNutrition = state.calculatedNutrition,
+                date = state.targetDate,
+                mealType = state.targetMealType
+            )
+        } else {
+            if (getBasketItemsUseCase().value.none { it.id == currentBasketItemId }) {
+                actionFailed(BasketItemMissingException().message ?: "This item is no longer in the basket.")
+                return
+            }
+            saveCurrentStateToBasket()
+        }
         _uiState.update { it.copy(isSavedSuccess = true) }
+        onSuccess()
+    }
+
+    fun removeCurrentBasketItem(onSuccess: () -> Unit) {
+        val itemId = editingBasketItemId ?: return
+        if (!startAction(requiresValidQuantity = false)) return
+        removeBasketItemUseCase(itemId)
         onSuccess()
     }
 
     fun deleteEntry(onSuccess: () -> Unit) {
         val id = editingEntryId ?: return
+        if (!startAction(requiresValidQuantity = false)) return
         viewModelScope.launch {
-            deleteDiaryEntryUseCase(id)
-            onSuccess()
+            runCatching { deleteDiaryEntryUseCase(id) }
+                .onSuccess { onSuccess() }
+                .onFailure { actionFailed("Couldn't delete this entry. Please try again.") }
         }
     }
 
@@ -340,6 +484,9 @@ class FoodDetailViewModel(
         val state = _uiState.value
         val food = state.food ?: return
         val serving = state.selectedServing ?: return
+        // Only from a diary entry, and once: onCopied reloads this screen for the new basket item,
+        // which leaves diary-edit mode, so a second tap does nothing (BUG-011)
+        if (!isEditingDiary() || actionInFlight || state.quantityError != null) return
 
         val newBasketItemId = addFoodToBasketUseCase(
             food = food,
@@ -352,7 +499,10 @@ class FoodDetailViewModel(
         onCopied(food.id, state.targetMealType, state.targetDate.toEpochDay(), newBasketItemId)
     }
 
-    fun isEditingDiary(): Boolean = editingEntryId != null && editingEntryId!! > 0L
+    fun isEditingDiary(): Boolean {
+        val currentId = editingEntryId
+        return currentId != null && currentId > 0L
+    }
     fun isEditingBasket(): Boolean = editingBasketItemId != null
 }
 
@@ -370,6 +520,8 @@ fun FoodDetailScreen(
     val viewModel: FoodDetailViewModel = org.koin.androidx.compose.koinViewModel()
     val uiState by viewModel.uiState.collectAsState()
 
+    BackHandler(onBack = onNavigateBack)
+
     LaunchedEffect(foodId, entryId, basketItemId) {
         viewModel.loadFood(foodId, mealType, date, entryId, basketItemId)
     }
@@ -381,7 +533,68 @@ fun FoodDetailScreen(
         return
     }
 
-    val food = uiState.food ?: return
+    val food = uiState.food
+    if (food == null) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(AppColors.Background)
+        ) {
+            // Top Header Bar matching reference
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(AppColors.Primary)
+                    .padding(horizontal = AppSpacing.xs),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.IconButton(onClick = onNavigateBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = AppColors.TextPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.width(AppSpacing.xs))
+                Text(
+                    text = "Food Detail",
+                    style = AppTypography.Header2.copy(color = AppColors.TextPrimary)
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(AppSpacing.xl),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Error",
+                        tint = AppColors.AlertRed,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.md))
+                    Text(
+                        text = uiState.errorMessage ?: "Food item not found",
+                        style = AppTypography.Header3,
+                        color = AppColors.TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.lg))
+                    PrimaryButton(
+                        text = "Back to Search",
+                        onClick = onNavigateBack
+                    )
+                }
+            }
+        }
+        return
+    }
 
     Column(
         modifier = modifier
@@ -416,16 +629,6 @@ fun FoodDetailScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-        // Swipe to delete hint (mock)
-        Box(
-            modifier = Modifier.fillMaxWidth().background(AppColors.Surface).padding(vertical = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("swipe left to delete", style = AppTypography.Caption, color = AppColors.TextSecondary)
-        }
-        
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
         // Food Header Section
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm),
@@ -457,7 +660,7 @@ fun FoodDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .size(width = 48.dp, height = 36.dp)
-                                    .border(1.dp, AppColors.Divider, RoundedCornerShape(2.dp))
+                                    .border(1.dp, if (uiState.quantityError != null) AppColors.AlertRed else AppColors.Divider, RoundedCornerShape(2.dp))
                                     .padding(vertical = 6.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -471,7 +674,7 @@ fun FoodDetailScreen(
                     var dropdownExpanded by remember { mutableStateOf(false) }
                     Box(modifier = Modifier.weight(1f).clickable { dropdownExpanded = true }) {
                         Text(
-                            text = uiState.selectedServing?.description ?: "100 g",
+                            text = uiState.selectedServing?.let { food.servingLabel(it) } ?: "100 g",
                             style = AppTypography.Body1,
                             color = AppColors.TextPrimary
                         )
@@ -482,7 +685,7 @@ fun FoodDetailScreen(
                         ) {
                             uiState.availableServings.forEach { serving ->
                                 DropdownMenuItem(
-                                    text = { Text(serving.description, color = AppColors.TextPrimary) },
+                                    text = { Text(food.servingLabel(serving), color = AppColors.TextPrimary) },
                                     onClick = {
                                         viewModel.onServingSelected(serving)
                                         dropdownExpanded = false
@@ -501,6 +704,9 @@ fun FoodDetailScreen(
                     }
                 }
                 
+                uiState.quantityError?.let { error ->
+                    Text(error, style = AppTypography.Caption, color = AppColors.AlertRed)
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 // Food Name
                 Text(food.name, style = AppTypography.Body1, color = AppColors.TextPrimary)
@@ -689,7 +895,7 @@ fun FoodDetailScreen(
                         .clip(RoundedCornerShape(4.dp))
                         .background(AppColors.SurfaceAlt)
                         .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                        .clickable {
+                        .clickable(enabled = !uiState.isSaving && uiState.quantityError == null) {
                             viewModel.copyEntry { copiedFoodId, copiedMealType, copiedDateEpochDay, newBasketItemId ->
                                 viewModel.loadFood(
                                     foodId = copiedFoodId,
@@ -728,7 +934,7 @@ fun FoodDetailScreen(
                         .clip(RoundedCornerShape(4.dp))
                         .background(AppColors.SurfaceAlt)
                         .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                        .clickable {
+                        .clickable(enabled = !uiState.isSaving) {
                             viewModel.deleteEntry { onNavigateBack() }
                         },
                     contentAlignment = Alignment.Center
@@ -758,8 +964,18 @@ fun FoodDetailScreen(
 
         // Primary Action Button
         val logLabel = if (viewModel.isEditingDiary()) "SAVE ENTRY" else "Log 1 Food"
+        val canSave = !uiState.isSaving && uiState.quantityError == null
+        uiState.actionError?.let { error ->
+            Text(
+                error,
+                style = AppTypography.Body2,
+                color = AppColors.AlertRed,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs)
+            )
+        }
         Button(
             onClick = { viewModel.logFood { onNavigateBack() } },
+            enabled = canSave,
             modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = AppSpacing.xs),
             shape = RoundedCornerShape(2.dp),
             colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
@@ -769,7 +985,7 @@ fun FoodDetailScreen(
 
         if (!viewModel.isEditingDiary()) {
             Spacer(modifier = Modifier.height(AppSpacing.sm))
-            Box(modifier = Modifier.fillMaxWidth().clickable { viewModel.keepInBasket { onNavigateBack() } }, contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxWidth().clickable(enabled = canSave) { viewModel.keepInBasket { onNavigateBack() } }, contentAlignment = Alignment.Center) {
                 Text("Keep in Basket", style = AppTypography.Body1, color = AppColors.TextSecondary)
             }
         }
@@ -787,9 +1003,26 @@ fun FoodDetailScreen(
         
         Spacer(modifier = Modifier.height(AppSpacing.sm))
         
-        if (!viewModel.isEditingDiary()) {
-            Box(modifier = Modifier.fillMaxWidth().clickable { viewModel.deleteEntry { onNavigateBack() } }, contentAlignment = Alignment.Center) {
-                Text("Clear Basket", style = AppTypography.Body1, color = Color(0xFFE53935))
+        if (viewModel.isEditingBasket()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !uiState.isSaving) { viewModel.removeCurrentBasketItem { onNavigateBack() } }
+                    .padding(vertical = AppSpacing.sm),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Remove from Basket", style = AppTypography.Body1, color = Color(0xFFE53935))
+            }
+            Spacer(modifier = Modifier.height(AppSpacing.md))
+        } else if (viewModel.isEditingDiary()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !uiState.isSaving) { viewModel.deleteEntry { onNavigateBack() } }
+                    .padding(vertical = AppSpacing.sm),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Delete Entry", style = AppTypography.Body1, color = Color(0xFFE53935))
             }
             Spacer(modifier = Modifier.height(AppSpacing.md))
         }

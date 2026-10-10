@@ -77,7 +77,13 @@ data class FoodDetailUiState(
     val targetDate: LocalDate = LocalDate.now(),
     val isLoading: Boolean = false,
     val isSavedSuccess: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** Set while the quantity text is not a loggable amount; Log/Save stay disabled. */
+    val quantityError: String? = null,
+    /** True while a log/save/delete runs (and after it succeeds), so repeat taps are ignored. */
+    val isSaving: Boolean = false,
+    /** Why the last log/save/delete failed; the screen stays open so nothing is lost silently. */
+    val actionError: String? = null
 )
 
 /**

@@ -1,5 +1,6 @@
 package com.macrobase.app
 
+import androidx.compose.ui.geometry.Offset
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
@@ -10,9 +11,11 @@ import com.macrobase.app.domain.usecase.AddWeightEntryUseCase
 import com.macrobase.app.domain.usecase.DeleteWeightEntryUseCase
 import com.macrobase.app.domain.usecase.GetWeightForDateUseCase
 import com.macrobase.app.domain.usecase.GetWeightHistoryUseCase
+import com.macrobase.app.feature.weight.WeightGraphHelper
 import com.macrobase.app.feature.weight.WeightMetrics
 import com.macrobase.app.feature.weight.WeightTimeInterval
 import com.macrobase.app.feature.weight.WeightUiState
+import com.macrobase.app.feature.weight.formatWeightValue
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -204,6 +207,178 @@ class WeightTrackingUnitTests {
             thrown = true
         }
         assertTrue("Should reject > 500 kg", thrown)
+    }
+
+    // =========================================================================
+    // WEIGHT GRAPH POINT TAP & TOOLTIP INTERACTION TESTS
+    // =========================================================================
+
+    private val sampleGraphEntries = listOf(
+        WeightEntry(id = 1, date = LocalDate.of(2026, 6, 24), weightKg = 81.6),
+        WeightEntry(id = 2, date = LocalDate.of(2026, 7, 1), weightKg = 81.0),
+        WeightEntry(id = 3, date = LocalDate.of(2026, 7, 10), weightKg = 80.4)
+    )
+
+    private val sampleWeights = sampleGraphEntries.map { it.weightKg }
+    private val sampleOffsets = WeightGraphHelper.calculatePointOffsets(
+        entries = sampleGraphEntries,
+        weights = sampleWeights,
+        minW = 79.0,
+        rangeW = 4.0,
+        width = 400f,
+        height = 200f,
+        paddingLeft = 40f,
+        paddingRight = 16f,
+        paddingTop = 12f,
+        paddingBottom = 24f
+    )
+
+    @Test
+    fun weightGraph_tapFirstPoint_showsCorrectDateAndWeight() {
+        val firstPoint = sampleOffsets[0]
+        // Tap near first point (within 10px)
+        val tapOffset = Offset(firstPoint.x + 5f, firstPoint.y - 5f)
+        val selectedIdx = WeightGraphHelper.findNearestPointIndex(tapOffset, sampleOffsets, 32f)
+
+        assertNotNull(selectedIdx)
+        assertEquals(0, selectedIdx)
+
+        val entry = sampleGraphEntries[selectedIdx!!]
+        assertEquals("Jun 24", WeightGraphHelper.formatTooltipDate(entry.date))
+        assertEquals("81.6 kg", formatWeightValue(entry.weightKg, isImperial = false))
+    }
+
+    @Test
+    fun weightGraph_tapMiddlePoint_showsCorrectDateAndWeight() {
+        val midPoint = sampleOffsets[1]
+        val tapOffset = Offset(midPoint.x - 2f, midPoint.y + 3f)
+        val selectedIdx = WeightGraphHelper.findNearestPointIndex(tapOffset, sampleOffsets, 32f)
+
+        assertNotNull(selectedIdx)
+        assertEquals(1, selectedIdx)
+
+        val entry = sampleGraphEntries[selectedIdx!!]
+        assertEquals("Jul 1", WeightGraphHelper.formatTooltipDate(entry.date))
+        assertEquals("81.0 kg", formatWeightValue(entry.weightKg, isImperial = false))
+    }
+
+    @Test
+    fun weightGraph_tapLastPoint_showsCorrectDateAndWeight() {
+        val lastPoint = sampleOffsets[2]
+        val tapOffset = Offset(lastPoint.x + 4f, lastPoint.y + 4f)
+        val selectedIdx = WeightGraphHelper.findNearestPointIndex(tapOffset, sampleOffsets, 32f)
+
+        assertNotNull(selectedIdx)
+        assertEquals(2, selectedIdx)
+
+        val entry = sampleGraphEntries[selectedIdx!!]
+        assertEquals("Jul 10", WeightGraphHelper.formatTooltipDate(entry.date))
+        assertEquals("80.4 kg", formatWeightValue(entry.weightKg, isImperial = false))
+    }
+
+    @Test
+    fun weightGraph_tapOutsideThreshold_returnsNullAndDismissesTooltip() {
+        // Tap far away in empty space
+        val tapOffset = Offset(10f, 10f)
+        val selectedIdx = WeightGraphHelper.findNearestPointIndex(tapOffset, sampleOffsets, 32f)
+
+        assertNull("Tap far from any data point should return null", selectedIdx)
+    }
+
+    @Test
+    fun weightGraph_multipleClosePoints_selectsNearestPoint() {
+        val closePoints = listOf(
+            Offset(100f, 100f),
+            Offset(110f, 100f)
+        )
+        // Tap closer to first point
+        val tap1 = Offset(102f, 100f)
+        assertEquals(0, WeightGraphHelper.findNearestPointIndex(tap1, closePoints, 32f))
+
+        // Tap closer to second point
+        val tap2 = Offset(108f, 100f)
+        assertEquals(1, WeightGraphHelper.findNearestPointIndex(tap2, closePoints, 32f))
+    }
+
+    @Test
+    fun weightGraph_pointNearTop_positionsTooltipBelowPointWithoutClipping() {
+        // Point very close to top of canvas (y = 5)
+        val pointNearTop = Offset(200f, 5f)
+        val bounds = WeightGraphHelper.calculateTooltipBounds(
+            point = pointNearTop,
+            tooltipWidth = 70f,
+            tooltipHeight = 38f,
+            canvasWidth = 400f,
+            canvasHeight = 200f,
+            marginPx = 4f
+        )
+
+        // Must flip below point (topY > pointNearTop.y) and stay within bounds
+        assertTrue("Tooltip should flip below point when near top", bounds.topY >= pointNearTop.y)
+        assertTrue("Tooltip top must be within canvas", bounds.topY >= 4f)
+        assertTrue("Tooltip bottom must be within canvas", bounds.topY + bounds.height <= 200f)
+    }
+
+    @Test
+    fun weightGraph_pointNearLeft_clampsTooltipInsideLeftMargin() {
+        // Point on left edge (x = 5)
+        val pointNearLeft = Offset(5f, 100f)
+        val bounds = WeightGraphHelper.calculateTooltipBounds(
+            point = pointNearLeft,
+            tooltipWidth = 80f,
+            tooltipHeight = 38f,
+            canvasWidth = 400f,
+            canvasHeight = 200f,
+            marginPx = 4f
+        )
+
+        assertTrue("Tooltip left must not clip past left margin", bounds.leftX >= 4f)
+    }
+
+    @Test
+    fun weightGraph_pointNearRight_clampsTooltipInsideRightMargin() {
+        // Point on right edge (x = 395)
+        val pointNearRight = Offset(395f, 100f)
+        val bounds = WeightGraphHelper.calculateTooltipBounds(
+            point = pointNearRight,
+            tooltipWidth = 80f,
+            tooltipHeight = 38f,
+            canvasWidth = 400f,
+            canvasHeight = 200f,
+            marginPx = 4f
+        )
+
+        assertTrue("Tooltip right must not clip past right margin", bounds.leftX + bounds.width <= 396f)
+    }
+
+    @Test
+    fun weightGraph_emptyOrSinglePoint_doesNotCrash() {
+        val emptyOffsets = WeightGraphHelper.calculatePointOffsets(
+            entries = emptyList(),
+            weights = emptyList(),
+            minW = 50.0,
+            rangeW = 10.0,
+            width = 400f,
+            height = 200f,
+            paddingLeft = 40f,
+            paddingRight = 16f,
+            paddingTop = 12f,
+            paddingBottom = 24f
+        )
+        assertTrue(emptyOffsets.isEmpty())
+
+        val result = WeightGraphHelper.findNearestPointIndex(Offset(100f, 100f), emptyOffsets, 32f)
+        assertNull(result)
+    }
+
+    @Test
+    fun weightGraph_imperialUnitFormatting_showsPoundsCorrectly() {
+        val entry = WeightEntry(id = 1, date = LocalDate.of(2026, 6, 24), weightKg = 81.6)
+        val formattedMetric = formatWeightValue(entry.weightKg, isImperial = false)
+        val formattedImperial = formatWeightValue(entry.weightKg, isImperial = true)
+
+        assertEquals("81.6 kg", formattedMetric)
+        assertEquals("179.9 lb", formattedImperial)
     }
 }
 

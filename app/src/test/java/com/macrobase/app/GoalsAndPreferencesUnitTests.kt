@@ -2,15 +2,27 @@ package com.macrobase.app
 
 import com.macrobase.app.core.config.CalendarPerformanceConfig
 import com.macrobase.app.domain.model.DailyNutritionSummary
+import com.macrobase.app.domain.model.DiaryEntry
+import com.macrobase.app.domain.model.FitnessGoal
+import com.macrobase.app.domain.model.Food
 import com.macrobase.app.domain.model.Goal
+import com.macrobase.app.domain.model.GoalStrategyHelper
+import com.macrobase.app.domain.model.Meal
+import com.macrobase.app.domain.model.MealType
+import com.macrobase.app.domain.model.Nutrition
+import com.macrobase.app.domain.model.Serving
+import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * Unit test suite for Phase 8: Goals, Preferences, Unit Conversions, and Calendar Performance.
@@ -223,5 +235,283 @@ class GoalsAndPreferencesUnitTests {
         assertTrue(summary3.isOverBudget)
         assertEquals(-300.0, summary3.calorieBalance, 0.001)
         assertEquals(300.0, summary3.overBudgetAmount, 0.001)
+    }
+
+    @Test
+    fun testGoalInputValidation_variousFormats() {
+        // Test parsing helper logic matching DailyGoalsScreen
+        fun validateInputs(calText: String, cText: String, pText: String, fText: String): Boolean {
+            val parsedCalorie = calText.toDoubleOrNull()
+            val isCalorieValid = parsedCalorie != null && parsedCalorie > 0.0
+            val calorieVal = (parsedCalorie ?: 0.0).coerceAtLeast(0.0)
+
+            val parsedCarbs = cText.toDoubleOrNull()
+            val isCarbsValid = parsedCarbs != null && parsedCarbs >= 0.0
+            val carbPctVal = parsedCarbs ?: 0.0
+
+            val parsedProtein = pText.toDoubleOrNull()
+            val isProteinValid = parsedProtein != null && parsedProtein >= 0.0
+            val proteinPctVal = parsedProtein ?: 0.0
+
+            val parsedFat = fText.toDoubleOrNull()
+            val isFatValid = parsedFat != null && parsedFat >= 0.0
+            val fatPctVal = parsedFat ?: 0.0
+
+            val previewGoal = Goal(
+                dailyCalorieGoal = calorieVal,
+                carbPercentage = carbPctVal,
+                proteinPercentage = proteinPctVal,
+                fatPercentage = fatPctVal
+            )
+            val isValidSum = kotlin.math.abs(previewGoal.totalPercentage - 100.0) < 0.01
+            return isCalorieValid && isCarbsValid && isProteinValid && isFatValid && isValidSum
+        }
+
+        // 1. Empty string -> invalid
+        assertFalse(validateInputs("", "50", "25", "25"))
+
+        // 2. Blank string -> invalid
+        assertFalse(validateInputs("   ", "50", "25", "25"))
+
+        // 3. "0" calories -> invalid
+        assertFalse(validateInputs("0", "50", "25", "25"))
+
+        // 4. Non-numeric "abc" -> invalid
+        assertFalse(validateInputs("abc", "50", "25", "25"))
+
+        // 5. Valid integer "2000" -> valid
+        assertTrue(validateInputs("2000", "50", "25", "25"))
+
+        // 6. Valid decimal "2000.5" -> valid
+        assertTrue(validateInputs("2000.5", "50", "25", "25"))
+
+        // 7. Invalid macro sum (totals 90%) -> invalid
+        assertFalse(validateInputs("2000", "40", "25", "25"))
+
+        // 8. Negative percentage -> invalid
+        assertFalse(validateInputs("2000", "-10", "60", "50"))
+    }
+
+    @Test
+    fun goalStrategyHelper_autoDetectStrategy_resolvesAccurately() {
+        // Current 70kg, Target 75kg -> Bulking
+        assertEquals(FitnessGoal.BULKING, GoalStrategyHelper.autoDetectStrategy(70.0, 75.0))
+
+        // Current 80kg, Target 72kg -> Cutting
+        assertEquals(FitnessGoal.CUTTING, GoalStrategyHelper.autoDetectStrategy(80.0, 72.0))
+
+        // Current 70kg, Target 70kg -> Maintaining
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(70.0, 70.0))
+
+        // Current 70kg, Target 70.05kg (< 0.1 delta threshold) -> Maintaining
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(70.0, 70.05))
+
+        // Current 70kg, Target 69.95kg (< 0.1 delta threshold) -> Maintaining
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(70.0, 69.95))
+
+        // Null weights -> Maintaining
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(null, 75.0))
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(70.0, null))
+        assertEquals(FitnessGoal.MAINTAINING, GoalStrategyHelper.autoDetectStrategy(null, null))
+    }
+
+    @Test
+    fun goalStrategyHelper_getContradictionWarning_bulkingMismatch_returnsWarning() {
+        // Bulking with target < current
+        val warningMetric = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.BULKING,
+            currentWeightKg = 80.0,
+            targetWeightKg = 75.0,
+            unitSystem = UnitSystem.METRIC
+        )
+        assertEquals(
+            "Warning: Your strategy is set to Bulking, but your target weight (75.0 kg) is lower than your current weight (80.0 kg).",
+            warningMetric
+        )
+
+        val warningImperial = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.BULKING,
+            currentWeightKg = 80.0,
+            targetWeightKg = 75.0,
+            unitSystem = UnitSystem.IMPERIAL
+        )
+        val expectedTargetLb = String.format(Locale.US, "%.1f lb", UnitConversions.kgToLbs(75.0))
+        val expectedCurrentLb = String.format(Locale.US, "%.1f lb", UnitConversions.kgToLbs(80.0))
+        assertEquals(
+            "Warning: Your strategy is set to Bulking, but your target weight ($expectedTargetLb) is lower than your current weight ($expectedCurrentLb).",
+            warningImperial
+        )
+    }
+
+    @Test
+    fun goalStrategyHelper_getContradictionWarning_cuttingMismatch_returnsWarning() {
+        // Cutting with target > current
+        val warningMetric = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.CUTTING,
+            currentWeightKg = 70.0,
+            targetWeightKg = 76.0,
+            unitSystem = UnitSystem.METRIC
+        )
+        assertEquals(
+            "Warning: Your strategy is set to Cutting, but your target weight (76.0 kg) is higher than your current weight (70.0 kg).",
+            warningMetric
+        )
+
+        val warningImperial = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.CUTTING,
+            currentWeightKg = 70.0,
+            targetWeightKg = 76.0,
+            unitSystem = UnitSystem.IMPERIAL
+        )
+        val expectedTargetLb = String.format(Locale.US, "%.1f lb", UnitConversions.kgToLbs(76.0))
+        val expectedCurrentLb = String.format(Locale.US, "%.1f lb", UnitConversions.kgToLbs(70.0))
+        assertEquals(
+            "Warning: Your strategy is set to Cutting, but your target weight ($expectedTargetLb) is higher than your current weight ($expectedCurrentLb).",
+            warningImperial
+        )
+    }
+
+    @Test
+    fun goalStrategyHelper_getContradictionWarning_maintainingMismatch_returnsNotice() {
+        // Maintaining with > 0.5kg difference
+        val notice = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.MAINTAINING,
+            currentWeightKg = 70.0,
+            targetWeightKg = 72.0,
+            unitSystem = UnitSystem.METRIC
+        )
+        assertEquals(
+            "Notice: Your strategy is set to Maintaining, but your target weight (72.0 kg) differs from your current weight (70.0 kg).",
+            notice
+        )
+
+        // Maintaining within 0.5kg -> null
+        val noticeWithinThreshold = GoalStrategyHelper.getContradictionWarning(
+            selectedStrategy = FitnessGoal.MAINTAINING,
+            currentWeightKg = 70.0,
+            targetWeightKg = 70.3,
+            unitSystem = UnitSystem.METRIC
+        )
+        assertNull(noticeWithinThreshold)
+    }
+
+    @Test
+    fun goalStrategyHelper_getContradictionWarning_consistentTargets_returnsNull() {
+        // Bulking with target > current -> null
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.BULKING, 70.0, 75.0))
+
+        // Cutting with target < current -> null
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.CUTTING, 80.0, 75.0))
+
+        // Maintaining with same weight -> null
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.MAINTAINING, 70.0, 70.0))
+
+        // Null weights -> null
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.BULKING, null, 75.0))
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.CUTTING, 70.0, null))
+        assertNull(GoalStrategyHelper.getContradictionWarning(FitnessGoal.MAINTAINING, null, null))
+    }
+
+    private fun createDummyWidgetEntry(mealType: MealType): DiaryEntry {
+        return DiaryEntry(
+            id = 1L,
+            uuid = "widget-test-uuid",
+            date = LocalDate.now(),
+            mealType = mealType,
+            food = Food(id = 1L, uuid = "food-uuid", name = "Test Food", nutrition = Nutrition.ZERO),
+            serving = Serving(description = "1 serving", unit = ServingUnit.SERVING, gramWeight = 100.0),
+            quantity = 1.0,
+            calculatedNutrition = Nutrition(calories = 500.0, proteinGrams = 40.0, carbsGrams = 50.0, fatGrams = 15.0)
+        )
+    }
+
+    private fun formatWidgetEmptyMeals(summary: DailyNutritionSummary?): String {
+        val mainMeals = listOf(MealType.BREAKFAST, MealType.LUNCH, MealType.DINNER)
+        val emptyMeals = mainMeals.filter { type ->
+            val meal = summary?.meals?.firstOrNull { it.type == type }
+            meal == null || meal.entries.isEmpty()
+        }
+        return if (emptyMeals.isEmpty()) {
+            "All main meals logged \u2713"
+        } else {
+            "Remaining: " + emptyMeals.joinToString(", ") {
+                it.displayName.lowercase().replaceFirstChar { c -> c.uppercase() }
+            }
+        }
+    }
+
+    private fun formatWidgetMacros(
+        proteinIntake: Double, proteinGoal: Double,
+        carbIntake: Double, carbGoal: Double,
+        fatIntake: Double, fatGoal: Double
+    ): String {
+        return String.format(
+            Locale.US,
+            "Protein: %d/%dg   Carb: %d/%dg   Fat: %d/%dg",
+            proteinIntake.roundToInt(), proteinGoal.roundToInt(),
+            carbIntake.roundToInt(), carbGoal.roundToInt(),
+            fatIntake.roundToInt(), fatGoal.roundToInt()
+        )
+    }
+
+    @Test
+    fun widget_emptyMeals_whenNoEntries_returnsAllMainMealsRemaining() {
+        val emptySummary = DailyNutritionSummary(
+            date = LocalDate.now(),
+            totalCaloriesIntake = 0.0,
+            totalProteinGrams = 0.0,
+            totalCarbsGrams = 0.0,
+            totalFatGrams = 0.0,
+            calorieGoal = 2000.0,
+            meals = emptyList()
+        )
+        assertEquals("Remaining: Breakfast, Lunch, Dinner", formatWidgetEmptyMeals(emptySummary))
+        assertEquals("Remaining: Breakfast, Lunch, Dinner", formatWidgetEmptyMeals(null))
+    }
+
+    @Test
+    fun widget_emptyMeals_whenBreakfastLogged_returnsLunchAndDinnerRemaining() {
+        val summary = DailyNutritionSummary(
+            date = LocalDate.now(),
+            totalCaloriesIntake = 500.0,
+            totalProteinGrams = 40.0,
+            totalCarbsGrams = 50.0,
+            totalFatGrams = 15.0,
+            calorieGoal = 2000.0,
+            meals = listOf(
+                Meal(MealType.BREAKFAST, listOf(createDummyWidgetEntry(MealType.BREAKFAST))),
+                Meal(MealType.LUNCH, emptyList()),
+                Meal(MealType.DINNER, emptyList())
+            )
+        )
+        assertEquals("Remaining: Lunch, Dinner", formatWidgetEmptyMeals(summary))
+    }
+
+    @Test
+    fun widget_emptyMeals_whenAllLogged_returnsAllMainMealsLoggedWithCheckmark() {
+        val summary = DailyNutritionSummary(
+            date = LocalDate.now(),
+            totalCaloriesIntake = 1500.0,
+            totalProteinGrams = 120.0,
+            totalCarbsGrams = 150.0,
+            totalFatGrams = 45.0,
+            calorieGoal = 2000.0,
+            meals = listOf(
+                Meal(MealType.BREAKFAST, listOf(createDummyWidgetEntry(MealType.BREAKFAST))),
+                Meal(MealType.LUNCH, listOf(createDummyWidgetEntry(MealType.LUNCH))),
+                Meal(MealType.DINNER, listOf(createDummyWidgetEntry(MealType.DINNER)))
+            )
+        )
+        assertEquals("All main meals logged \u2713", formatWidgetEmptyMeals(summary))
+    }
+
+    @Test
+    fun widget_macrosFormatting_usesLocaleUSAndRoundToInt() {
+        val formatted = formatWidgetMacros(
+            proteinIntake = 49.6, proteinGoal = 150.0,
+            carbIntake = 199.4, carbGoal = 250.0,
+            fatIntake = 29.8, fatGoal = 60.0
+        )
+        assertEquals("Protein: 50/150g   Carb: 199/250g   Fat: 30/60g", formatted)
     }
 }

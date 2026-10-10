@@ -1,5 +1,6 @@
 package com.macrobase.app.data.repository
 
+import kotlin.math.roundToInt
 import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.database.entity.RecipeEntity
 import com.macrobase.app.data.database.entity.WaterLogEntity
@@ -26,7 +27,9 @@ import com.macrobase.app.domain.repository.WeightRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 
@@ -40,7 +43,7 @@ class RecipeRepositoryImpl(
             uuid = recipe.uuid,
             name = recipe.name,
             servingsProduced = recipe.servingsProduced,
-            ingredientsJson = "[]",
+            ingredientsJson = RecipeIngredientsJson.encode(recipe.ingredients),
             caloriesPerServing = recipe.nutritionPerServing.calories,
             proteinPerServing = recipe.nutritionPerServing.proteinGrams,
             carbsPerServing = recipe.nutritionPerServing.carbsGrams,
@@ -59,30 +62,34 @@ class RecipeRepositoryImpl(
     }
 
     override fun observeRecipes(): Flow<List<Recipe>> {
-        return userDatabase.recipeDao().observeAllRecipes().map { list ->
-            list.map {
-                Recipe(
-                    id = it.id,
-                    uuid = it.uuid,
-                    name = it.name,
-                    servingsProduced = it.servingsProduced,
-                    createdAt = Instant.ofEpochMilli(it.createdAt)
-                )
-            }
-        }
+        // Decoding ingredient JSON stays off the collector's (main) thread
+        return userDatabase.recipeDao().observeAllRecipes()
+            .map { list -> list.map { it.toDomain() } }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
     }
 
     override suspend fun getRecipes(): List<Recipe> {
-        return userDatabase.recipeDao().getAllRecipes().map {
-            Recipe(
-                id = it.id,
-                uuid = it.uuid,
-                name = it.name,
-                servingsProduced = it.servingsProduced,
-                createdAt = Instant.ofEpochMilli(it.createdAt)
-            )
-        }
+        return userDatabase.recipeDao().getAllRecipes().map { it.toDomain() }
     }
+
+    /**
+     * Ingredients come from ingredientsJson. Recipes saved before ingredients were persisted
+     * have "[]" there, so the stored per-serving columns keep them loggable.
+     */
+    private fun RecipeEntity.toDomain() = Recipe(
+        id = id,
+        uuid = uuid,
+        name = name,
+        servingsProduced = servingsProduced,
+        ingredients = RecipeIngredientsJson.decode(ingredientsJson) ?: emptyList(),
+        createdAt = Instant.ofEpochMilli(createdAt),
+        savedNutritionPerServing = Nutrition(
+            calories = caloriesPerServing,
+            proteinGrams = proteinPerServing,
+            carbsGrams = carbsPerServing,
+            fatGrams = fatPerServing
+        )
+    )
 
     override suspend fun getRecipeById(recipeId: Long): Recipe? {
         return getRecipes().firstOrNull { it.id == recipeId }
@@ -225,7 +232,8 @@ class WaterRepositoryImpl(
 class StatisticsRepositoryImpl(
     private val diaryRepository: DiaryRepository,
     private val goalsRepository: GoalsRepository,
-    private val weightRepository: WeightRepository
+    private val weightRepository: WeightRepository,
+    private val clock: Clock = com.macrobase.app.core.util.DeviceClock
 ) : StatisticsRepository {
 
     override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
@@ -234,7 +242,7 @@ class StatisticsRepositoryImpl(
             goalsRepository.observeGoals()
         ) { aggregations, goals ->
             val aggMap = aggregations.associateBy { it.date }
-            val today = LocalDate.now()
+            val today = LocalDate.now(clock)
             val allCells = mutableListOf<com.macrobase.app.domain.model.HeatmapCellData>()
 
             var curr = startDate
@@ -249,7 +257,7 @@ class StatisticsRepositoryImpl(
                 } else {
                     com.macrobase.app.core.config.CalendarPerformanceConfig.evaluatePerformance(cals, goalCals)
                 }
-                val pct = if (goalCals > 0.0) ((cals / goalCals) * 100.0).toInt() else 0
+                val pct = if (goalCals > 0.0) ((cals / goalCals) * 100.0).roundToInt() else 0
 
                 allCells.add(
                     com.macrobase.app.domain.model.HeatmapCellData(

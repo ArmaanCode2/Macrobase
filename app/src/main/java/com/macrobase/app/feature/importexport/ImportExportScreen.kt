@@ -2,6 +2,7 @@ package com.macrobase.app.feature.importexport
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -56,17 +57,22 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.components.PrimaryButton
 import com.macrobase.app.domain.model.BackupPreview
+import com.macrobase.app.domain.model.BackupRecordCountsDto
 import com.macrobase.app.domain.model.ImportMode
 import com.macrobase.app.domain.model.ImportResult
 import com.macrobase.app.domain.model.MacroBaseBackupData
 import com.macrobase.app.domain.usecase.ExportUserDataUseCase
 import com.macrobase.app.domain.usecase.ImportUserDataUseCase
 import com.macrobase.app.domain.usecase.ValidateBackupUseCase
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.time.LocalDate
@@ -92,17 +98,29 @@ class ImportExportViewModel(
     private val _uiState = MutableStateFlow(ImportExportUiState())
     val uiState: StateFlow<ImportExportUiState> = _uiState.asStateFlow()
 
-    fun exportBackup(outputStreamSupplier: () -> OutputStream?) {
+    /**
+     * The archive is built in memory first, so a failure while reading the data never touches
+     * the chosen file (it may be an older backup the user picked to replace). Only a file this
+     * export started writing is removed with [discardOutput] when the write fails, so no
+     * half-written archive is left to be restored later (BUG-017). [discardOutput] returns
+     * whether the file was deleted.
+     */
+    fun exportBackup(outputStreamSupplier: () -> OutputStream?, discardOutput: () -> Boolean = { false }) {
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true, exportSuccessMessage = null, exportErrorMessage = null) }
+            var writeStarted = false
             try {
+                val archive = ByteArrayOutputStream().also { exportUserDataUseCase.writeBackupArchive(it) }.toByteArray()
                 val stream = outputStreamSupplier()
                 if (stream == null) {
                     _uiState.update { it.copy(isExporting = false, exportErrorMessage = "Failed to open destination file.") }
                     return@launch
                 }
-                stream.use { out ->
-                    exportUserDataUseCase.writeBackupArchive(out)
+                withContext(Dispatchers.IO) {
+                    stream.use { out ->
+                        writeStarted = true
+                        out.write(archive)
+                    }
                 }
                 _uiState.update {
                     it.copy(
@@ -110,11 +128,16 @@ class ImportExportViewModel(
                         exportSuccessMessage = "Backup exported successfully!"
                     )
                 }
+            } catch (e: CancellationException) {
+                // Leaving the screen is not a failure; an unfinished file fails validation on restore
+                throw e
             } catch (e: Exception) {
+                val deleted = writeStarted && discardOutput()
+                val note = if (deleted) " The incomplete file was deleted." else ""
                 _uiState.update {
                     it.copy(
                         isExporting = false,
-                        exportErrorMessage = "Export failed: ${e.message ?: "Unknown error"}"
+                        exportErrorMessage = "Export failed: ${e.message ?: "Unknown error"}.$note"
                     )
                 }
             }
@@ -132,12 +155,22 @@ class ImportExportViewModel(
                 }
                 val validation = stream.use { validateBackupUseCase(it) }
                 if (validation.isValid && validation.backupData != null && validation.manifest != null) {
+                    val data = validation.backupData
                     val preview = BackupPreview(
                         exportedAt = validation.manifest.exportedAt,
                         appVersion = validation.manifest.appVersion,
                         backupVersion = validation.manifest.backupVersion,
-                        counts = validation.manifest.counts,
-                        backupData = validation.backupData
+                        // What will actually be restored, not what the manifest claims (BUG-017)
+                        counts = BackupRecordCountsDto(
+                            diaryEntries = data.diaryEntries.size,
+                            customFoods = data.customFoods.size,
+                            recipes = data.recipes.size,
+                            weightEntries = data.weightEntries.size,
+                            waterEntries = data.waterEntries.size,
+                            goals = if (data.goals != null) 1 else 0,
+                            preferences = if (data.preferences != null) 1 else 0
+                        ),
+                        backupData = data
                     )
                     _uiState.update { it.copy(isValidating = false, previewData = preview) }
                 } else {
@@ -207,9 +240,15 @@ fun ImportExportScreen(
         contract = ActivityResultContracts.CreateDocument(PortabilityConfig.BACKUP_MIME_TYPE)
     ) { uri: Uri? ->
         if (uri != null) {
-            viewModel.exportBackup {
-                context.contentResolver.openOutputStream(uri)
-            }
+            viewModel.exportBackup(
+                // "wt" truncates, so replacing a larger older backup leaves no stale bytes behind;
+                // providers without "wt" get the default mode, as before
+                outputStreamSupplier = {
+                    runCatching { context.contentResolver.openOutputStream(uri, "wt") }.getOrNull()
+                        ?: context.contentResolver.openOutputStream(uri)
+                },
+                discardOutput = { runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }.getOrDefault(false) }
+            )
         }
     }
 
@@ -307,6 +346,13 @@ fun ImportExportScreen(
                         color = AppColors.TextMuted
                     )
                 }
+                Spacer(modifier = Modifier.height(AppSpacing.xs))
+                Text(
+                    // Auto Backup excludes MacroBase data from Google's cloud (BUG-018)
+                    text = "Android's Google cloud backup does not include MacroBase data. Export a backup file to keep a copy.",
+                    style = AppTypography.Caption,
+                    color = AppColors.TextMuted
+                )
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))
 
@@ -322,7 +368,7 @@ fun ImportExportScreen(
                     }
                 } else {
                     PrimaryButton(
-                        text = "📤 Export Backup File",
+                        text = "\uD83D\uDCE4 Export Backup File",
                         onClick = {
                             val defaultName = "${PortabilityConfig.BACKUP_ZIP_FILENAME_PREFIX}${LocalDate.now()}.zip"
                             exportLauncher.launch(defaultName)
@@ -364,7 +410,7 @@ fun ImportExportScreen(
                     }
                 } else {
                     PrimaryButton(
-                        text = "📥 Select Backup File to Restore",
+                        text = "\uD83D\uDCE5 Select Backup File to Restore",
                         onClick = {
                             importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                         }
@@ -419,7 +465,7 @@ fun ImportExportScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("➕ Merge with Existing Data", color = AppColors.Background)
+                        Text("\u2795 Merge with Existing Data", color = AppColors.Background)
                     }
                     Spacer(modifier = Modifier.height(AppSpacing.xs))
                     Button(
@@ -427,7 +473,7 @@ fun ImportExportScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = AppColors.AlertRed),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("⚠️ Overwrite Entire Database", color = AppColors.TextPrimary)
+                        Text("\u26A0\uFE0F Overwrite Entire Database", color = AppColors.TextPrimary)
                     }
                     Spacer(modifier = Modifier.height(AppSpacing.xs))
                     OutlinedButton(

@@ -26,6 +26,13 @@ data class DiaryEntryEntity(
     val loggedProtein: Double,
     val loggedCarbs: Double,
     val loggedFat: Double,
+    // Secondary nutrients: null when the food did not state them, never coerced to 0.0 (BUG-037)
+    val loggedFiber: Double? = null,
+    val loggedSugar: Double? = null,
+    val loggedSodium: Double? = null,
+    val loggedSaturatedFat: Double? = null,
+    val loggedTransFat: Double? = null,
+    val loggedCholesterol: Double? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 

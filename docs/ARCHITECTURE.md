@@ -60,7 +60,7 @@
 MacroBase leverages **Koin** for dependency injection. All modules are declared in `app/src/main/java/com/macrobase/app/core/di/DiModules.kt`:
 
 1. **`databaseModule`**:
-   - `UserDatabase`: Built via `Room.databaseBuilder` with `DatabaseConfig.USER_DATABASE_NAME`, registering `UserDatabase.MIGRATION_1_2` and `UserDatabase.MIGRATION_2_3`.
+   - `UserDatabase`: Built by `UserDatabase.create()` with `DatabaseConfig.USER_DATABASE_NAME`, registering `UserDatabase.ALL_MIGRATIONS` (`MIGRATION_1_2`, `MIGRATION_2_3`) and no destructive fallback.
    - DAOs: `diaryDao()`, `customFoodDao()`, `recipeDao()`, `weightDao()`, `waterDao()`.
    - Static Asset DB: `BuiltInDatabaseManager(get())` and `LocalFoodDatabaseProvider(get())` (`FoodDataProvider`).
 2. **`repositoryModule`**:
@@ -92,9 +92,12 @@ loggedCalories REAL NOT NULL,
 loggedProtein REAL NOT NULL,
 loggedCarbs REAL NOT NULL,
 loggedFat REAL NOT NULL,
-loggedFiber REAL NOT NULL DEFAULT 0.0,
-loggedSugar REAL NOT NULL DEFAULT 0.0,
-loggedSodium REAL NOT NULL DEFAULT 0.0,
+loggedFiber REAL,          -- null = not stated, 0.0 = none
+loggedSugar REAL,
+loggedSodium REAL,
+loggedSaturatedFat REAL,
+loggedTransFat REAL,
+loggedCholesterol REAL,
 servingDescription TEXT NOT NULL,
 gramWeight REAL NOT NULL,
 userQuantity REAL NOT NULL

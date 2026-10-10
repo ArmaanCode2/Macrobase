@@ -20,8 +20,8 @@ class LocalFoodDatabaseProvider(
     private val databaseManager: BuiltInDatabaseManager
 ) : FoodDataProvider {
 
-    override val providerId: String = "BUILT_IN_USDA"
-    override val displayName: String = "USDA Food Catalog"
+    override val providerId: String = "BUILT_IN_INDIAN"
+    override val displayName: String = "Indian Food Catalog"
     override val isLocal: Boolean = true
 
     override suspend fun searchFoods(query: String, limit: Int): List<Food> = withContext(Dispatchers.IO) {
@@ -62,6 +62,7 @@ class LocalFoodDatabaseProvider(
             android.util.Log.d("LocalFoodDb", "Query '$trimmed' (FTS '$ftsQuery') matched ${foods.size} foods")
         } catch (e: Exception) {
             android.util.Log.w("LocalFoodDb", "FTS5 search unavailable on OS SQLite, falling back to indexed LIKE search: ${e.message}")
+            val safeLike = escapeLikeWildcards(trimmed)
             val fallbackSql = """
                 SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
                        f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
@@ -72,12 +73,12 @@ class LocalFoodDatabaseProvider(
                        c.name as category_name
                 FROM foods f
                 LEFT JOIN categories c ON f.category_id = c.id
-                WHERE (f.normalized_name LIKE ? OR f.name LIKE ?) AND f.is_active = 1
-                ORDER BY CASE WHEN f.normalized_name LIKE ? THEN 0 ELSE 1 END, f.name ASC
+                WHERE (f.normalized_name LIKE ? ESCAPE '/' OR f.name LIKE ? ESCAPE '/') AND f.is_active = 1
+                ORDER BY CASE WHEN f.normalized_name LIKE ? ESCAPE '/' THEN 0 ELSE 1 END, f.name ASC
                 LIMIT ?
             """.trimIndent()
             try {
-                db.rawQuery(fallbackSql, arrayOf("%$trimmed%", "%$trimmed%", "$trimmed%", limit.toString())).use { cursor ->
+                db.rawQuery(fallbackSql, arrayOf("%$safeLike%", "%$safeLike%", "$safeLike%", limit.toString())).use { cursor ->
                     while (cursor.moveToNext()) {
                         val food = cursor.extractFoodWithoutServings()
                         foods.add(food)
@@ -101,33 +102,38 @@ class LocalFoodDatabaseProvider(
     }
 
     override suspend fun getFoodById(id: Long): Food? = withContext(Dispatchers.IO) {
-        val db = databaseManager.getDatabase()
+        try {
+            val db = databaseManager.getDatabase()
 
-        val sql = """
-            SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
-                   f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
-                   f.saturated_fat, f.trans_fat, f.cholesterol, f.sodium,
-                   f.potassium, f.calcium, f.iron, f.magnesium, f.phosphorus, f.zinc,
-                   f.vitamin_a_rae, f.vitamin_c, f.vitamin_d_mcg, f.vitamin_e, f.vitamin_k,
-                   f.vitamin_b6, f.vitamin_b12, f.folate_b9, f.water,
-                   c.name as category_name
-            FROM foods f
-            LEFT JOIN categories c ON f.category_id = c.id
-            WHERE f.id = ? AND f.is_active = 1
-            LIMIT 1
-        """.trimIndent()
+            val sql = """
+                SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
+                       f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
+                       f.saturated_fat, f.trans_fat, f.cholesterol, f.sodium,
+                       f.potassium, f.calcium, f.iron, f.magnesium, f.phosphorus, f.zinc,
+                       f.vitamin_a_rae, f.vitamin_c, f.vitamin_d_mcg, f.vitamin_e, f.vitamin_k,
+                       f.vitamin_b6, f.vitamin_b12, f.folate_b9, f.water,
+                       c.name as category_name
+                FROM foods f
+                LEFT JOIN categories c ON f.category_id = c.id
+                WHERE f.id = ? AND (f.is_active = 1 OR f.is_active IS NULL)
+                LIMIT 1
+            """.trimIndent()
 
-        var food: Food? = null
-        db.rawQuery(sql, arrayOf(id.toString())).use { cursor ->
-            if (cursor.moveToFirst()) {
-                food = cursor.extractFoodWithoutServings()
+            var food: Food? = null
+            db.rawQuery(sql, arrayOf(id.toString())).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    food = cursor.extractFoodWithoutServings()
+                }
             }
+
+            val baseFood = food ?: return@withContext null
+            val servings = getFoodServings(id)
+
+            baseFood.copy(servings = servings)
+        } catch (e: Exception) {
+            android.util.Log.e("LocalFoodDb", "Error fetching food by id $id: ${e.message}", e)
+            null
         }
-
-        val baseFood = food ?: return@withContext null
-        val servings = getFoodServings(id)
-
-        baseFood.copy(servings = servings)
     }
 
     override suspend fun getFoodByBarcode(barcode: String): Food? {
@@ -136,23 +142,28 @@ class LocalFoodDatabaseProvider(
     }
 
     override suspend fun getFoodServings(foodId: Long): List<Serving> = withContext(Dispatchers.IO) {
-        val db = databaseManager.getDatabase()
-        val servings = mutableListOf<Serving>()
+        try {
+            val db = databaseManager.getDatabase()
+            val servings = mutableListOf<Serving>()
 
-        val sql = """
-            SELECT id, food_id, description, unit_type, quantity, gram_weight, is_default, sequence
-            FROM servings
-            WHERE food_id = ?
-            ORDER BY sequence ASC, id ASC
-        """.trimIndent()
+            val sql = """
+                SELECT id, food_id, description, unit_type, quantity, gram_weight, is_default, sequence
+                FROM servings
+                WHERE food_id = ?
+                ORDER BY sequence ASC, id ASC
+            """.trimIndent()
 
-        db.rawQuery(sql, arrayOf(foodId.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                servings.add(cursor.extractServing())
+            db.rawQuery(sql, arrayOf(foodId.toString())).use { cursor ->
+                while (cursor.moveToNext()) {
+                    servings.add(cursor.extractServing())
+                }
             }
-        }
 
-        servings
+            servings
+        } catch (e: Exception) {
+            android.util.Log.e("LocalFoodDb", "Error fetching servings for foodId $foodId: ${e.message}", e)
+            emptyList()
+        }
     }
 
     private fun loadServingsForFoodIds(db: SQLiteDatabase, foodIds: List<Long>): Map<Long, List<Serving>> {
@@ -238,16 +249,19 @@ class LocalFoodDatabaseProvider(
         val id = getLong(getColumnIndexOrThrow("id"))
         val description = getStringOrNull("description") ?: "1 serving"
         val unitTypeStr = getStringOrNull("unit_type")
-        val quantity = getDouble(getColumnIndexOrThrow("quantity"))
+        val rawQuantity = getDouble(getColumnIndexOrThrow("quantity"))
         val gramWeight = getDouble(getColumnIndexOrThrow("gram_weight"))
         val isDefault = getInt(getColumnIndexOrThrow("is_default")) == 1
         val sequence = getInt(getColumnIndexOrThrow("sequence"))
+
+        // 1 serving of "100 g" represents 1.0 portion unit weighing 100.0 grams
+        val normalizedQuantity = if (rawQuantity == 100.0 && gramWeight == 100.0) 1.0 else rawQuantity
 
         return Serving(
             id = id,
             description = description,
             unit = ServingUnit.fromString(unitTypeStr),
-            quantity = quantity,
+            quantity = normalizedQuantity,
             gramWeight = gramWeight,
             isDefault = isDefault,
             sequence = sequence
@@ -278,5 +292,11 @@ class LocalFoodDatabaseProvider(
         if (tokens.isEmpty()) return ""
 
         return tokens.joinToString(" ") { "$it*" }
+    }
+
+    private fun escapeLikeWildcards(input: String): String {
+        return input.replace("/", "//")
+                    .replace("%", "/%")
+                    .replace("_", "/_")
     }
 }

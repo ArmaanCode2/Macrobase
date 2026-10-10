@@ -69,6 +69,8 @@ import com.macrobase.app.core.designsystem.components.EmptyStateCard
 import com.macrobase.app.core.designsystem.components.PrimaryButton
 import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.Food
+import com.macrobase.app.feature.detail.formatQuantityForInput
+import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.Nutrition
 import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.model.scanner.NutritionLabelDraft
@@ -158,6 +160,9 @@ class CustomFoodsViewModel(
         iron: Double? = null,
         onComplete: () -> Unit
     ) {
+        // A second Save tap must not create the food twice (each call gets a new uuid, BUG-011)
+        if (saveInFlight) return
+        saveInFlight = true
         viewModelScope.launch {
             val customFood = CustomFood(
                 id = id,
@@ -180,10 +185,20 @@ class CustomFoodsViewModel(
                     ironMg = iron
                 )
             )
-            foodRepository.saveCustomFood(customFood)
+            try {
+                foodRepository.saveCustomFood(customFood)
+            } catch (e: Exception) {
+                saveInFlight = false
+                throw e
+            }
             onComplete()
         }
     }
+
+    private var saveInFlight = false
+
+    /** Loads the stored custom food, including fields the list model does not carry. */
+    suspend fun getCustomFood(id: Long): CustomFood? = foodRepository.getCustomFood(id)
 
     fun deleteCustomFood(id: Long, onComplete: () -> Unit) {
         viewModelScope.launch {
@@ -379,7 +394,7 @@ fun CustomFoodRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val sub = food.brand ?: food.defaultServing?.description ?: "1 serving"
+            val sub = food.listSubtitle
             Text(
                 text = sub,
                 style = AppTypography.Body2,
@@ -391,7 +406,7 @@ fun CustomFoodRow(
 
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                text = "${food.nutrition.calories.toInt()}",
+                text = "${food.nutrition.calories.roundToInt()}",
                 style = AppTypography.ValueMd,
                 color = AppColors.CalorieText
             )
@@ -419,7 +434,7 @@ fun EditCustomFoodScreen(
     onSaveSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var existingFood by remember { mutableStateOf<Food?>(null) }
+    var existingFood by remember { mutableStateOf<CustomFood?>(null) }
     var name by remember { mutableStateOf("") }
     var brand by remember { mutableStateOf("") }
     var servingSize by remember { mutableStateOf("1") }
@@ -434,9 +449,11 @@ fun EditCustomFoodScreen(
     var sodium by remember { mutableStateOf("") }
 
     val scannedDraft by viewModel.scannedDraft.collectAsState()
+    var activeDraftForBanner by remember { mutableStateOf<NutritionLabelDraft?>(null) }
 
     LaunchedEffect(scannedDraft) {
         scannedDraft?.let { draft ->
+            activeDraftForBanner = draft
             if (!draft.foodName.isNullOrBlank()) name = draft.foodName
             if (!draft.brand.isNullOrBlank()) brand = draft.brand
             draft.servingSize?.let { servingSize = if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }
@@ -452,27 +469,25 @@ fun EditCustomFoodScreen(
         }
     }
 
-    val customFoodsList by viewModel.customFoods.collectAsState()
-
-    LaunchedEffect(foodId, customFoodsList) {
+    LaunchedEffect(foodId) {
         if (foodId > 0L && existingFood == null) {
-            val found = customFoodsList.firstOrNull { it.id == foodId }
+            val found = viewModel.getCustomFood(foodId)
             if (found != null) {
+                // Prefill the stored values exactly; saving unchanged must not alter the food
+                val nutrition = found.nutritionPerServing
                 existingFood = found
                 name = found.name
                 brand = found.brand ?: ""
-                calories = found.nutrition.calories.toInt().toString()
-                protein = found.nutrition.proteinGrams.toString()
-                carbs = found.nutrition.carbsGrams.toString()
-                fat = found.nutrition.fatGrams.toString()
-                fiber = found.nutrition.fiberGrams?.toString() ?: ""
-                sugar = found.nutrition.sugarGrams?.toString() ?: ""
-                sodium = found.nutrition.sodiumMg?.toString() ?: ""
-                found.defaultServing?.let {
-                    servingSize = if (it.quantity % 1.0 == 0.0) it.quantity.toInt().toString() else it.quantity.toString()
-                    selectedServingUnit = it.unit
-                    customUnitName = it.customUnitName ?: ""
-                }
+                servingSize = formatQuantityForInput(found.servingSize)
+                selectedServingUnit = found.servingUnit
+                customUnitName = found.customUnitName ?: ""
+                calories = formatQuantityForInput(nutrition.calories)
+                protein = formatQuantityForInput(nutrition.proteinGrams)
+                carbs = formatQuantityForInput(nutrition.carbsGrams)
+                fat = formatQuantityForInput(nutrition.fatGrams)
+                fiber = nutrition.fiberGrams?.let { formatQuantityForInput(it) } ?: ""
+                sugar = nutrition.sugarGrams?.let { formatQuantityForInput(it) } ?: ""
+                sodium = nutrition.sodiumMg?.let { formatQuantityForInput(it) } ?: ""
             }
         }
     }
@@ -508,27 +523,47 @@ fun EditCustomFoodScreen(
         }
 
         // Detected values review banner
-        if (scannedDraft != null && !isEditing) {
-            val draft = scannedDraft!!
+        if (activeDraftForBanner != null && !isEditing) {
+            val draft = activeDraftForBanner!!
             Surface(
                 color = AppColors.SurfaceAlt,
                 shape = AppShapes.Card,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(AppSpacing.md)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.QrCodeScanner,
-                            contentDescription = null,
-                            tint = AppColors.CalorieText,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.xs))
-                        Text(
-                            text = "Values detected (${draft.detectedBasis.displayName})",
-                            style = AppTypography.Header3,
-                            color = AppColors.CalorieText
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = null,
+                                tint = AppColors.CalorieText,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(AppSpacing.xs))
+                            Text(
+                                text = "Values detected (${draft.detectedBasis.displayName})",
+                                style = AppTypography.Header3,
+                                color = AppColors.CalorieText
+                            )
+                        }
+                        IconButton(
+                            onClick = { activeDraftForBanner = null },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = AppColors.TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(AppSpacing.xs))
                     Text(
@@ -536,11 +571,19 @@ fun EditCustomFoodScreen(
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
+                    if (!draft.normalizationNote.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(AppSpacing.xs))
+                        Text(
+                            text = draft.normalizationNote!!,
+                            style = AppTypography.Caption,
+                            color = AppColors.Primary
+                        )
+                    }
                     if (draft.warnings.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(AppSpacing.xs))
                         draft.warnings.forEach { warning ->
                             Text(
-                                text = "• $warning",
+                                text = "\u2022 $warning",
                                 style = AppTypography.Caption,
                                 color = AppColors.MacroCarbs
                             )
@@ -730,6 +773,10 @@ fun EditCustomFoodScreen(
                     fiber = fiber.toDoubleOrNull(),
                     sugar = sugar.toDoubleOrNull(),
                     sodium = sodium.toDoubleOrNull(),
+                    // Not editable in this form: carry the stored values through
+                    potassium = existingFood?.nutritionPerServing?.potassiumMg,
+                    calcium = existingFood?.nutritionPerServing?.calciumMg,
+                    iron = existingFood?.nutritionPerServing?.ironMg,
                     onComplete = {
                         viewModel.clearScannedDraft()
                         onSaveSuccess()

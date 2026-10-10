@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -20,8 +21,6 @@ import com.macrobase.app.feature.dashboard.HomeScreen
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import com.macrobase.app.feature.detail.FoodDetailScreen
 import com.macrobase.app.feature.detail.FoodDetailViewModel
-import com.macrobase.app.feature.goals.DailyGoalsScreen
-import com.macrobase.app.feature.goals.DailyGoalsViewModel
 import com.macrobase.app.feature.importexport.ImportExportScreen
 import com.macrobase.app.feature.importexport.ImportExportViewModel
 import com.macrobase.app.feature.preferences.PreferencesScreen
@@ -41,6 +40,14 @@ import com.macrobase.app.feature.weight.WeightScreen
 import com.macrobase.app.feature.weight.WeightViewModel
 import org.koin.androidx.compose.koinViewModel
 import java.time.LocalDate
+
+/**
+ * Pops [entry] only while it is the screen on top. A Back tap during a save, or a save finishing
+ * after Back was tapped, would otherwise pop the screen underneath as well (BUG-011).
+ */
+private fun NavHostController.popIfCurrent(entry: NavBackStackEntry) {
+    if (currentBackStackEntry?.id == entry.id) popBackStack()
+}
 
 @Composable
 fun NavGraph(
@@ -167,13 +174,7 @@ fun NavGraph(
                 date = targetDate,
                 entryId = entryIdArg,
                 basketItemId = basketItemIdArg,
-                onNavigateBack = {
-                    if (basketItemIdArg != null) {
-                        navController.popBackStack()
-                    } else {
-                        navController.popBackStack(Screen.Home.route, inclusive = false)
-                    }
-                }
+                onNavigateBack = { navController.popIfCurrent(backStackEntry) }
             )
         }
 
@@ -299,7 +300,7 @@ fun NavGraph(
                 onScanLabelClick = {
                     navController.navigate(Screen.NutritionLabelScanner.route)
                 },
-                onSaveSuccess = { navController.popBackStack() }
+                onSaveSuccess = { navController.popIfCurrent(backStackEntry) }
             )
         }
 
@@ -323,7 +324,12 @@ fun NavGraph(
                 viewModel = viewModel,
                 onCreateClick = { navController.navigate(Screen.EditRecipe.createRoute()) },
                 onEditClick = { recipeId -> navController.navigate(Screen.EditRecipe.createRoute(recipeId)) },
-                onLogSuccess = { navController.navigate(Screen.Home.route) }
+                // Back to the existing dashboard rather than stacking a second one on top
+                onLogSuccess = {
+                    if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
+                        navController.navigate(Screen.Home.todayRoute())
+                    }
+                }
             )
         }
 
@@ -340,16 +346,16 @@ fun NavGraph(
             EditRecipeScreen(
                 recipeId = recipeId,
                 viewModel = viewModel,
-                onSaveSuccess = { navController.popBackStack() }
+                onSaveSuccess = { navController.popIfCurrent(backStackEntry) }
             )
         }
 
-        // Daily Goals
+        // Daily Goals (Forwarded to PreferencesScreen for backward compatibility)
         composable(Screen.DailyGoals.route) {
-            val viewModel: DailyGoalsViewModel = koinViewModel()
-            DailyGoalsScreen(
+            val viewModel: PreferencesViewModel = koinViewModel()
+            PreferencesScreen(
                 viewModel = viewModel,
-                onSaveSuccess = { navController.popBackStack() }
+                onNavigateToImportExport = { navController.navigate(Screen.ImportExport.route) }
             )
         }
 
@@ -369,17 +375,23 @@ fun NavGraph(
         }
 
         // Basket
-        composable(Screen.Basket.route) {
+        composable(Screen.Basket.route) { backStackEntry ->
             val viewModel: com.macrobase.app.feature.basket.BasketViewModel = koinViewModel()
             com.macrobase.app.feature.basket.BasketScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { navController.popIfCurrent(backStackEntry) },
                 onNavigateToSearch = { navController.navigate(Screen.Search.createRoute()) },
                 onNavigateToDashboard = { navController.popBackStack(Screen.Home.route, inclusive = false) },
                 onEditItem = { basketItemId, foodId ->
                     navController.navigate(Screen.FoodDetail.createRoute(foodId = foodId, basketItemId = basketItemId))
                 }
             )
+        }
+
+        // Rank
+        composable(Screen.Rank.route) {
+            val viewModel: com.macrobase.app.feature.rank.RankViewModel = koinViewModel()
+            com.macrobase.app.feature.rank.RankScreen(viewModel = viewModel)
         }
     }
 }

@@ -1,6 +1,8 @@
 package com.macrobase.app.data.repository
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -15,7 +17,8 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "user_preferences")
 
 class PreferencesRepositoryImpl(
-    private val context: Context
+    private val context: Context,
+    private val store: DataStore<Preferences> = context.dataStore
 ) : PreferencesRepository {
 
     private object Keys {
@@ -34,7 +37,7 @@ class PreferencesRepositoryImpl(
     }
 
     override fun observePreferences(): Flow<UserPreferences> {
-        return context.dataStore.data.map { prefs ->
+        return store.data.map { prefs ->
             val unitStr = prefs[Keys.UNIT_SYSTEM] ?: UnitSystem.METRIC.name
             UserPreferences(
                 firstName = prefs[Keys.FIRST_NAME] ?: "",
@@ -50,7 +53,7 @@ class PreferencesRepositoryImpl(
     }
 
     override suspend fun updatePreferences(preferences: UserPreferences) {
-        context.dataStore.edit { prefs ->
+        store.edit { prefs ->
             prefs[Keys.FIRST_NAME] = preferences.firstName
             prefs[Keys.LAST_NAME] = preferences.lastName
             prefs[Keys.TIME_ZONE] = preferences.timeZone
@@ -61,4 +64,6 @@ class PreferencesRepositoryImpl(
             preferences.targetWeightKg?.let { prefs[Keys.TARGET_WEIGHT_KG] = it }
         }
     }
+
+    override suspend fun hasSavedPreferences(): Boolean = store.data.first().asMap().isNotEmpty()
 }

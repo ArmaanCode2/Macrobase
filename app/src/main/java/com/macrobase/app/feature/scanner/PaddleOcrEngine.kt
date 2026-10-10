@@ -7,8 +7,7 @@ import com.paddle.ocr.PaddleOCRConfig
 import com.paddle.ocr.EngineConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * On-device OCR backend using PaddleOCR (ONNX + OpenCV).
@@ -65,8 +64,12 @@ class PaddleOcrEngine(
         val currentOcr = ocr
         ocr = null
         if (currentOcr != null) {
-            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                currentOcr.release()
+            try {
+                runBlocking {
+                    currentOcr.release()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("PaddleOcrEngine", "Error releasing OCR resources: ${e.message}")
             }
         }
     }

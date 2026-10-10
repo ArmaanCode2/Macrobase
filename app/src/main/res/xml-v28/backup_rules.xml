@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 9 to 11. Data is included only for device-to-device transfer to a new phone, so
+    nothing goes to Google's cloud backup (BUG-018). With include rules present, everything not
+    included is left out of every backup.
+-->
+<full-backup-content>
+    <include domain="database" path="." requireFlags="deviceToDeviceTransfer" />
+    <include domain="file" path="." requireFlags="deviceToDeviceTransfer" />
+    <include domain="sharedpref" path="." requireFlags="deviceToDeviceTransfer" />
+    <exclude domain="database" path="built_in_foods.db" />
+</full-backup-content>

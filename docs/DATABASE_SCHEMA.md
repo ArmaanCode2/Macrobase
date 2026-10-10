@@ -54,9 +54,12 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 | `loggedProtein` | `REAL` | `NOT NULL` | Scaled protein snapshot (g) |
 | `loggedCarbs` | `REAL` | `NOT NULL` | Scaled carbs snapshot (g) |
 | `loggedFat` | `REAL` | `NOT NULL` | Scaled fat snapshot (g) |
-| `loggedFiber` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled dietary fiber snapshot (g) [Added v3] |
-| `loggedSugar` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled sugars snapshot (g) [Added v3] |
-| `loggedSodium` | `REAL` | `NOT NULL DEFAULT 0.0` | Scaled sodium snapshot (mg) [Added v3] |
+| `loggedFiber` | `REAL` | `NULL` | Scaled dietary fiber snapshot (g); null = not stated [Added v3] |
+| `loggedSugar` | `REAL` | `NULL` | Scaled sugars snapshot (g); null = not stated [Added v3] |
+| `loggedSodium` | `REAL` | `NULL` | Scaled sodium snapshot (mg); null = not stated [Added v3] |
+| `loggedSaturatedFat` | `REAL` | `NULL` | Scaled saturated fat snapshot (g); null = not stated [Added v3] |
+| `loggedTransFat` | `REAL` | `NULL` | Scaled trans fat snapshot (g); null = not stated [Added v3] |
+| `loggedCholesterol` | `REAL` | `NULL` | Scaled cholesterol snapshot (mg); null = not stated [Added v3] |
 | `createdAt` | `INTEGER` | `NOT NULL` | Creation timestamp |
 
 #### 2.1.2. `custom_foods`
@@ -131,19 +134,23 @@ The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 
   ALTER TABLE custom_foods ADD COLUMN customUnitName TEXT
   ```
 - **Version 3 (`MIGRATION_2_3`)**:
-  - Persisted secondary micronutrients in historical diary logs to prevent data loss upon diary insertion.
+  - Persisted secondary nutrients in historical diary logs. The columns are nullable with no default, so "not stated" (`NULL`) stays apart from "none" (`0.0`). Entries from version 2 never recorded them and become `NULL` (BUG-037).
   ```sql
-  ALTER TABLE diary_entries ADD COLUMN loggedFiber REAL NOT NULL DEFAULT 0.0;
-  ALTER TABLE diary_entries ADD COLUMN loggedSugar REAL NOT NULL DEFAULT 0.0;
-  ALTER TABLE diary_entries ADD COLUMN loggedSodium REAL NOT NULL DEFAULT 0.0;
+  ALTER TABLE diary_entries ADD COLUMN loggedFiber REAL;
+  ALTER TABLE diary_entries ADD COLUMN loggedSugar REAL;
+  ALTER TABLE diary_entries ADD COLUMN loggedSodium REAL;
+  ALTER TABLE diary_entries ADD COLUMN loggedSaturatedFat REAL;
+  ALTER TABLE diary_entries ADD COLUMN loggedTransFat REAL;
+  ALTER TABLE diary_entries ADD COLUMN loggedCholesterol REAL;
   ```
-- **Room Builder Configuration** (`DiModules.kt`):
+- **Room Builder Configuration** (`UserDatabase.create()`, used by `DiModules.kt`):
   ```kotlin
-  Room.databaseBuilder(get(), UserDatabase::class.java, DatabaseConfig.USER_DATABASE_NAME)
-      .addMigrations(UserDatabase.MIGRATION_1_2, UserDatabase.MIGRATION_2_3)
-      .fallbackToDestructiveMigration()
+  Room.databaseBuilder(context, UserDatabase::class.java, DatabaseConfig.USER_DATABASE_NAME)
+      .addMigrations(*UserDatabase.ALL_MIGRATIONS)
       .build()
   ```
+  There is no destructive fallback (BUG-046). A missing migration or a downgrade throws instead of deleting the user's data.
+- **Schema history**: `exportSchema = true`, and Room writes every version to `app/schemas/com.macrobase.app.data.database.UserDatabase/<version>.json`. `2.json` was exported from v1.0.3 (commit `054a547`). `P3PhaseOneDataSafetyTests` builds a version 2 database from it, migrates it, and checks every row survives.
 
 ### 3.3. Stable Food Identity Strategy
-Diary entries record the food reference (`foodId`, `uuid`) and snapshot immutable nutrition and portion descriptions (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`, `loggedFiber`, `loggedSugar`, `loggedSodium`, `servingDescription`, `gramWeight`). This guarantees that older diary entries remain readable and mathematically accurate across future database updates, custom food mutations, or food deletions.
+Diary entries record the food reference (`foodId`, `uuid`) and snapshot immutable nutrition and portion descriptions (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`, `loggedFiber`, `loggedSugar`, `loggedSodium`, `loggedSaturatedFat`, `loggedTransFat`, `loggedCholesterol`, `servingDescription`, `gramWeight`). This guarantees that older diary entries remain readable and mathematically accurate across future database updates, custom food mutations, or food deletions.

@@ -282,7 +282,7 @@ class CustomFoodsAndRecipesUnitTests {
         val domainFood = rotiFood.toFood()
         val serving = domainFood.servings.first()
 
-        assertEquals("1.0 roti", serving.description)
+        assertEquals("1 roti", serving.description)
         assertEquals("roti", serving.displayUnitName)
         assertEquals(ServingUnit.CUSTOM, serving.unit)
         assertEquals(0.0, serving.gramWeight, 0.001) // Not pretending to have an arbitrary gram weight
@@ -304,5 +304,152 @@ class CustomFoodsAndRecipesUnitTests {
         val scaled2 = calculateUseCase(domainFood, serving, 2.0)
         assertEquals(240.0, scaled2.calories, 0.01)
         assertEquals(7.0, scaled2.proteinGrams, 0.01)
+    }
+
+    @Test
+    fun customFood_scalingWithNonOneServingSize_calculatesAccurately() {
+        val customFood = CustomFood(
+            id = 20,
+            uuid = "custom-uuid-20",
+            name = "Granola",
+            servingSize = 100.0,
+            servingUnit = ServingUnit.GRAMS,
+            nutritionPerServing = Nutrition(
+                calories = 350.0,
+                proteinGrams = 20.0,
+                carbsGrams = 50.0,
+                fatGrams = 6.0,
+                fiberGrams = 8.0,
+                sugarGrams = 4.0,
+                sodiumMg = 120.0
+            )
+        )
+
+        val food = customFood.toFood()
+        val defaultServing = food.servings.first { it.isDefault }
+        assertEquals("100 g", defaultServing.description)
+        assertEquals(1.0, defaultServing.quantity, 0.001)
+        assertEquals(100.0, defaultServing.gramWeight, 0.001)
+
+        val calculateUseCase = com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase()
+
+        // userQuantity = 1.0 -> 100% of base portion
+        val scaled1 = calculateUseCase(food, defaultServing, 1.0)
+        assertEquals(350.0, scaled1.calories, 0.001)
+        assertEquals(20.0, scaled1.proteinGrams, 0.001)
+        assertEquals(50.0, scaled1.carbsGrams, 0.001)
+        assertEquals(6.0, scaled1.fatGrams, 0.001)
+        assertEquals(8.0, scaled1.fiberGrams ?: 0.0, 0.001)
+        assertEquals(4.0, scaled1.sugarGrams ?: 0.0, 0.001)
+        assertEquals(120.0, scaled1.sodiumMg ?: 0.0, 0.001)
+
+        // userQuantity = 2.0 -> 200% of base portion
+        val scaled2 = calculateUseCase(food, defaultServing, 2.0)
+        assertEquals(700.0, scaled2.calories, 0.001)
+        assertEquals(40.0, scaled2.proteinGrams, 0.001)
+        assertEquals(100.0, scaled2.carbsGrams, 0.001)
+        assertEquals(12.0, scaled2.fatGrams, 0.001)
+        assertEquals(16.0, scaled2.fiberGrams ?: 0.0, 0.001)
+        assertEquals(8.0, scaled2.sugarGrams ?: 0.0, 0.001)
+        assertEquals(240.0, scaled2.sodiumMg ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun customFood_subPortionOneGramServing_scalesAccurately() {
+        val customFood = CustomFood(
+            id = 20,
+            uuid = "custom-uuid-20",
+            name = "Granola",
+            servingSize = 100.0,
+            servingUnit = ServingUnit.GRAMS,
+            nutritionPerServing = Nutrition(
+                calories = 350.0,
+                proteinGrams = 20.0,
+                carbsGrams = 50.0,
+                fatGrams = 6.0,
+                fiberGrams = 8.0,
+                sugarGrams = 4.0,
+                sodiumMg = 120.0
+            )
+        )
+
+        val food = customFood.toFood()
+        val oneGramServing = food.servings.first { it.description == "1 g" }
+        assertEquals(1.0, oneGramServing.quantity, 0.001)
+        assertEquals(1.0, oneGramServing.gramWeight, 0.001)
+        assertFalse(oneGramServing.isDefault)
+
+        val calculateUseCase = com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase()
+
+        // 50g -> 50% of 100g base portion
+        val scaled50g = calculateUseCase(food, oneGramServing, 50.0)
+        assertEquals(175.0, scaled50g.calories, 0.001)
+        assertEquals(10.0, scaled50g.proteinGrams, 0.001)
+        assertEquals(25.0, scaled50g.carbsGrams, 0.001)
+        assertEquals(3.0, scaled50g.fatGrams, 0.001)
+        assertEquals(4.0, scaled50g.fiberGrams ?: 0.0, 0.001)
+        assertEquals(2.0, scaled50g.sugarGrams ?: 0.0, 0.001)
+        assertEquals(60.0, scaled50g.sodiumMg ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun customFood_diaryLoggingAndDailySummary_retainsFiberSugarSodium() {
+        val customFood = CustomFood(
+            id = 20,
+            uuid = "custom-uuid-20",
+            name = "Granola",
+            servingSize = 100.0,
+            servingUnit = ServingUnit.GRAMS,
+            nutritionPerServing = Nutrition(
+                calories = 350.0,
+                proteinGrams = 20.0,
+                carbsGrams = 50.0,
+                fatGrams = 6.0,
+                fiberGrams = 8.0,
+                sugarGrams = 4.0,
+                sodiumMg = 120.0
+            )
+        )
+
+        val food = customFood.toFood()
+        val serving = food.servings.first { it.isDefault }
+        val calculateUseCase = com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase()
+        val calculated = calculateUseCase(food, serving, 1.0)
+
+        val entry = DiaryEntry(
+            id = 100,
+            uuid = UUID.randomUUID().toString(),
+            date = LocalDate.now(),
+            mealType = MealType.BREAKFAST,
+            food = food,
+            serving = serving,
+            quantity = 1.0,
+            calculatedNutrition = calculated,
+            loggedAt = Instant.now()
+        )
+
+        val summary = com.macrobase.app.domain.model.DailyNutritionSummary(
+            date = LocalDate.now(),
+            totalCaloriesIntake = entry.calculatedNutrition.calories,
+            totalCaloriesBurned = 0.0,
+            calorieGoal = 2000.0,
+            totalProteinGrams = entry.calculatedNutrition.proteinGrams,
+            totalCarbsGrams = entry.calculatedNutrition.carbsGrams,
+            totalFatGrams = entry.calculatedNutrition.fatGrams,
+            totalFiberGrams = entry.calculatedNutrition.fiberGrams,
+            totalSugarGrams = entry.calculatedNutrition.sugarGrams,
+            totalSodiumMg = entry.calculatedNutrition.sodiumMg,
+            totalWaterMl = 0.0,
+            waterGoalMl = 2500.0,
+            meals = listOf(com.macrobase.app.domain.model.Meal(type = MealType.BREAKFAST, entries = listOf(entry)))
+        )
+
+        assertEquals(350.0, summary.totalCaloriesIntake, 0.001)
+        assertEquals(20.0, summary.totalProteinGrams, 0.001)
+        assertEquals(50.0, summary.totalCarbsGrams, 0.001)
+        assertEquals(6.0, summary.totalFatGrams, 0.001)
+        assertEquals(8.0, summary.totalFiberGrams!!, 0.001)
+        assertEquals(4.0, summary.totalSugarGrams!!, 0.001)
+        assertEquals(120.0, summary.totalSodiumMg!!, 0.001)
     }
 }

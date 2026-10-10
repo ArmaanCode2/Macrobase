@@ -200,13 +200,13 @@ fun WaterScreen(
     val displayTotal = if (isImperial) {
         "${UnitConversions.mlToFlOz(uiState.totalIntakeMl).roundToInt()} fl oz"
     } else {
-        "${uiState.totalIntakeMl.toInt()} mL"
+        "${uiState.totalIntakeMl.roundToInt()} mL"
     }
 
     val displayGoal = if (isImperial) {
         "${UnitConversions.mlToFlOz(uiState.dailyGoalMl).roundToInt()} fl oz"
     } else {
-        "${uiState.dailyGoalMl.toInt()} mL"
+        "${uiState.dailyGoalMl.roundToInt()} mL"
     }
 
     Column(
@@ -413,7 +413,7 @@ fun WaterScreen(
                     val entryAmountDisplay = if (isImperial) {
                         "${UnitConversions.mlToFlOz(entry.amountMl).roundToInt()} fl oz"
                     } else {
-                        "${entry.amountMl.toInt()} mL"
+                        "${entry.amountMl.roundToInt()} mL"
                     }
 
                     Card(
@@ -549,9 +549,10 @@ fun WaterScreen(
     // 6. Edit Entry Dialog
     entryToEdit?.let { entry ->
         val initialAmount = if (isImperial) {
-            UnitConversions.mlToFlOz(entry.amountMl).roundToInt().toString()
+            com.macrobase.app.feature.detail.formatQuantityForInput(UnitConversions.mlToFlOz(entry.amountMl))
         } else {
-            entry.amountMl.toInt().toString()
+            // Exact stored amount, so saving the dialog unchanged never alters the entry
+            com.macrobase.app.feature.detail.formatQuantityForInput(entry.amountMl)
         }
         var editInput by remember { mutableStateOf(initialAmount) }
         var editErrorMessage by remember { mutableStateOf<String?>(null) }

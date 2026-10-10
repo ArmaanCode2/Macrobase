@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.scanner
 
+import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.scanner.ConfidenceLevel
 import com.macrobase.app.domain.model.scanner.NutritionBasis
 import com.macrobase.app.domain.model.scanner.NutritionLabelDraft
@@ -142,7 +143,7 @@ class NutritionValidator {
         val tolerance = max(20.0, calories * 0.40)
 
         return if (diff > tolerance) {
-            "Calculated macro calories (${expectedCalories.toInt()} kcal) differ notably from label calories (${calories.toInt()} kcal)"
+            "Calculated macro calories (${expectedCalories.roundToInt()} kcal) differ notably from label calories (${calories.roundToInt()} kcal)"
         } else {
             null
         }

@@ -12,6 +12,7 @@ import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.Locale
 import java.util.TimeZone
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -90,19 +91,39 @@ object BackupArchiveManager {
      */
     fun extractAndValidateBackup(inputStream: InputStream): BackupValidationResult {
         return try {
-            val bytes = inputStream.readBytes()
-            if (bytes.isEmpty()) {
-                return BackupValidationResult(isValid = false, errorMessage = "Selected file is empty.")
-            }
-            if (bytes.size > MAX_ARCHIVE_SIZE_BYTES) {
-                return BackupValidationResult(isValid = false, errorMessage = "Archive exceeds maximum permitted size of ${MAX_ARCHIVE_SIZE_BYTES / (1024 * 1024)} MB.")
-            }
-
             val entryMap = mutableMapOf<String, String>()
             var totalUncompressedBytes = 0L
+            var totalCompressedBytesRead = 0L
             var entryCount = 0
 
-            ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+            // Wrap in a counting stream to enforce the 50 MB archive limit during read
+            val countingStream = object : java.io.FilterInputStream(inputStream) {
+                override fun read(): Int {
+                    val b = super.read()
+                    if (b != -1) {
+                        totalCompressedBytesRead++
+                        checkLimit()
+                    }
+                    return b
+                }
+
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    val count = super.read(b, off, len)
+                    if (count != -1) {
+                        totalCompressedBytesRead += count
+                        checkLimit()
+                    }
+                    return count
+                }
+
+                private fun checkLimit() {
+                    if (totalCompressedBytesRead > MAX_ARCHIVE_SIZE_BYTES) {
+                        throw IllegalStateException("Archive exceeds maximum permitted size of ${MAX_ARCHIVE_SIZE_BYTES / (1024 * 1024)} MB.")
+                    }
+                }
+            }
+
+            ZipInputStream(countingStream).use { zip ->
                 var entry: ZipEntry? = zip.nextEntry
                 while (entry != null) {
                     entryCount++
@@ -131,10 +152,17 @@ object BackupArchiveManager {
                     }
 
                     val content = out.toString(StandardCharsets.UTF_8.name())
+                    if (entryMap.containsKey(name)) {
+                        return BackupValidationResult(isValid = false, errorMessage = "Archive contains $name more than once. It may have been edited or damaged.")
+                    }
                     entryMap[name] = content
                     zip.closeEntry()
                     entry = zip.nextEntry
                 }
+            }
+
+            if (entryMap.isEmpty()) {
+                return BackupValidationResult(isValid = false, errorMessage = "Selected backup archive is empty or invalid.")
             }
 
             val manifestContent = entryMap[PortabilityConfig.FILE_MANIFEST]
@@ -160,10 +188,15 @@ object BackupArchiveManager {
                 )
             }
 
-            // Verify checksums
+            // Every file the manifest lists must be present: a missing data file used to be read
+            // as an empty list, and Overwrite then emptied that table (BUG-017)
             manifest.checksums.forEach { (filename, expectedHash) ->
                 val content = entryMap[filename]
-                if (content != null && expectedHash.isNotBlank()) {
+                    ?: return BackupValidationResult(
+                        isValid = false,
+                        errorMessage = "This backup is incomplete: $filename is missing. Nothing can be restored from it."
+                    )
+                if (expectedHash.isNotBlank()) {
                     val actualHash = calculateSha256(content)
                     if (!actualHash.equals(expectedHash, ignoreCase = true)) {
                         return BackupValidationResult(
@@ -174,9 +207,23 @@ object BackupArchiveManager {
                 }
             }
 
+            // Every export writes all five data files, and Overwrite empties those tables, so a
+            // backup without one of them is incomplete even when its manifest does not list it
+            listOf(
+                PortabilityConfig.FILE_DIARY, PortabilityConfig.FILE_CUSTOM_FOODS, PortabilityConfig.FILE_RECIPES,
+                PortabilityConfig.FILE_WEIGHT, PortabilityConfig.FILE_WATER
+            ).firstOrNull { it !in entryMap }?.let { missing ->
+                return BackupValidationResult(
+                    isValid = false,
+                    errorMessage = "This backup is incomplete: $missing is missing. Nothing can be restored from it."
+                )
+            }
+
             // Parse data files safely
             val diaryEntries = entryMap[PortabilityConfig.FILE_DIARY]?.let {
-                try { BackupJsonSerializer.parseDiaryEntries(it) } catch (e: Exception) {
+                try {
+                    BackupJsonSerializer.legacyZerosAsUnknown(BackupJsonSerializer.parseDiaryEntries(it), manifest.backupVersion)
+                } catch (e: Exception) {
                     return BackupValidationResult(isValid = false, errorMessage = "Corrupted diary.json: ${e.message}")
                 }
             } ?: emptyList()
@@ -217,6 +264,34 @@ object BackupArchiveManager {
                 } else null
             }
 
+            // The record counts written at export must match what was read: fewer records means a
+            // truncated or edited file, and restoring it would silently drop the rest (BUG-017)
+            val declared = manifest.counts
+            listOf(
+                Triple(PortabilityConfig.FILE_DIARY, diaryEntries.size, declared.diaryEntries),
+                Triple(PortabilityConfig.FILE_CUSTOM_FOODS, customFoods.size, declared.customFoods),
+                Triple(PortabilityConfig.FILE_RECIPES, recipes.size, declared.recipes),
+                Triple(PortabilityConfig.FILE_WEIGHT, weightEntries.size, declared.weightEntries),
+                Triple(PortabilityConfig.FILE_WATER, waterEntries.size, declared.waterEntries)
+            ).firstOrNull { (_, read, listed) -> read != listed }?.let { (filename, read, listed) ->
+                return BackupValidationResult(
+                    isValid = false,
+                    errorMessage = "This backup is damaged: $filename holds $read records but the backup lists $listed. Nothing can be restored from it."
+                )
+            }
+            // Goals and profile the backup says it has must be readable, never silently dropped
+            val unreadableSettings = when {
+                declared.goals > 0 && (goals == null || !goals.hasUsableTargets) -> PortabilityConfig.FILE_GOALS
+                declared.preferences > 0 && preferences == null -> PortabilityConfig.FILE_PREFERENCES
+                else -> null
+            }
+            if (unreadableSettings != null) {
+                return BackupValidationResult(
+                    isValid = false,
+                    errorMessage = "This backup is damaged: $unreadableSettings cannot be read. Nothing can be restored from it."
+                )
+            }
+
             val backupData = MacroBaseBackupData(
                 manifest = manifest,
                 diaryEntries = diaryEntries,
@@ -236,7 +311,11 @@ object BackupArchiveManager {
         } catch (e: Exception) {
             BackupValidationResult(
                 isValid = false,
-                errorMessage = "Failed to extract backup archive: ${e.message ?: "Invalid ZIP file"}"
+                errorMessage = if (e is IllegalStateException && e.message?.contains("maximum permitted size") == true) {
+                    e.message ?: "Archive exceeds maximum permitted size."
+                } else {
+                    "Failed to extract backup archive: ${e.message ?: "Invalid ZIP file"}"
+                }
             )
         }
     }
@@ -253,7 +332,7 @@ object BackupArchiveManager {
         val hashBytes = digest.digest(content.toByteArray(StandardCharsets.UTF_8))
         val sb = StringBuilder()
         for (b in hashBytes) {
-            sb.append(String.format("%02x", b))
+            sb.append(String.format(Locale.US, "%02x", b))
         }
         return sb.toString()
     }

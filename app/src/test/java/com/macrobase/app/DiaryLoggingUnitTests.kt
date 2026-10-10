@@ -239,6 +239,90 @@ class DiaryLoggingUnitTests {
     }
 
     @Test
+    fun editPaneer30gTo35g_resultsInExactlyOneDiaryEntry() = runBlocking {
+        val testDate = LocalDate.of(2026, 8, 20)
+        val paneerFood = Food(
+            id = 501,
+            uuid = "paneer-uuid",
+            name = "Paneer Fresh",
+            nutrition = Nutrition(calories = 296.0, proteinGrams = 18.3, carbsGrams = 4.5, fatGrams = 22.0)
+        )
+        val gServing = Serving(description = "1 g", gramWeight = 1.0)
+
+        // 1. Initial entry: Paneer 30g
+        val initialEntry = DiaryEntry(
+            id = 777L,
+            uuid = "paneer-entry-uuid",
+            date = testDate,
+            mealType = MealType.BREAKFAST,
+            food = paneerFood,
+            serving = gServing,
+            quantity = 30.0,
+            calculatedNutrition = paneerFood.nutrition.scale(0.30),
+            loggedAt = Instant.now()
+        )
+        logFoodUseCase(initialEntry)
+
+        var summary = getDailyDiaryUseCase(testDate).first()
+        assertEquals(1, summary.meals.first { it.type == MealType.BREAKFAST }.entries.size)
+        assertEquals(30.0, summary.meals.first { it.type == MealType.BREAKFAST }.entries.first().quantity, 0.001)
+
+        // 2. Edit: Paneer 35g
+        val updatedEntry = initialEntry.copy(
+            quantity = 35.0,
+            calculatedNutrition = paneerFood.nutrition.scale(0.35)
+        )
+        updateDiaryEntryUseCase(updatedEntry)
+
+        summary = getDailyDiaryUseCase(testDate).first()
+        val breakfastEntries = summary.meals.first { it.type == MealType.BREAKFAST }.entries
+        assertEquals("Should have exactly ONE entry, not two", 1, breakfastEntries.size)
+        assertEquals(35.0, breakfastEntries.first().quantity, 0.001)
+        assertEquals(777L, breakfastEntries.first().id)
+    }
+
+    @Test
+    fun editDiaryEntry_quantityServingDateMeal_preservesSingleEntry() = runBlocking {
+        val date1 = LocalDate.of(2026, 8, 21)
+        val date2 = LocalDate.of(2026, 8, 22)
+
+        val initialEntry = DiaryEntry(
+            id = 888L,
+            uuid = "edit-multi-uuid",
+            date = date1,
+            mealType = MealType.BREAKFAST,
+            food = eggFood,
+            serving = Serving(description = "1 Large Egg", gramWeight = 50.0),
+            quantity = 1.0,
+            calculatedNutrition = eggFood.nutrition.scale(0.50),
+            loggedAt = Instant.now()
+        )
+        logFoodUseCase(initialEntry)
+
+        // Edit quantity, serving, date, and meal
+        val updatedEntry = initialEntry.copy(
+            date = date2,
+            mealType = MealType.DINNER,
+            serving = Serving(description = "100 g", gramWeight = 100.0),
+            quantity = 2.0,
+            calculatedNutrition = eggFood.nutrition.scale(2.0)
+        )
+        updateDiaryEntryUseCase(updatedEntry)
+
+        // Old date should now have 0 entries
+        val summary1 = getDailyDiaryUseCase(date1).first()
+        assertEquals(0, summary1.meals.flatMap { it.entries }.size)
+
+        // New date should have exactly 1 entry under DINNER
+        val summary2 = getDailyDiaryUseCase(date2).first()
+        val dinnerEntries = summary2.meals.first { it.type == MealType.DINNER }.entries
+        assertEquals(1, dinnerEntries.size)
+        assertEquals(888L, dinnerEntries.first().id)
+        assertEquals(2.0, dinnerEntries.first().quantity, 0.001)
+        assertEquals("100 g", dinnerEntries.first().serving.description)
+    }
+
+    @Test
     fun multiDayHistoricalLogging_isolatesDatesCompletely() = runBlocking {
         val dayA = LocalDate.of(2026, 8, 18)
         val dayB = LocalDate.of(2026, 8, 19)
@@ -323,6 +407,55 @@ class DiaryLoggingUnitTests {
         assertEquals(MealType.entries.size, summary.meals.size)
         assertTrue("All meal entry lists must be empty", summary.meals.all { it.entries.isEmpty() })
     }
+
+    @Test
+    fun secondaryNutrients_fiberSugarSodium_aggregateAccurately() = runBlocking {
+        val today = LocalDate.now()
+        val foodWithMicros = Food(
+            id = 500,
+            uuid = "micro-food-uuid",
+            name = "Chia Seed Pudding",
+            nutrition = Nutrition(
+                calories = 250.0,
+                proteinGrams = 10.0,
+                carbsGrams = 20.0,
+                fatGrams = 15.0,
+                fiberGrams = 12.5,
+                sugarGrams = 6.2,
+                sodiumMg = 145.0
+            )
+        )
+
+        val entry = DiaryEntry(
+            id = 101,
+            uuid = UUID.randomUUID().toString(),
+            date = today,
+            mealType = MealType.BREAKFAST,
+            food = foodWithMicros,
+            serving = Serving(description = "1 bowl", gramWeight = 200.0),
+            quantity = 2.0,
+            calculatedNutrition = Nutrition(
+                calories = 500.0,
+                proteinGrams = 20.0,
+                carbsGrams = 40.0,
+                fatGrams = 30.0,
+                fiberGrams = 25.0,
+                sugarGrams = 12.4,
+                sodiumMg = 290.0
+            ),
+            loggedAt = Instant.now()
+        )
+        logFoodUseCase(entry)
+
+        val summary = getDailyDiaryUseCase(today).first()
+        assertEquals(500.0, summary.totalCaloriesIntake, 0.01)
+        assertEquals(20.0, summary.totalProteinGrams, 0.01)
+        assertEquals(40.0, summary.totalCarbsGrams, 0.01)
+        assertEquals(30.0, summary.totalFatGrams, 0.01)
+        assertEquals(25.0, summary.totalFiberGrams!!, 0.01)
+        assertEquals(12.4, summary.totalSugarGrams!!, 0.01)
+        assertEquals(290.0, summary.totalSodiumMg!!, 0.01)
+    }
 }
 
 /**
@@ -357,9 +490,10 @@ private class FakeDiaryRepository : DiaryRepository {
                 totalProteinGrams = dateEntries.sumOf { it.calculatedNutrition.proteinGrams },
                 totalCarbsGrams = dateEntries.sumOf { it.calculatedNutrition.carbsGrams },
                 totalFatGrams = dateEntries.sumOf { it.calculatedNutrition.fatGrams },
-                totalFiberGrams = dateEntries.sumOf { it.calculatedNutrition.fiberGrams ?: 0.0 },
-                totalSugarGrams = dateEntries.sumOf { it.calculatedNutrition.sugarGrams ?: 0.0 },
-                totalSodiumMg = dateEntries.sumOf { it.calculatedNutrition.sodiumMg ?: 0.0 },
+                // Same rule as DiaryRepositoryImpl: a total is null only when every entry is null
+                totalFiberGrams = dateEntries.fold(Nutrition.ZERO) { acc, e -> acc + e.calculatedNutrition }.fiberGrams,
+                totalSugarGrams = dateEntries.fold(Nutrition.ZERO) { acc, e -> acc + e.calculatedNutrition }.sugarGrams,
+                totalSodiumMg = dateEntries.fold(Nutrition.ZERO) { acc, e -> acc + e.calculatedNutrition }.sodiumMg,
                 totalWaterMl = 0.0,
                 waterGoalMl = 2500.0,
                 meals = meals

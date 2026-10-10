@@ -84,6 +84,7 @@ fun MacroBaseScaffold(
 
     val isRootScreen = currentRoute?.substringBefore("?") == Screen.Home.route.substringBefore("?")
     val isScanner = currentRoute?.substringBefore("?") == Screen.NutritionLabelScanner.route.substringBefore("?")
+    val isFoodDetail = currentRoute?.startsWith("food_detail") == true
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -117,12 +118,12 @@ fun MacroBaseScaffold(
     ) {
         Scaffold(
             topBar = {
-                if (isScanner) {
-                    // Immersive Fullscreen Scanner handles its own top bar
+                if (isScanner || isFoodDetail) {
+                    // Immersive Fullscreen Scanner and Food Detail handle their own top bar
                 } else {
-                    val isFoodDetailOrBasket = currentRoute?.substringBefore("/") == "food_detail" || currentRoute == Screen.Basket.route
+                    val isBasket = currentRoute?.substringBefore("?") == Screen.Basket.route.substringBefore("?")
                     
-                    if (isRootScreen || isFoodDetailOrBasket) {
+                    if (isRootScreen || isBasket) {
                         // Home Dashboard, Food Detail & Basket Custom Top Bar with Embedded Search Input Pill
                         androidx.compose.material3.TopAppBar(
                             title = {
@@ -244,12 +245,12 @@ fun MacroBaseScaffold(
                         ) {
                             val isHome = currentRoute?.substringBefore("?") == Screen.Home.route.substringBefore("?")
                             val isStats = currentRoute?.substringBefore("?") == Screen.Statistics.route.substringBefore("?")
-                            val isSuggested = currentRoute?.substringBefore("?") == Screen.Recipes.route.substringBefore("?")
+                            val isRank = currentRoute?.substringBefore("?") == Screen.Rank.route.substringBefore("?")
                             val isPrefs = currentRoute?.substringBefore("?") == Screen.Preferences.route.substringBefore("?")
                             
                             BottomNavTab(
                                 title = "Dashboard",
-                                icon = androidx.compose.material.icons.Icons.Default.Home,
+                                icon = Screen.Home.icon!!,
                                 selected = isHome,
                                 onClick = {
                                     homeViewModel?.resetToToday()
@@ -263,7 +264,7 @@ fun MacroBaseScaffold(
                             )
                             BottomNavTab(
                                 title = "Stats",
-                                icon = androidx.compose.material.icons.Icons.Default.Assessment,
+                                icon = Screen.Statistics.icon!!,
                                 selected = isStats,
                                 onClick = {
                                     navController.navigate(Screen.Statistics.route) {
@@ -276,11 +277,11 @@ fun MacroBaseScaffold(
                             )
                             Spacer(modifier = Modifier.weight(1f)) // Space for Track button
                             BottomNavTab(
-                                title = "Suggested",
-                                icon = androidx.compose.material.icons.Icons.Default.RestaurantMenu,
-                                selected = isSuggested,
+                                title = "Rank",
+                                icon = Screen.Rank.icon!!,
+                                selected = isRank,
                                 onClick = {
-                                    navController.navigate(Screen.Recipes.route) {
+                                    navController.navigate(Screen.Rank.route) {
                                         popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
                                         launchSingleTop = true
                                         restoreState = true
@@ -290,7 +291,7 @@ fun MacroBaseScaffold(
                             )
                             BottomNavTab(
                                 title = "Preferences",
-                                icon = androidx.compose.material.icons.Icons.Default.Settings,
+                                icon = Screen.Preferences.icon!!,
                                 selected = isPrefs,
                                 onClick = {
                                     navController.navigate(Screen.Preferences.route) {
@@ -342,7 +343,9 @@ private fun getScreenTitle(route: String?): String {
         route.startsWith("custom_foods") -> "Custom Foods"
         route.startsWith("edit_custom_food") -> "Edit Custom Food"
         route.startsWith("recipes") -> "My Recipes"
+        route.startsWith("edit_recipe") -> "Edit Recipe"
         route.startsWith("daily_goals") -> "Edit Daily Goals"
+        route.startsWith("rank") -> "Rank"
         route.startsWith("preferences") -> "Preferences"
         route.startsWith("import_export") -> "Data & Backup"
         else -> "MacroBase"

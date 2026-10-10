@@ -1,7 +1,7 @@
 package com.macrobase.app.core.designsystem.components
 
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.macrobase.app.core.config.CalendarPerformanceConfig
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
@@ -36,7 +35,6 @@ import com.macrobase.app.domain.model.CalendarDaySummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.Meal
 import com.macrobase.app.domain.model.MealType
-import com.macrobase.app.domain.model.Nutrition
 
 /**
  * 40dp Square Calendar Cell matching UI_UX_SPECIFICATION.md
@@ -106,7 +104,7 @@ fun DailyMealSection(
     onEntryClick: (DiaryEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val sectionCalories = meal.totalCalories.toInt()
+    val sectionCalories = meal.totalCalories.roundToInt()
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Section Header Row
@@ -192,69 +190,4 @@ fun DailyMealSection(
             }
         }
     }
-}
-
-/**
- * Standard FDA-Style Nutrition Facts Panel on Dark Surface.
- */
-@Composable
-fun NutritionFactsPanel(
-    foodName: String,
-    nutrition: Nutrition,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .border(1.dp, AppColors.Divider, AppShapes.Card)
-            .background(AppColors.Surface)
-            .padding(AppSpacing.md)
-    ) {
-        Text(text = "Nutrition Facts", style = AppTypography.Header1, fontSize = 24.sp)
-        Text(text = foodName, style = AppTypography.Body2, color = AppColors.TextSecondary)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Text(text = "Calories", style = AppTypography.Header2)
-            Text(text = String.format("%.1f", nutrition.calories), style = AppTypography.ValueLg)
-        }
-        HorizontalDivider(color = AppColors.TextPrimary, thickness = 4.dp)
-        
-        NutrientRow("Total Fat", "${String.format("%.1f", nutrition.fatGrams)}g")
-        NutrientRow("  Saturated Fat", "${String.format("%.1f", nutrition.saturatedFatGrams ?: 0.0)}g", isSubItem = true)
-        NutrientRow("Cholesterol", "${nutrition.cholesterolMg?.toInt() ?: 0}mg")
-        NutrientRow("Sodium", "${String.format("%.1f", nutrition.sodiumMg ?: 0.0)}mg")
-        NutrientRow("Total Carbohydrates", "${String.format("%.1f", nutrition.carbsGrams)}g")
-        NutrientRow("  Dietary Fiber", "${String.format("%.1f", nutrition.fiberGrams ?: 0.0)}g", isSubItem = true)
-        NutrientRow("  Sugars", "${String.format("%.1f", nutrition.sugarGrams ?: 0.0)}g", isSubItem = true)
-        NutrientRow("Protein", "${String.format("%.1f", nutrition.proteinGrams)}g")
-        
-        HorizontalDivider(color = AppColors.TextPrimary, thickness = 2.dp)
-        Text(
-            text = "Net Carbs: ${String.format("%.1f", nutrition.netCarbsGrams)}g",
-            style = AppTypography.Header3,
-            color = AppColors.CalorieText,
-            modifier = Modifier.padding(top = AppSpacing.xs)
-        )
-    }
-}
-
-@Composable
-private fun NutrientRow(name: String, value: String, isSubItem: Boolean = false) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = name,
-            style = if (isSubItem) AppTypography.Body2 else AppTypography.Body1
-        )
-        Text(
-            text = value,
-            style = if (isSubItem) AppTypography.Body2 else AppTypography.Header3
-        )
-    }
-    HorizontalDivider(color = AppColors.Divider, thickness = 0.5.dp)
 }

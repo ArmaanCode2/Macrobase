@@ -15,11 +15,10 @@ import com.macrobase.app.domain.model.BackupRecordCountsDto
 import com.macrobase.app.domain.model.BackupValidationResult
 import com.macrobase.app.domain.model.CustomFoodBackupDto
 import com.macrobase.app.domain.model.DiaryEntryBackupDto
-import com.macrobase.app.domain.model.Goal
-import com.macrobase.app.domain.model.GoalBackupDto
 import com.macrobase.app.domain.model.ImportMode
 import com.macrobase.app.domain.model.ImportResult
 import com.macrobase.app.domain.model.MacroBaseBackupData
+import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.RecipeBackupDto
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
@@ -49,9 +48,23 @@ class PortabilityRepositoryImpl(
         val recipeEntities = userDatabase.recipeDao().getAllRecipes()
         val weightEntities = userDatabase.weightDao().getAllWeightEntriesList()
         val waterEntities = userDatabase.waterDao().getAllWaterLogsList()
-        val currentGoal = goalsRepository.getGoals()
         val currentPrefs = preferencesRepository.getPreferences()
 
+        val customFoodsByRowId = customFoodEntities.associateBy { it.id }
+        // Write the uuid only when the row is still the logged food: entries mis-linked by
+        // earlier restores must not be exported as authoritative links (import then falls back
+        // to name matching).
+        fun customFoodUuidFor(e: DiaryEntryEntity): String? =
+            FoodRepositoryImpl.customRowIdOrNull(e.foodId)
+                ?.let { customFoodsByRowId[it] }
+                ?.takeIf { it.name.trim().equals(e.foodName.trim(), ignoreCase = true) }
+                ?.uuid
+        val recipesByRowId = recipeEntities.associateBy { it.id }
+        fun recipeUuidFor(e: DiaryEntryEntity): String? =
+            Recipe.rowIdOrNull(e.foodId)
+                ?.let { recipesByRowId[it] }
+                ?.takeIf { it.name.trim().equals(e.foodName.trim(), ignoreCase = true) }
+                ?.uuid
         val diaryDtos = diaryEntities.map { e ->
             DiaryEntryBackupDto(
                 uuid = e.uuid,
@@ -67,7 +80,15 @@ class PortabilityRepositoryImpl(
                 loggedProtein = e.loggedProtein,
                 loggedCarbs = e.loggedCarbs,
                 loggedFat = e.loggedFat,
-                createdAt = e.createdAt
+                createdAt = e.createdAt,
+                loggedFiber = e.loggedFiber,
+                loggedSugar = e.loggedSugar,
+                loggedSodium = e.loggedSodium,
+                loggedSaturatedFat = e.loggedSaturatedFat,
+                loggedTransFat = e.loggedTransFat,
+                loggedCholesterol = e.loggedCholesterol,
+                customFoodUuid = customFoodUuidFor(e),
+                recipeUuid = recipeUuidFor(e)
             )
         }
 
@@ -78,6 +99,7 @@ class PortabilityRepositoryImpl(
                 brand = f.brand,
                 servingSize = f.servingSize,
                 servingUnit = f.servingUnit,
+                customUnitName = f.customUnitName,
                 calories = f.calories,
                 proteinGrams = f.proteinGrams,
                 carbsGrams = f.carbsGrams,
@@ -125,12 +147,8 @@ class PortabilityRepositoryImpl(
             )
         }
 
-        val goalDto = GoalBackupDto(
-            dailyCalorieGoal = currentGoal.dailyCalorieGoal,
-            carbPercentage = currentGoal.carbPercentage,
-            proteinPercentage = currentGoal.proteinPercentage,
-            fatPercentage = currentGoal.fatPercentage
-        )
+        // Targets plus strategy, any scheduled change and the strategy history (BUG-016)
+        val goalDto = goalsRepository.exportGoalBackup()
 
         val prefsDto = UserPreferencesBackupDto(
             firstName = currentPrefs.firstName,
@@ -192,68 +210,51 @@ class PortabilityRepositoryImpl(
 
             if (mode == ImportMode.OVERWRITE) {
                 // Execute destructive overwrite in transaction
-                userDatabase.runInTransaction {
-                    kotlinx.coroutines.runBlocking {
-                        userDatabase.diaryDao().clearAllEntries()
-                        userDatabase.customFoodDao().clearAllCustomFoods()
-                        userDatabase.recipeDao().clearAllRecipes()
-                        userDatabase.weightDao().clearAllWeightEntries()
-                        userDatabase.waterDao().clearAllWaterLogs()
+                userDatabase.withTransaction {
+                    userDatabase.diaryDao().clearAllEntries()
+                    userDatabase.customFoodDao().clearAllCustomFoods()
+                    userDatabase.recipeDao().clearAllRecipes()
+                    userDatabase.weightDao().clearAllWeightEntries()
+                    userDatabase.waterDao().clearAllWaterLogs()
 
-                        // Insert Custom Foods
-                        val customEntities = backupData.customFoods.map { it.toEntity() }
-                        userDatabase.customFoodDao().insertCustomFoods(customEntities)
-                        imported += customEntities.size
+                    // Insert Custom Foods
+                    val customEntities = backupData.customFoods.map { it.toEntity() }
+                    userDatabase.customFoodDao().insertCustomFoods(customEntities)
+                    imported += customEntities.size
 
-                        // Insert Recipes
-                        val recipeEntities = backupData.recipes.map { it.toEntity() }
-                        userDatabase.recipeDao().insertRecipes(recipeEntities)
-                        imported += recipeEntities.size
+                    // Insert Recipes
+                    val recipeEntities = backupData.recipes.map { it.toEntity() }
+                    userDatabase.recipeDao().insertRecipes(recipeEntities)
+                    imported += recipeEntities.size
 
-                        // Insert Diary Entries
-                        val diaryEntities = backupData.diaryEntries.map { it.toEntity() }
-                        userDatabase.diaryDao().insertEntries(diaryEntities)
-                        imported += diaryEntities.size
+                    // Insert Diary Entries, pointing custom-food and recipe entries at the restored rows
+                    val resolveFoodId = foodIdResolver()
+                    val diaryEntities = backupData.diaryEntries.map { it.toEntity(resolveFoodId(it)) }
+                    userDatabase.diaryDao().insertEntries(diaryEntities)
+                    imported += diaryEntities.size
 
-                        // Insert Weight Entries
-                        val weightEntities = backupData.weightEntries.map { it.toEntity() }
-                        userDatabase.weightDao().insertWeightEntries(weightEntities)
-                        imported += weightEntities.size
+                    // Insert Weight Entries
+                    val weightEntities = backupData.weightEntries.map { it.toEntity() }
+                    userDatabase.weightDao().insertWeightEntries(weightEntities)
+                    imported += weightEntities.size
 
-                        // Insert Water Logs
-                        val waterEntities = backupData.waterEntries.map { it.toEntity() }
-                        userDatabase.waterDao().insertWaterLogs(waterEntities)
-                        imported += waterEntities.size
+                    // Insert Water Logs
+                    val waterEntities = backupData.waterEntries.map { it.toEntity() }
+                    userDatabase.waterDao().insertWaterLogs(waterEntities)
+                    imported += waterEntities.size
+                }
+
+                // Restore Goals & Preferences as they were in the backup; a restore is not a
+                // strategy change, so nothing is scheduled for tomorrow (BUG-016)
+                val settingsNote = restoringSettings {
+                    backupData.goals?.let { g ->
+                        goalsRepository.restoreGoalBackup(g)
+                        imported++
                     }
-                }
-
-                // Restore Goals & Preferences
-                backupData.goals?.let { g ->
-                    goalsRepository.updateGoals(
-                        Goal(
-                            dailyCalorieGoal = g.dailyCalorieGoal,
-                            carbPercentage = g.carbPercentage,
-                            proteinPercentage = g.proteinPercentage,
-                            fatPercentage = g.fatPercentage
-                        )
-                    )
-                    imported++
-                }
-
-                backupData.preferences?.let { p ->
-                    preferencesRepository.updatePreferences(
-                        UserPreferences(
-                            firstName = p.firstName,
-                            lastName = p.lastName,
-                            timeZone = p.timeZone,
-                            unitSystem = try { UnitSystem.valueOf(p.unitSystem) } catch (e: Exception) { UnitSystem.METRIC },
-                            heightCm = p.heightCm,
-                            currentWeightKg = p.currentWeightKg,
-                            targetWeightKg = p.targetWeightKg,
-                            dailyWaterGoalMl = p.dailyWaterGoalMl
-                        )
-                    )
-                    imported++
+                    backupData.preferences?.let { p ->
+                        preferencesRepository.updatePreferences(p.toPreferences(preferencesRepository.getPreferences()))
+                        imported++
+                    }
                 }
 
                 ImportResult(
@@ -263,150 +264,152 @@ class PortabilityRepositoryImpl(
                     recordsSkipped = 0,
                     recordsUpdated = 0,
                     conflictsResolved = 0,
-                    message = "Successfully restored $imported records in Overwrite mode."
+                    message = "Successfully restored $imported records in Overwrite mode.$settingsNote"
                 )
             } else {
                 // MERGE Mode: Non-destructive resolution
-                userDatabase.runInTransaction {
-                    kotlinx.coroutines.runBlocking {
-                        // 1. Merge Custom Foods
-                        val existingCustomFoods = userDatabase.customFoodDao().getAllCustomFoods().associateBy { it.uuid }
-                        val toInsertFoods = mutableListOf<CustomFoodEntity>()
-                        for (dto in backupData.customFoods) {
-                            val existing = existingCustomFoods[dto.uuid]
-                            if (existing == null) {
-                                toInsertFoods.add(dto.toEntity())
-                                imported++
-                            } else {
-                                if (existing.isIdenticalTo(dto)) {
-                                    skipped++
-                                } else if (dto.createdAt >= existing.createdAt) {
-                                    toInsertFoods.add(dto.toEntity(existingId = existing.id))
-                                    updated++
-                                    conflicts++
-                                } else {
-                                    skipped++
-                                    conflicts++
-                                }
-                            }
-                        }
-                        if (toInsertFoods.isNotEmpty()) {
-                            userDatabase.customFoodDao().insertCustomFoods(toInsertFoods)
-                        }
-
-                        // 2. Merge Recipes
-                        val existingRecipes = userDatabase.recipeDao().getAllRecipes().associateBy { it.uuid }
-                        val toInsertRecipes = mutableListOf<RecipeEntity>()
-                        for (dto in backupData.recipes) {
-                            val existing = existingRecipes[dto.uuid]
-                            if (existing == null) {
-                                toInsertRecipes.add(dto.toEntity())
-                                imported++
-                            } else {
-                                if (existing.isIdenticalTo(dto)) {
-                                    skipped++
-                                } else if (dto.createdAt >= existing.createdAt) {
-                                    toInsertRecipes.add(dto.toEntity(existingId = existing.id))
-                                    updated++
-                                    conflicts++
-                                } else {
-                                    skipped++
-                                    conflicts++
-                                }
-                            }
-                        }
-                        if (toInsertRecipes.isNotEmpty()) {
-                            userDatabase.recipeDao().insertRecipes(toInsertRecipes)
-                        }
-
-                        // 3. Merge Diary Entries
-                        val existingDiaryEntries = userDatabase.diaryDao().getAllEntries().associateBy { it.uuid }
-                        val toInsertDiary = mutableListOf<DiaryEntryEntity>()
-                        for (dto in backupData.diaryEntries) {
-                            if (!existingDiaryEntries.containsKey(dto.uuid)) {
-                                toInsertDiary.add(dto.toEntity())
-                                imported++
+                userDatabase.withTransaction {
+                    // 1. Merge Custom Foods
+                    val existingCustomFoods = userDatabase.customFoodDao().getAllCustomFoods().associateBy { it.uuid }
+                    val toInsertFoods = mutableListOf<CustomFoodEntity>()
+                    for (dto in backupData.customFoods) {
+                        val existing = existingCustomFoods[dto.uuid]
+                        if (existing == null) {
+                            toInsertFoods.add(dto.toEntity())
+                            imported++
+                        } else {
+                            if (existing.isIdenticalTo(dto)) {
+                                skipped++
+                            } else if (dto.createdAt >= existing.createdAt) {
+                                toInsertFoods.add(dto.toEntity(existingId = existing.id))
+                                updated++
+                                conflicts++
                             } else {
                                 skipped++
+                                conflicts++
                             }
                         }
-                        if (toInsertDiary.isNotEmpty()) {
-                            userDatabase.diaryDao().insertEntries(toInsertDiary)
-                        }
+                    }
+                    if (toInsertFoods.isNotEmpty()) {
+                        userDatabase.customFoodDao().insertCustomFoods(toInsertFoods)
+                    }
 
-                        // 4. Merge Weight Entries (1 entry per date)
-                        val existingWeights = userDatabase.weightDao().getAllWeightEntriesList().associateBy { it.dateEpochDay }
-                        val toInsertWeights = mutableListOf<WeightEntryEntity>()
-                        for (dto in backupData.weightEntries) {
-                            val existing = existingWeights[dto.dateEpochDay]
-                            if (existing == null) {
-                                toInsertWeights.add(dto.toEntity())
-                                imported++
-                            } else {
-                                if (existing.weightKg == dto.weightKg && existing.note == dto.note) {
-                                    skipped++
-                                } else if (dto.createdAt >= existing.createdAt) {
-                                    toInsertWeights.add(dto.toEntity(existingId = existing.id))
-                                    updated++
-                                    conflicts++
-                                } else {
-                                    skipped++
-                                    conflicts++
-                                }
-                            }
-                        }
-                        if (toInsertWeights.isNotEmpty()) {
-                            userDatabase.weightDao().insertWeightEntries(toInsertWeights)
-                        }
-
-                        // 5. Merge Water Logs
-                        val existingWater = userDatabase.waterDao().getAllWaterLogsList()
-                            .map { Triple(it.dateEpochDay, it.timestamp, it.amountMl) }.toSet()
-                        val toInsertWater = mutableListOf<WaterLogEntity>()
-                        for (dto in backupData.waterEntries) {
-                            val key = Triple(dto.dateEpochDay, dto.timestamp, dto.amountMl)
-                            if (!existingWater.contains(key)) {
-                                toInsertWater.add(dto.toEntity())
-                                imported++
+                    // 2. Merge Recipes
+                    val existingRecipes = userDatabase.recipeDao().getAllRecipes().associateBy { it.uuid }
+                    val toInsertRecipes = mutableListOf<RecipeEntity>()
+                    for (dto in backupData.recipes) {
+                        val existing = existingRecipes[dto.uuid]
+                        if (existing == null) {
+                            toInsertRecipes.add(dto.toEntity())
+                            imported++
+                        } else {
+                            if (existing.isIdenticalTo(dto)) {
+                                skipped++
+                            } else if (dto.createdAt >= existing.createdAt) {
+                                toInsertRecipes.add(dto.toEntity(existingId = existing.id))
+                                updated++
+                                conflicts++
                             } else {
                                 skipped++
+                                conflicts++
                             }
                         }
-                        if (toInsertWater.isNotEmpty()) {
-                            userDatabase.waterDao().insertWaterLogs(toInsertWater)
+                    }
+                    if (toInsertRecipes.isNotEmpty()) {
+                        userDatabase.recipeDao().insertRecipes(toInsertRecipes)
+                    }
+
+                    // 3. Merge Diary Entries
+                    val existingDiaryEntries = userDatabase.diaryDao().getAllEntries().associateBy { it.uuid }
+                    val toInsertDiary = mutableListOf<DiaryEntryEntity>()
+                    val resolveFoodId = foodIdResolver()
+                    for (dto in backupData.diaryEntries) {
+                        if (!existingDiaryEntries.containsKey(dto.uuid)) {
+                            toInsertDiary.add(dto.toEntity(resolveFoodId(dto)))
+                            imported++
+                        } else {
+                            skipped++
+                        }
+                    }
+                    if (toInsertDiary.isNotEmpty()) {
+                        userDatabase.diaryDao().insertEntries(toInsertDiary)
+                    }
+
+                    // 4. Merge Weight Entries (1 entry per date)
+                    val existingWeights = userDatabase.weightDao().getAllWeightEntriesList().associateBy { it.dateEpochDay }
+                    val toInsertWeights = mutableListOf<WeightEntryEntity>()
+                    for (dto in backupData.weightEntries) {
+                        val existing = existingWeights[dto.dateEpochDay]
+                        if (existing == null) {
+                            toInsertWeights.add(dto.toEntity())
+                            imported++
+                        } else {
+                            if (existing.weightKg == dto.weightKg && existing.note == dto.note) {
+                                skipped++
+                            } else if (dto.createdAt >= existing.createdAt) {
+                                toInsertWeights.add(dto.toEntity(existingId = existing.id))
+                                updated++
+                                conflicts++
+                            } else {
+                                skipped++
+                                conflicts++
+                            }
+                        }
+                    }
+                    if (toInsertWeights.isNotEmpty()) {
+                        userDatabase.weightDao().insertWeightEntries(toInsertWeights)
+                    }
+
+                    // 5. Merge Water Logs
+                    val existingWater = userDatabase.waterDao().getAllWaterLogsList()
+                        .map { Triple(it.dateEpochDay, it.timestamp, it.amountMl) }.toSet()
+                    val toInsertWater = mutableListOf<WaterLogEntity>()
+                    for (dto in backupData.waterEntries) {
+                        val key = Triple(dto.dateEpochDay, dto.timestamp, dto.amountMl)
+                        if (!existingWater.contains(key)) {
+                            toInsertWater.add(dto.toEntity())
+                            imported++
+                        } else {
+                            skipped++
+                        }
+                    }
+                    if (toInsertWater.isNotEmpty()) {
+                        userDatabase.waterDao().insertWaterLogs(toInsertWater)
+                    }
+                }
+
+                // Merge keeps this phone's goals and profile. A backup only fills them on a phone
+                // where none were saved yet, such as a fresh install (BUG-016).
+                var keptGoals = false
+                var keptProfile = false
+                val settingsNote = restoringSettings {
+                    backupData.goals?.let { g ->
+                        if (goalsRepository.hasSavedGoals()) {
+                            keptGoals = true
+                            skipped++
+                        } else {
+                            goalsRepository.restoreGoalBackup(g)
+                            imported++
+                        }
+                    }
+                    backupData.preferences?.let { p ->
+                        if (preferencesRepository.hasSavedPreferences()) {
+                            keptProfile = true
+                            skipped++
+                        } else {
+                            preferencesRepository.updatePreferences(p.toPreferences(preferencesRepository.getPreferences()))
+                            imported++
                         }
                     }
                 }
 
-                // Goals & Preferences in Merge mode: Update to backup values
-                backupData.goals?.let { g ->
-                    goalsRepository.updateGoals(
-                        Goal(
-                            dailyCalorieGoal = g.dailyCalorieGoal,
-                            carbPercentage = g.carbPercentage,
-                            proteinPercentage = g.proteinPercentage,
-                            fatPercentage = g.fatPercentage
-                        )
-                    )
-                    updated++
+                val kept = when {
+                    keptGoals && keptProfile -> "goals and profile were"
+                    keptGoals -> "goals were"
+                    keptProfile -> "profile was"
+                    else -> null
                 }
-
-                backupData.preferences?.let { p ->
-                    preferencesRepository.updatePreferences(
-                        UserPreferences(
-                            firstName = p.firstName,
-                            lastName = p.lastName,
-                            timeZone = p.timeZone,
-                            unitSystem = try { UnitSystem.valueOf(p.unitSystem) } catch (e: Exception) { UnitSystem.METRIC },
-                            heightCm = p.heightCm,
-                            currentWeightKg = p.currentWeightKg,
-                            targetWeightKg = p.targetWeightKg,
-                            dailyWaterGoalMl = p.dailyWaterGoalMl
-                        )
-                    )
-                    updated++
-                }
-
+                val keptNote = kept?.let { " Your current $it kept; restore with Overwrite to use the backup's." } ?: ""
                 ImportResult(
                     isSuccess = true,
                     mode = ImportMode.MERGE,
@@ -414,7 +417,7 @@ class PortabilityRepositoryImpl(
                     recordsSkipped = skipped,
                     recordsUpdated = updated,
                     conflictsResolved = conflicts,
-                    message = "Merge complete: $imported imported, $updated updated, $skipped skipped."
+                    message = "Merge complete: $imported imported, $updated updated, $skipped skipped.$keptNote$settingsNote"
                 )
             }
         } catch (e: Exception) {
@@ -426,7 +429,34 @@ class PortabilityRepositoryImpl(
         }
     }
 
+    /**
+     * Goals and profile live outside the database, so they are written after its transaction has
+     * committed. If writing them fails, the records are still restored: say exactly that instead
+     * of reporting the whole import as failed. Returns a note for the result message.
+     */
+    private suspend fun restoringSettings(block: suspend () -> Unit): String = try {
+        block()
+        ""
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        " Your records were restored, but your goals and profile could not be saved (${e.message ?: "storage error"})."
+    }
+
     // Helper Entity Converters
+
+    /** The backup's profile fields over [current], so settings a backup does not carry are kept. */
+    private fun UserPreferencesBackupDto.toPreferences(current: UserPreferences) = current.copy(
+        firstName = firstName,
+        lastName = lastName,
+        timeZone = timeZone,
+        unitSystem = try { UnitSystem.valueOf(unitSystem) } catch (e: Exception) { UnitSystem.METRIC },
+        heightCm = heightCm,
+        currentWeightKg = currentWeightKg,
+        targetWeightKg = targetWeightKg,
+        dailyWaterGoalMl = dailyWaterGoalMl
+    )
+
     private fun CustomFoodBackupDto.toEntity(existingId: Long = 0L) = CustomFoodEntity(
         id = existingId,
         uuid = uuid,
@@ -434,6 +464,7 @@ class PortabilityRepositoryImpl(
         brand = brand,
         servingSize = servingSize,
         servingUnit = servingUnit,
+        customUnitName = customUnitName,
         calories = calories,
         proteinGrams = proteinGrams,
         carbsGrams = carbsGrams,
@@ -460,12 +491,12 @@ class PortabilityRepositoryImpl(
         createdAt = createdAt
     )
 
-    private fun DiaryEntryBackupDto.toEntity() = DiaryEntryEntity(
+    private fun DiaryEntryBackupDto.toEntity(resolvedFoodId: Long = foodId) = DiaryEntryEntity(
         id = 0L,
         uuid = uuid,
         dateEpochDay = dateEpochDay,
         mealType = mealType,
-        foodId = foodId,
+        foodId = resolvedFoodId,
         foodName = foodName,
         userQuantity = userQuantity,
         servingDescription = servingDescription,
@@ -474,8 +505,51 @@ class PortabilityRepositoryImpl(
         loggedProtein = loggedProtein,
         loggedCarbs = loggedCarbs,
         loggedFat = loggedFat,
+        // Null stays null: older backups lack these, and "unknown" must not become 0.0 (BUG-037)
+        loggedFiber = loggedFiber,
+        loggedSugar = loggedSugar,
+        loggedSodium = loggedSodium,
+        loggedSaturatedFat = loggedSaturatedFat,
+        loggedTransFat = loggedTransFat,
+        loggedCholesterol = loggedCholesterol,
         createdAt = createdAt
     )
+
+    /**
+     * Restored custom foods and recipes get new Room row ids, so a diary entry's food id from
+     * the backup is stale. Re-point it by the food's uuid; backups without one (custom foods
+     * before format 1.1.0, or a link that no longer matched at export) fall back to a unique
+     * name match. Call after custom foods and recipes are written.
+     *
+     * The backup's row id means nothing in this database, so an entry that cannot be matched
+     * (food deleted before export, or two foods with the same name) is unlinked rather than
+     * kept: it then always opens from its own snapshot, never as another food.
+     * Catalog ids and older raw ids are kept.
+     */
+    private suspend fun foodIdResolver(): (DiaryEntryBackupDto) -> Long {
+        val localFoods = userDatabase.customFoodDao().getAllCustomFoods()
+        val foodRowIdByUuid = localFoods.associate { it.uuid to it.id }
+        val foodsByName = localFoods.groupBy { it.name.trim().lowercase() }
+        val localRecipes = userDatabase.recipeDao().getAllRecipes()
+        val recipeRowIdByUuid = localRecipes.associate { it.uuid to it.id }
+        val recipesByName = localRecipes.groupBy { it.name.trim().lowercase() }
+        return { dto ->
+            val name = dto.foodName.trim().lowercase()
+            when {
+                FoodRepositoryImpl.customRowIdOrNull(dto.foodId) != null -> {
+                    val rowId = dto.customFoodUuid?.let { foodRowIdByUuid[it] }
+                        ?: foodsByName[name]?.singleOrNull()?.id
+                    rowId?.let { FoodRepositoryImpl.CUSTOM_FOOD_ID_OFFSET + it } ?: FoodRepositoryImpl.UNLINKED_CUSTOM_FOOD_ID
+                }
+                Recipe.rowIdOrNull(dto.foodId) != null -> {
+                    val rowId = dto.recipeUuid?.let { recipeRowIdByUuid[it] }
+                        ?: recipesByName[name]?.singleOrNull()?.id
+                    rowId?.let { Recipe.FOOD_ID_OFFSET + it } ?: Recipe.UNLINKED_FOOD_ID
+                }
+                else -> dto.foodId
+            }
+        }
+    }
 
     private fun WeightEntryBackupDto.toEntity(existingId: Long = 0L) = WeightEntryEntity(
         id = existingId,
@@ -497,6 +571,7 @@ class PortabilityRepositoryImpl(
                 brand == dto.brand &&
                 servingSize == dto.servingSize &&
                 servingUnit == dto.servingUnit &&
+                customUnitName == dto.customUnitName &&
                 calories == dto.calories &&
                 proteinGrams == dto.proteinGrams &&
                 carbsGrams == dto.carbsGrams &&

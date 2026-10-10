@@ -65,6 +65,23 @@ class DashboardNavigationUnitTests {
         Dispatchers.resetMain()
     }
 
+    // "Today" comes from the injected clock, so a test can step across midnight
+    @Test
+    fun testF_todayComesFromTheInjectedClock() {
+        val clock = com.macrobase.app.testutil.MutableTestClock(LocalDate.of(2026, 3, 9), java.time.LocalTime.of(23, 59))
+        val viewModel = HomeViewModel(
+            getDailyDiaryUseCase = getDailyDiaryUseCase,
+            deleteDiaryEntryUseCase = deleteDiaryEntryUseCase,
+            addFoodToBasketUseCase = addFoodToBasketUseCase,
+            clock = clock
+        )
+        assertEquals(LocalDate.of(2026, 3, 9), viewModel.selectedDate.value)
+
+        clock.advanceBy(java.time.Duration.ofMinutes(2))
+        viewModel.resetToToday()
+        assertEquals(LocalDate.of(2026, 3, 10), viewModel.selectedDate.value)
+    }
+
     /**
      * Test A: Main Dashboard navigation -> today's date
      */

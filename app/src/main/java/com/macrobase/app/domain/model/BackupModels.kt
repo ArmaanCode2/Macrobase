@@ -53,7 +53,19 @@ data class DiaryEntryBackupDto(
     val loggedProtein: Double,
     val loggedCarbs: Double,
     val loggedFat: Double,
-    val createdAt: Long
+    val createdAt: Long,
+    // Added in backup format 1.1.0; null when restoring older backups
+    val loggedFiber: Double? = null,
+    val loggedSugar: Double? = null,
+    val loggedSodium: Double? = null,
+    // Added in backup format 1.3.0
+    val loggedSaturatedFat: Double? = null,
+    val loggedTransFat: Double? = null,
+    val loggedCholesterol: Double? = null,
+    /** Stable id of the logged custom food; Room row ids change when a backup is restored. */
+    val customFoodUuid: String? = null,
+    /** Stable id of the logged recipe, for the same reason. */
+    val recipeUuid: String? = null
 )
 
 /**
@@ -75,7 +87,8 @@ data class CustomFoodBackupDto(
     val potassiumMg: Double?,
     val calciumMg: Double?,
     val ironMg: Double?,
-    val createdAt: Long
+    val createdAt: Long,
+    val customUnitName: String? = null
 )
 
 /**
@@ -116,8 +129,50 @@ data class WaterLogBackupDto(
 
 /**
  * Portable Backup DTO for Goals.
+ *
+ * Backups before format 1.2.0 carry only the four targets; the strategy fields are then null and
+ * a restore keeps the device's own strategy, scheduled change and history (BUG-016).
  */
 data class GoalBackupDto(
+    val dailyCalorieGoal: Double,
+    val carbPercentage: Double,
+    val proteinPercentage: Double,
+    val fatPercentage: Double,
+    val fitnessGoal: String? = null,
+    val maintenanceCalories: Double? = null,
+    val scheduledFitnessGoal: String? = null,
+    val scheduledMaintenanceCalories: Double? = null,
+    /** ISO date (yyyy-MM-dd) the scheduled strategy takes effect. */
+    val scheduledEffectiveDate: String? = null,
+    /** Strategy history, oldest first; null when the backup did not record it. */
+    val transitions: List<GoalTransitionBackupDto>? = null
+) {
+    /** A calorie target above 0 and non-negative macro shares, as the Goals screen allows. */
+    val hasUsableTargets: Boolean
+        get() = dailyCalorieGoal.isFinite() && dailyCalorieGoal > 0.0 &&
+            listOf(carbPercentage, proteinPercentage, fatPercentage).all { it.isFinite() && it >= 0.0 }
+
+    companion object {
+        /** The goal as the app sees it now, without history. */
+        fun from(goal: Goal) = GoalBackupDto(
+            dailyCalorieGoal = goal.dailyCalorieGoal,
+            carbPercentage = goal.carbPercentage,
+            proteinPercentage = goal.proteinPercentage,
+            fatPercentage = goal.fatPercentage,
+            fitnessGoal = goal.fitnessGoal.name,
+            maintenanceCalories = goal.maintenanceCalories,
+            scheduledFitnessGoal = goal.scheduledFitnessGoal?.name,
+            scheduledMaintenanceCalories = goal.scheduledMaintenanceCalories,
+            scheduledEffectiveDate = goal.scheduledEffectiveDate?.toString()
+        )
+    }
+}
+
+/** One strategy change: the goals in force from [effectiveDate] (ISO date) on. */
+data class GoalTransitionBackupDto(
+    val effectiveDate: String,
+    val fitnessGoal: String,
+    val maintenanceCalories: Double,
     val dailyCalorieGoal: Double,
     val carbPercentage: Double,
     val proteinPercentage: Double,

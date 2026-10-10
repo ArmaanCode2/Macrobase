@@ -20,5 +20,7 @@ interface FoodRepository {
     fun observeCustomFoods(): Flow<List<Food>>
     suspend fun getCustomFoods(): List<Food>
     suspend fun saveCustomFood(food: CustomFood): Long
+    /** Full custom food (serving size, unit, all nutrients) for editing; null if absent. */
+    suspend fun getCustomFood(id: Long): CustomFood? = null
     suspend fun deleteCustomFood(id: Long)
 }

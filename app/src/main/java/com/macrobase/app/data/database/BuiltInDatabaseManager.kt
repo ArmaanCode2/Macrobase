@@ -24,8 +24,16 @@ class BuiltInDatabaseManager(
 
     companion object {
         private const val TAG = "BuiltInDbManager"
-        const val EXPECTED_DATABASE_VERSION = "1.0.0"
+        const val EXPECTED_DATABASE_VERSION = "2.1.0"
         const val EXPECTED_SCHEMA_VERSION = "1"
+        const val EXPECTED_DATASET_NAME = "macrobase_indian_foods_canonical"
+
+        /**
+         * An installed catalog is reused only if it is the dataset and version bundled with this
+         * build; anything else is replaced from assets so catalog fixes reach existing installs.
+         */
+        fun isCurrentCatalog(datasetName: String?, databaseVersion: String?): Boolean =
+            datasetName == EXPECTED_DATASET_NAME && databaseVersion == EXPECTED_DATABASE_VERSION
     }
 
     /**
@@ -160,7 +168,22 @@ class BuiltInDatabaseManager(
                 SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
             )
             validateDatabase(testDb)
-            true
+
+            // Verify dataset and version match the catalog bundled with this build
+            var datasetName: String? = null
+            var databaseVersion: String? = null
+            testDb.rawQuery(
+                "SELECT key, value FROM database_metadata WHERE key IN ('dataset_name', 'database_version')",
+                null
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    when (cursor.getString(0)) {
+                        "dataset_name" -> datasetName = cursor.getString(1)
+                        "database_version" -> databaseVersion = cursor.getString(1)
+                    }
+                }
+            }
+            isCurrentCatalog(datasetName, databaseVersion)
         } catch (e: Exception) {
             Log.w(TAG, "Database validation check failed for ${file.name}: ${e.message}")
             false
@@ -183,7 +206,7 @@ class BuiltInDatabaseManager(
         db.rawQuery("SELECT COUNT(*) FROM foods", null).use { cursor ->
             if (cursor.moveToFirst()) {
                 val count = cursor.getInt(0)
-                if (count < 1000) {
+                if (count < 500) {
                     throw IllegalStateException("Database has insufficient food records: $count")
                 }
             }

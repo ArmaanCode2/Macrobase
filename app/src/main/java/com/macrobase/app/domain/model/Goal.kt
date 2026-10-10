@@ -1,7 +1,20 @@
 package com.macrobase.app.domain.model
 
 import com.macrobase.app.core.config.NutritionStandardConfig
+import java.time.LocalDate
 import kotlin.math.abs
+
+enum class FitnessGoal(val displayName: String) {
+    MAINTAINING("Maintaining"),
+    BULKING("Bulking"),
+    CUTTING("Cutting");
+
+    companion object {
+        fun fromString(name: String?): FitnessGoal {
+            return entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: MAINTAINING
+        }
+    }
+}
 
 /**
  * Domain model representing user calorie and macronutrient split targets.
@@ -13,7 +26,12 @@ data class Goal(
     val dailyCalorieGoal: Double = 2000.0,
     val carbPercentage: Double = 50.0,
     val proteinPercentage: Double = 25.0,
-    val fatPercentage: Double = 25.0
+    val fatPercentage: Double = 25.0,
+    val fitnessGoal: FitnessGoal = FitnessGoal.MAINTAINING,
+    val maintenanceCalories: Double = 2000.0,
+    val scheduledFitnessGoal: FitnessGoal? = null,
+    val scheduledMaintenanceCalories: Double? = null,
+    val scheduledEffectiveDate: LocalDate? = null
 ) {
     /**
      * Target carbohydrate amount in grams.
@@ -52,5 +70,5 @@ data class Goal(
      * Validates overall goal configuration.
      */
     val isValid: Boolean
-        get() = dailyCalorieGoal > 0 && carbPercentage >= 0 && proteinPercentage >= 0 && fatPercentage >= 0 && isValidPercentageSum
+        get() = dailyCalorieGoal > 0 && maintenanceCalories > 0 && carbPercentage >= 0 && proteinPercentage >= 0 && fatPercentage >= 0 && isValidPercentageSum
 }

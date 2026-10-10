@@ -1,7 +1,5 @@
 package com.macrobase.app.core.di
 
-import androidx.room.Room
-import com.macrobase.app.core.config.DatabaseConfig
 import com.macrobase.app.data.database.BuiltInDatabaseManager
 import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.provider.FoodDataProvider
@@ -77,44 +75,50 @@ import com.macrobase.app.domain.usecase.basket.ClearBasketUseCase
 import com.macrobase.app.domain.usecase.basket.CommitBasketUseCase
 import com.macrobase.app.domain.usecase.basket.CommitSingleBasketItemUseCase
 import com.macrobase.app.feature.basket.BasketViewModel
+import com.macrobase.app.domain.repository.rank.RankRepository
+import com.macrobase.app.data.repository.rank.RankRepositoryImpl
+import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
+import com.macrobase.app.domain.usecase.rank.CalculateLifestyleScoreUseCase
+import com.macrobase.app.feature.rank.RankViewModel
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 val databaseModule = module {
-    single {
-        Room.databaseBuilder(
-            get(),
-            UserDatabase::class.java,
-            DatabaseConfig.USER_DATABASE_NAME
-        )
-        .addMigrations(UserDatabase.MIGRATION_1_2)
-        .fallbackToDestructiveMigration()
-        .build()
-    }
+    single { UserDatabase.create(get()) }
 
     single { get<UserDatabase>().diaryDao() }
     single { get<UserDatabase>().customFoodDao() }
     single { get<UserDatabase>().recipeDao() }
     single { get<UserDatabase>().weightDao() }
     single { get<UserDatabase>().waterDao() }
+    single { com.macrobase.app.data.repository.DiaryFoodLinkRepair(get()) }
 
     single { BuiltInDatabaseManager(get()) }
     single<FoodDataProvider> { LocalFoodDatabaseProvider(get()) }
 }
 
 val repositoryModule = module {
+    // "Now" for every class that reads the date; tests pass a fixed clock instead
+    single<java.time.Clock> { com.macrobase.app.core.util.DeviceClock }
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
     single<GoalsRepository> { GoalsRepositoryImpl(get()) }
-    single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get()) }
+    single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get(), get()) }
     single<FoodRepository> { FoodRepositoryImpl(get(), get()) }
     single<RecipeRepository> { RecipeRepositoryImpl(get()) }
     single<WeightRepository> { WeightRepositoryImpl(get()) }
     single<WaterRepository> { WaterRepositoryImpl(get()) }
-    single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get()) }
+    single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get(), get()) }
     single<PortabilityRepository> { PortabilityRepositoryImpl(get(), get(), get()) }
-    single<com.macrobase.app.domain.repository.basket.BasketRepository> { com.macrobase.app.data.repository.basket.InMemoryBasketRepository() }
+    // Saved to the app's private files so staged items survive the process being killed (BUG-015)
+    single<com.macrobase.app.domain.repository.basket.BasketRepository> {
+        com.macrobase.app.data.repository.basket.PersistentBasketRepository(
+            file = java.io.File(get<android.content.Context>().filesDir, "basket.json"),
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+        )
+    }
+    single<RankRepository> { RankRepositoryImpl(get(), get(), get(), get(), get(), get()) }
 }
 
 val useCaseModule = module {
@@ -160,6 +164,10 @@ val useCaseModule = module {
     singleOf(::ClearBasketUseCase)
     singleOf(::CommitBasketUseCase)
     singleOf(::CommitSingleBasketItemUseCase)
+
+    // Rank
+    singleOf(::GetRankProfileUseCase)
+    singleOf(::CalculateLifestyleScoreUseCase)
 }
 
 val viewModelModule = module {
@@ -177,6 +185,7 @@ val viewModelModule = module {
     viewModelOf(::ImportExportViewModel)
     viewModelOf(::NutritionLabelScannerViewModel)
     viewModelOf(::BasketViewModel)
+    viewModelOf(::RankViewModel)
 }
 
 val appModules = listOf(

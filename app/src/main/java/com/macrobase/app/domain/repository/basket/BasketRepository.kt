@@ -10,6 +10,8 @@ interface BasketRepository {
     
     fun addItem(item: BasketItem)
     fun removeItem(itemId: String)
+    /** Removes exactly these items in one atomic update; items added meanwhile are kept. */
+    fun removeItems(itemIds: Set<String>) = itemIds.forEach { removeItem(it) }
     fun updateItem(item: BasketItem)
     fun updateAllMeals(mealType: MealType)
     fun updateAllDates(date: LocalDate)

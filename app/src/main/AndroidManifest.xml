@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Zero network: ML Kit pulls in Google's datatransport logging, which adds INTERNET.
+         Strip it; the build fails if any merged manifest still requests INTERNET.
+         ACCESS_NETWORK_STATE stays: it grants no network access, the transport runtime reads
+         it when draining upload jobs queued by older app versions, and on API 34+ JobScheduler
+         network constraints throw a SecurityException without it. -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
@@ -25,6 +33,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".feature.widget.MacroBaseWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/macrobase_widget_info" />
+        </receiver>
+
+        <!-- Unregister the Google CCT upload backend so ML Kit usage events are dropped
+             instead of queued. The classes stay because ML Kit references them. -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            tools:node="merge">
+            <meta-data
+                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
+                tools:node="remove" />
+        </service>
     </application>
 
 </manifest>

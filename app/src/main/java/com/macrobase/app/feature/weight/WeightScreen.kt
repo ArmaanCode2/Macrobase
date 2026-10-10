@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,13 +53,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -795,6 +799,10 @@ fun WeightScreen(
 /**
  * Dedicated Canvas-based Cubic Bezier Line Graph matching Section 8 of UI_UX_SPECIFICATION.md.
  */
+/**
+ * Dedicated Canvas-based Cubic Bezier Line Graph matching Section 8 of UI_UX_SPECIFICATION.md
+ * with interactive data point selection and tooltip overlay.
+ */
 @Composable
 fun WeightLineGraph(
     entries: List<WeightEntry>,
@@ -802,19 +810,41 @@ fun WeightLineGraph(
     modifier: Modifier = Modifier
 ) {
     val shortDateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd") }
+    val tooltipDateFormatter = remember { DateTimeFormatter.ofPattern("MMM d") }
 
-    val weights = entries.map {
-        if (isImperial) UnitConversions.kgToLbs(it.weightKg) else it.weightKg
+    val weights = remember(entries, isImperial) {
+        entries.map {
+            if (isImperial) UnitConversions.kgToLbs(it.weightKg) else it.weightKg
+        }
     }
 
-    val minW = floor(weights.minOrNull() ?: 50.0) - 1.0
-    val maxW = ceil(weights.maxOrNull() ?: 100.0) + 1.0
-    val rangeW = (maxW - minW).coerceAtLeast(1.0)
+    val minW = remember(weights) { floor(weights.minOrNull() ?: 50.0) - 1.0 }
+    val maxW = remember(weights) { ceil(weights.maxOrNull() ?: 100.0) + 1.0 }
+    val rangeW = remember(minW, maxW) { (maxW - minW).coerceAtLeast(1.0) }
 
     val graphCyan = Color(0xFF81D4FA)
     val textGray = android.graphics.Color.parseColor("#888888")
 
-    Canvas(modifier = modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
+    // Interactive tooltip state: resets when entries or date interval changes
+    var selectedIndex by remember(entries) { mutableStateOf<Int?>(null) }
+    var currentPointOffsets by remember { mutableStateOf<List<Offset>>(emptyList()) }
+
+    Canvas(
+        modifier = modifier
+            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .pointerInput(entries, isImperial) {
+                detectTapGestures { tapOffset ->
+                    val points = currentPointOffsets
+                    if (points.isNotEmpty()) {
+                        val hitRadius = 32.dp.toPx()
+                        val nearest = WeightGraphHelper.findNearestPointIndex(tapOffset, points, hitRadius)
+                        selectedIndex = nearest
+                    } else {
+                        selectedIndex = null
+                    }
+                }
+            }
+    ) {
         val width = size.width
         val height = size.height
         val paddingLeft = 40.dp.toPx()
@@ -857,18 +887,19 @@ fun WeightLineGraph(
         }
 
         // 2. Map Data Points to Coordinates
-        val pointOffsets = mutableListOf<Offset>()
-        val n = entries.size
-        for (i in entries.indices) {
-            val x = if (n > 1) {
-                paddingLeft + (i.toFloat() / (n - 1).toFloat()) * plotWidth
-            } else {
-                paddingLeft + plotWidth / 2f
-            }
-            val w = weights[i]
-            val y = paddingTop + plotHeight - ((w - minW) / rangeW).toFloat() * plotHeight
-            pointOffsets.add(Offset(x, y))
-        }
+        val pointOffsets = WeightGraphHelper.calculatePointOffsets(
+            entries = entries,
+            weights = weights,
+            minW = minW,
+            rangeW = rangeW,
+            width = width,
+            height = height,
+            paddingLeft = paddingLeft,
+            paddingRight = paddingRight,
+            paddingTop = paddingTop,
+            paddingBottom = paddingBottom
+        )
+        currentPointOffsets = pointOffsets
 
         // 3. Construct Cubic Bezier Path
         val linePath = Path()
@@ -906,23 +937,45 @@ fun WeightLineGraph(
                 style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
             )
 
-            // 6. Draw Circular Data Points (White filled with Cyan border)
+            // 6. Draw Circular Data Points
             val pointRadius = 4.dp.toPx()
             val borderThickness = 2.dp.toPx()
 
-            pointOffsets.forEach { pt ->
-                // Outer Cyan Border
-                drawCircle(
-                    color = graphCyan,
-                    radius = pointRadius + borderThickness / 2f,
-                    center = pt
-                )
-                // Inner White Fill
-                drawCircle(
-                    color = Color.White,
-                    radius = pointRadius,
-                    center = pt
-                )
+            pointOffsets.forEachIndexed { index, pt ->
+                val isSelected = (index == selectedIndex)
+                if (isSelected) {
+                    // Outer glow halo for selected point
+                    drawCircle(
+                        color = graphCyan.copy(alpha = 0.35f),
+                        radius = pointRadius + 5.dp.toPx(),
+                        center = pt
+                    )
+                    // Outer Cyan Border
+                    drawCircle(
+                        color = graphCyan,
+                        radius = pointRadius + borderThickness,
+                        center = pt
+                    )
+                    // Inner White Fill
+                    drawCircle(
+                        color = Color.White,
+                        radius = pointRadius,
+                        center = pt
+                    )
+                } else {
+                    // Outer Cyan Border
+                    drawCircle(
+                        color = graphCyan,
+                        radius = pointRadius + borderThickness / 2f,
+                        center = pt
+                    )
+                    // Inner White Fill
+                    drawCircle(
+                        color = Color.White,
+                        radius = pointRadius,
+                        center = pt
+                    )
+                }
             }
 
             // 7. Draw X-Axis Date Labels
@@ -955,18 +1008,183 @@ fun WeightLineGraph(
                     xTextPaint
                 )
             }
+
+            // 8. Draw Interactive Tooltip for Selected Point
+            val activeIdx = selectedIndex
+            if (activeIdx != null && activeIdx in entries.indices && activeIdx in pointOffsets.indices) {
+                val selPoint = pointOffsets[activeIdx]
+                val selEntry = entries[activeIdx]
+
+                val dateText = selEntry.date.format(tooltipDateFormatter)
+                val weightText = formatWeightValue(selEntry.weightKg, isImperial)
+
+                val tooltipDatePaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.parseColor("#B0BEC5")
+                    textSize = 10.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    typeface = android.graphics.Typeface.DEFAULT
+                    isAntiAlias = true
+                }
+
+                val tooltipWeightPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.WHITE
+                    textSize = 12.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    isAntiAlias = true
+                }
+
+                val dateWidth = tooltipDatePaint.measureText(dateText)
+                val weightWidth = tooltipWeightPaint.measureText(weightText)
+                val tooltipWidth = maxOf(dateWidth, weightWidth) + 20.dp.toPx()
+                val tooltipHeight = 38.dp.toPx()
+                val cornerRadius = 6.dp.toPx()
+
+                val bounds = WeightGraphHelper.calculateTooltipBounds(
+                    point = selPoint,
+                    tooltipWidth = tooltipWidth,
+                    tooltipHeight = tooltipHeight,
+                    canvasWidth = width,
+                    canvasHeight = height,
+                    marginPx = 4.dp.toPx()
+                )
+
+                val centerX = bounds.leftX + bounds.width / 2f
+
+                // Background container
+                drawRoundRect(
+                    color = Color(0xFF1E1E1E),
+                    topLeft = Offset(bounds.leftX, bounds.topY),
+                    size = Size(bounds.width, bounds.height),
+                    cornerRadius = CornerRadius(cornerRadius, cornerRadius)
+                )
+
+                // Border outline
+                drawRoundRect(
+                    color = Color(0xFF424242),
+                    topLeft = Offset(bounds.leftX, bounds.topY),
+                    size = Size(bounds.width, bounds.height),
+                    cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+                    style = Stroke(width = 1.dp.toPx())
+                )
+
+                // Render formatted Date & Weight
+                drawContext.canvas.nativeCanvas.drawText(
+                    dateText,
+                    centerX,
+                    bounds.topY + 14.dp.toPx(),
+                    tooltipDatePaint
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    weightText,
+                    centerX,
+                    bounds.topY + 30.dp.toPx(),
+                    tooltipWeightPaint
+                )
+            }
         }
     }
 }
 
-private fun formatWeightValue(kg: Double?, isImperial: Boolean): String {
+internal object WeightGraphHelper {
+    fun calculatePointOffsets(
+        entries: List<WeightEntry>,
+        weights: List<Double>,
+        minW: Double,
+        rangeW: Double,
+        width: Float,
+        height: Float,
+        paddingLeft: Float,
+        paddingRight: Float,
+        paddingTop: Float,
+        paddingBottom: Float
+    ): List<Offset> {
+        if (entries.isEmpty()) return emptyList()
+        val plotWidth = width - paddingLeft - paddingRight
+        val plotHeight = height - paddingTop - paddingBottom
+        val n = entries.size
+        return entries.indices.map { i ->
+            val x = if (n > 1) {
+                paddingLeft + (i.toFloat() / (n - 1).toFloat()) * plotWidth
+            } else {
+                paddingLeft + plotWidth / 2f
+            }
+            val w = weights[i]
+            val y = paddingTop + plotHeight - ((w - minW) / rangeW).toFloat() * plotHeight
+            Offset(x, y)
+        }
+    }
+
+    fun findNearestPointIndex(
+        tapOffset: Offset,
+        pointOffsets: List<Offset>,
+        hitThresholdPx: Float
+    ): Int? {
+        if (pointOffsets.isEmpty()) return null
+        var bestIndex = -1
+        var minDistance = Float.MAX_VALUE
+        for (i in pointOffsets.indices) {
+            val dist = (pointOffsets[i] - tapOffset).getDistance()
+            if (dist < minDistance && dist <= hitThresholdPx) {
+                minDistance = dist
+                bestIndex = i
+            }
+        }
+        return if (bestIndex >= 0) bestIndex else null
+    }
+
+    data class TooltipBounds(
+        val leftX: Float,
+        val topY: Float,
+        val width: Float,
+        val height: Float
+    )
+
+    fun calculateTooltipBounds(
+        point: Offset,
+        tooltipWidth: Float,
+        tooltipHeight: Float,
+        canvasWidth: Float,
+        canvasHeight: Float,
+        marginPx: Float = 4f
+    ): TooltipBounds {
+        var topY = point.y - tooltipHeight - 8f
+        if (topY < marginPx) {
+            topY = point.y + 10f
+        }
+        if (topY + tooltipHeight > canvasHeight - marginPx) {
+            topY = canvasHeight - marginPx - tooltipHeight
+        }
+
+        var leftX = point.x - tooltipWidth / 2f
+        if (leftX < marginPx) {
+            leftX = marginPx
+        }
+        if (leftX + tooltipWidth > canvasWidth - marginPx) {
+            leftX = canvasWidth - marginPx - tooltipWidth
+        }
+
+        return TooltipBounds(
+            leftX = leftX,
+            topY = topY,
+            width = tooltipWidth,
+            height = tooltipHeight
+        )
+    }
+
+    fun formatTooltipDate(date: LocalDate): String {
+        return date.format(DateTimeFormatter.ofPattern("MMM d"))
+    }
+}
+
+internal fun formatWeightValue(kg: Double?, isImperial: Boolean): String {
     if (kg == null || kg <= 0.0) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(kg) else kg
     val unit = if (isImperial) "lb" else "kg"
     return "${String.format("%.1f", v)} $unit"
 }
 
-private fun formatWeightDelta(deltaKg: Double?, isImperial: Boolean): String {
+internal fun formatWeightDelta(deltaKg: Double?, isImperial: Boolean): String {
     if (deltaKg == null) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(deltaKg) else deltaKg
     val unit = if (isImperial) "lb" else "kg"

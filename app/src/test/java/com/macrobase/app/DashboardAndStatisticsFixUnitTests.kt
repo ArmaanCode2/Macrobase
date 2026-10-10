@@ -15,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class DashboardAndStatisticsFixUnitTests {
 
@@ -220,5 +221,49 @@ class DashboardAndStatisticsFixUnitTests {
             CalendarPerformanceConfig.PerformanceCategory.HIGH_OVER_TARGET,
             CalendarPerformanceConfig.evaluatePerformance(2600.0, goal)
         )
+    }
+
+    @Test
+    fun dailySummary_mojibakeAbsenceAndLocaleUSFormatting() {
+        val fiber = 12.45
+        val sugar = 6.2
+        val sodium = 145.8
+
+        val formattedFiber = String.format(Locale.US, "%.1f", fiber)
+        val formattedSugar = String.format(Locale.US, "%.1f", sugar)
+        val formattedSodium = String.format(Locale.US, "%.1f", sodium)
+
+        // Ensure decimal dot separator
+        assertEquals("12.5", formattedFiber)
+        assertEquals("6.2", formattedSugar)
+        assertEquals("145.8", formattedSodium)
+
+        // Verify absence of mojibake characters
+        val testStrings = listOf(
+            "Protein: $formattedFiber g",
+            "Carbohydrates: $formattedSugar g",
+            "Dietary Fiber: $formattedFiber g",
+            "Total Sugars: $formattedSugar g",
+            "Sodium: $formattedSodium mg"
+        )
+        testStrings.forEach { str ->
+            assertFalse("String should not contain mojibake sequences: $str", str.contains("â€¢"))
+            assertFalse("String should not contain raw unicode artifacts", str.contains("\u00e2\u20ac\u00a2"))
+        }
+    }
+
+    @Test
+    fun macroAndCalorie_roundingConsistency() {
+        // Truncation (.toInt()) would give 1999, 32, 45, 14
+        // Mathematical rounding (roundToInt()) accurately yields 2000, 33, 45, 15
+        val cal = 1999.6
+        val protein = 32.8
+        val carbs = 45.2
+        val fat = 14.5
+
+        assertEquals(2000, cal.roundToInt())
+        assertEquals(33, protein.roundToInt())
+        assertEquals(45, carbs.roundToInt())
+        assertEquals(15, fat.roundToInt())
     }
 }

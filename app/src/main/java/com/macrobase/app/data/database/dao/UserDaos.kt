@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.macrobase.app.data.database.entity.CustomFoodEntity
 import com.macrobase.app.data.database.entity.DiaryEntryEntity
 import com.macrobase.app.data.database.entity.RecipeEntity
@@ -22,11 +23,22 @@ interface DiaryDao {
     @Query("SELECT * FROM diary_entries WHERE id = :entryId LIMIT 1")
     suspend fun getEntryById(entryId: Long): DiaryEntryEntity?
 
+    @Query("SELECT * FROM diary_entries WHERE foodId > :fromExclusive AND foodId < :toExclusive")
+    suspend fun getEntriesWithFoodIdBetween(fromExclusive: Long, toExclusive: Long): List<DiaryEntryEntity>
+
+    /** Re-points an entry at its food; never touches the logged snapshot values. */
+    @Query("UPDATE diary_entries SET foodId = :foodId WHERE id = :entryId")
+    suspend fun updateFoodId(entryId: Long, foodId: Long)
+
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntry(entry: DiaryEntryEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEntries(entries: List<DiaryEntryEntity>)
+
+    @Update
+    suspend fun updateEntry(entry: DiaryEntryEntity)
 
     @Query("DELETE FROM diary_entries WHERE id = :entryId")
     suspend fun deleteEntry(entryId: Long)

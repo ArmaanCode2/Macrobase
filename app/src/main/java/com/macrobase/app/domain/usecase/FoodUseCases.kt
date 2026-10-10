@@ -47,13 +47,6 @@ class GetFoodServingsUseCase(
  * Does not depend on UI or database.
  */
 class CalculateNutritionForServingUseCase {
-    operator fun invoke(food: Food, serving: Serving, userQuantity: Double): Nutrition {
-        if (userQuantity <= 0.0) return Nutrition.ZERO
-        val multiplier = if (food.isUserOwned || food.source == com.macrobase.app.domain.model.FoodSource.CUSTOM_USER) {
-            if (serving.quantity > 0.0) userQuantity / serving.quantity else userQuantity
-        } else {
-            serving.calculateGramMultiplier(userQuantity)
-        }
-        return food.nutrition.scale(multiplier)
-    }
+    operator fun invoke(food: Food, serving: Serving, userQuantity: Double): Nutrition =
+        food.nutritionFor(serving, userQuantity)
 }

@@ -42,6 +42,13 @@ import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.components.PrimaryButton
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.ui.text.font.FontWeight
+import com.macrobase.app.domain.model.FitnessGoal
 import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.usecase.GetGoalsUseCase
 import com.macrobase.app.domain.usecase.UpdateGoalsUseCase
@@ -50,6 +57,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class DailyGoalsViewModel(
     private val getGoalsUseCase: GetGoalsUseCase,
@@ -59,13 +67,23 @@ class DailyGoalsViewModel(
     val goals: StateFlow<Goal> = getGoalsUseCase()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Goal())
 
-    fun updateGoals(calories: Double, carbsPct: Double, proteinPct: Double, fatPct: Double, onSuccess: () -> Unit) {
+    fun updateGoals(
+        calories: Double,
+        carbsPct: Double,
+        proteinPct: Double,
+        fatPct: Double,
+        fitnessGoal: FitnessGoal = FitnessGoal.MAINTAINING,
+        maintenanceCalories: Double = calories,
+        onSuccess: () -> Unit
+    ) {
         viewModelScope.launch {
             val updated = Goal(
                 dailyCalorieGoal = calories,
                 carbPercentage = carbsPct,
                 proteinPercentage = proteinPct,
-                fatPercentage = fatPct
+                fatPercentage = fatPct,
+                fitnessGoal = fitnessGoal,
+                maintenanceCalories = maintenanceCalories
             )
             val res = updateGoalsUseCase(updated)
             if (res.isSuccess) {
@@ -75,6 +93,7 @@ class DailyGoalsViewModel(
     }
 }
 
+@Deprecated("Use PreferencesScreen which consolidates all profile, biometrics, and daily goals")
 @Composable
 fun DailyGoalsScreen(
     viewModel: DailyGoalsViewModel,
@@ -83,26 +102,45 @@ fun DailyGoalsScreen(
 ) {
     val goals by viewModel.goals.collectAsState()
 
-    var caloriesText by remember(goals) { mutableStateOf(goals.dailyCalorieGoal.toInt().toString()) }
-    var carbsText by remember(goals) { mutableStateOf(goals.carbPercentage.toInt().toString()) }
-    var proteinText by remember(goals) { mutableStateOf(goals.proteinPercentage.toInt().toString()) }
-    var fatText by remember(goals) { mutableStateOf(goals.fatPercentage.toInt().toString()) }
+    var selectedGoal by remember(goals) { mutableStateOf(goals.fitnessGoal) }
+    var maintenanceCaloriesText by remember(goals) { mutableStateOf(goals.maintenanceCalories.roundToInt().toString()) }
+    var caloriesText by remember(goals) { mutableStateOf(goals.dailyCalorieGoal.roundToInt().toString()) }
+    var carbsText by remember(goals) { mutableStateOf(goals.carbPercentage.roundToInt().toString()) }
+    var proteinText by remember(goals) { mutableStateOf(goals.proteinPercentage.roundToInt().toString()) }
+    var fatText by remember(goals) { mutableStateOf(goals.fatPercentage.roundToInt().toString()) }
 
-    val calorieVal = (caloriesText.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
-    val carbPctVal = carbsText.toDoubleOrNull() ?: 0.0
-    val proteinPctVal = proteinText.toDoubleOrNull() ?: 0.0
-    val fatPctVal = fatText.toDoubleOrNull() ?: 0.0
+    val parsedMaintenance = maintenanceCaloriesText.toDoubleOrNull()
+    val isMaintenanceValid = parsedMaintenance != null && parsedMaintenance > 0.0
+    val maintenanceVal = (parsedMaintenance ?: 0.0).coerceAtLeast(0.0)
+
+    val parsedCalorie = caloriesText.toDoubleOrNull()
+    val isCalorieValid = parsedCalorie != null && parsedCalorie > 0.0
+    val calorieVal = (parsedCalorie ?: 0.0).coerceAtLeast(0.0)
+
+    val parsedCarbs = carbsText.toDoubleOrNull()
+    val isCarbsValid = parsedCarbs != null && parsedCarbs >= 0.0
+    val carbPctVal = parsedCarbs ?: 0.0
+
+    val parsedProtein = proteinText.toDoubleOrNull()
+    val isProteinValid = parsedProtein != null && parsedProtein >= 0.0
+    val proteinPctVal = parsedProtein ?: 0.0
+
+    val parsedFat = fatText.toDoubleOrNull()
+    val isFatValid = parsedFat != null && parsedFat >= 0.0
+    val fatPctVal = parsedFat ?: 0.0
 
     val previewGoal = Goal(
         dailyCalorieGoal = calorieVal,
         carbPercentage = carbPctVal,
         proteinPercentage = proteinPctVal,
-        fatPercentage = fatPctVal
+        fatPercentage = fatPctVal,
+        fitnessGoal = selectedGoal,
+        maintenanceCalories = maintenanceVal
     )
 
-    val totalPercentage = previewGoal.totalPercentage
+    val totalPercentage = previewGoal.totalPercentageExact
     val isValidSum = abs(totalPercentage - 100.0) < 0.01
-    val isFormValid = calorieVal > 0.0 && carbPctVal >= 0.0 && proteinPctVal >= 0.0 && fatPctVal >= 0.0 && isValidSum
+    val isFormValid = isCalorieValid && isMaintenanceValid && isCarbsValid && isProteinValid && isFatValid && isValidSum
 
     Column(
         modifier = modifier
@@ -113,15 +151,140 @@ fun DailyGoalsScreen(
     ) {
         Text(text = "Daily Goals", style = AppTypography.Header1)
         Text(
-            text = "Configure your daily caloric target and macronutrient distribution split.",
+            text = "Configure your lifestyle strategy, maintenance calories, and macronutrient targets.",
             style = AppTypography.Body2,
             color = AppColors.TextSecondary,
             modifier = Modifier.padding(top = AppSpacing.xs)
         )
 
-        Spacer(modifier = Modifier.height(AppSpacing.lg))
+        Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        // 1. Calorie Target Input Card
+        // Next-Day Notice Banner
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(AppColors.SurfaceAlt)
+                .border(1.dp, AppColors.Divider, RoundedCornerShape(8.dp))
+                .padding(AppSpacing.md)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = AppColors.Primary,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .padding(top = 2.dp)
+                )
+                Spacer(modifier = Modifier.width(AppSpacing.sm))
+                Column {
+                    Text(
+                        text = "Next-Day Evaluation Schedule",
+                        style = AppTypography.Body2.copy(fontWeight = FontWeight.Bold),
+                        color = AppColors.TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Note: Changing your strategy or maintenance calories takes effect starting tomorrow. Today's rating will be evaluated under your current strategy.",
+                        style = AppTypography.Caption,
+                        color = AppColors.TextSecondary
+                    )
+                    if (goals.scheduledFitnessGoal != null && (goals.scheduledFitnessGoal != goals.fitnessGoal || goals.scheduledMaintenanceCalories != goals.maintenanceCalories)) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Pending: Switching to ${goals.scheduledFitnessGoal?.displayName} (${goals.scheduledMaintenanceCalories?.roundToInt()} kcal) starting tomorrow.",
+                            style = AppTypography.Caption.copy(fontWeight = FontWeight.SemiBold, color = AppColors.Primary)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(AppSpacing.md))
+
+        // 1. Strategy & Maintenance Card
+        Card(
+            shape = AppShapes.Card,
+            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(AppSpacing.md)) {
+                Text(text = "FITNESS STRATEGY", style = AppTypography.Caption, color = AppColors.TextSecondary)
+                Spacer(modifier = Modifier.height(AppSpacing.sm))
+
+                // Strategy Segmented Control / FilterChips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                ) {
+                    val strategies = listOf(FitnessGoal.BULKING, FitnessGoal.MAINTAINING, FitnessGoal.CUTTING)
+                    strategies.forEach { strategy ->
+                        FilterChip(
+                            selected = selectedGoal == strategy,
+                            onClick = { selectedGoal = strategy },
+                            label = { Text(strategy.displayName) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AppColors.Primary,
+                                selectedLabelColor = AppColors.Background,
+                                containerColor = AppColors.SurfaceAlt,
+                                labelColor = AppColors.TextSecondary
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(AppSpacing.sm))
+
+                // Dynamic Helper Card
+                val helperText = when (selectedGoal) {
+                    FitnessGoal.BULKING -> "Target intake: +0 to +500 kcal surplus above maintenance. +350 kcal is optimal for maximum RR reward."
+                    FitnessGoal.CUTTING -> "Target intake: 0 to -500 kcal deficit below maintenance. -350 to -400 kcal is optimal for maximum RR reward."
+                    FitnessGoal.MAINTAINING -> "Target intake: Stay within \u00b1100 kcal of maintenance for maximum RR reward."
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AppColors.SurfaceAlt)
+                        .padding(AppSpacing.sm)
+                ) {
+                    Text(
+                        text = helperText,
+                        style = AppTypography.Caption,
+                        color = AppColors.TextSecondary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(AppSpacing.md))
+
+                // Maintenance Calories Input
+                OutlinedTextField(
+                    value = maintenanceCaloriesText,
+                    onValueChange = { maintenanceCaloriesText = it },
+                    isError = maintenanceCaloriesText.isNotBlank() && !isMaintenanceValid,
+                    label = { Text("Maintenance Calories (kcal)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppColors.Primary,
+                        unfocusedBorderColor = AppColors.Divider,
+                        focusedTextColor = AppColors.TextPrimary,
+                        unfocusedTextColor = AppColors.TextPrimary,
+                        errorBorderColor = AppColors.ProgressOver
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(AppSpacing.md))
+
+        // 2. Calorie Target Input Card
         Card(
             shape = AppShapes.Card,
             colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
@@ -134,6 +297,7 @@ fun DailyGoalsScreen(
                 OutlinedTextField(
                     value = caloriesText,
                     onValueChange = { caloriesText = it },
+                    isError = caloriesText.isNotBlank() && !isCalorieValid,
                     label = { Text("Daily Calorie Target (kcal)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                     singleLine = true,
@@ -142,7 +306,8 @@ fun DailyGoalsScreen(
                         focusedBorderColor = AppColors.Primary,
                         unfocusedBorderColor = AppColors.Divider,
                         focusedTextColor = AppColors.TextPrimary,
-                        unfocusedTextColor = AppColors.TextPrimary
+                        unfocusedTextColor = AppColors.TextPrimary,
+                        errorBorderColor = AppColors.ProgressOver
                     )
                 )
             }
@@ -150,7 +315,7 @@ fun DailyGoalsScreen(
 
         Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        // 2. Macronutrient Split Configuration Card
+        // 3. Macronutrient Split Configuration Card
         Card(
             shape = AppShapes.Card,
             colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
@@ -169,6 +334,7 @@ fun DailyGoalsScreen(
                     OutlinedTextField(
                         value = carbsText,
                         onValueChange = { carbsText = it },
+                        isError = carbsText.isNotBlank() && !isCarbsValid,
                         label = { Text("Carbs (%)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                         singleLine = true,
@@ -177,12 +343,13 @@ fun DailyGoalsScreen(
                             focusedBorderColor = AppColors.MacroCarbs,
                             unfocusedBorderColor = AppColors.Divider,
                             focusedTextColor = AppColors.TextPrimary,
-                            unfocusedTextColor = AppColors.TextPrimary
+                            unfocusedTextColor = AppColors.TextPrimary,
+                            errorBorderColor = AppColors.ProgressOver
                         )
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "Carb Target", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        Text(text = "${previewGoal.carbGrams.toInt()} g", style = AppTypography.Header2, color = AppColors.MacroCarbs)
+                        Text(text = "${previewGoal.carbGrams.roundToInt()} g", style = AppTypography.Header2, color = AppColors.MacroCarbs)
                     }
                 }
 
@@ -197,6 +364,7 @@ fun DailyGoalsScreen(
                     OutlinedTextField(
                         value = proteinText,
                         onValueChange = { proteinText = it },
+                        isError = proteinText.isNotBlank() && !isProteinValid,
                         label = { Text("Protein (%)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                         singleLine = true,
@@ -205,12 +373,13 @@ fun DailyGoalsScreen(
                             focusedBorderColor = AppColors.MacroProtein,
                             unfocusedBorderColor = AppColors.Divider,
                             focusedTextColor = AppColors.TextPrimary,
-                            unfocusedTextColor = AppColors.TextPrimary
+                            unfocusedTextColor = AppColors.TextPrimary,
+                            errorBorderColor = AppColors.ProgressOver
                         )
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "Protein Target", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        Text(text = "${previewGoal.proteinGrams.toInt()} g", style = AppTypography.Header2, color = AppColors.MacroProtein)
+                        Text(text = "${previewGoal.proteinGrams.roundToInt()} g", style = AppTypography.Header2, color = AppColors.MacroProtein)
                     }
                 }
 
@@ -225,6 +394,7 @@ fun DailyGoalsScreen(
                     OutlinedTextField(
                         value = fatText,
                         onValueChange = { fatText = it },
+                        isError = fatText.isNotBlank() && !isFatValid,
                         label = { Text("Fat (%)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                         singleLine = true,
@@ -233,12 +403,13 @@ fun DailyGoalsScreen(
                             focusedBorderColor = AppColors.MacroFat,
                             unfocusedBorderColor = AppColors.Divider,
                             focusedTextColor = AppColors.TextPrimary,
-                            unfocusedTextColor = AppColors.TextPrimary
+                            unfocusedTextColor = AppColors.TextPrimary,
+                            errorBorderColor = AppColors.ProgressOver
                         )
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "Fat Target", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        Text(text = "${previewGoal.fatGrams.toInt()} g", style = AppTypography.Header2, color = AppColors.MacroFat)
+                        Text(text = "${previewGoal.fatGrams.roundToInt()} g", style = AppTypography.Header2, color = AppColors.MacroFat)
                     }
                 }
             }
@@ -246,7 +417,7 @@ fun DailyGoalsScreen(
 
         Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        // 3. Validation Banner
+        // 4. Validation Banner
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -272,7 +443,7 @@ fun DailyGoalsScreen(
                         color = if (isValidSum) AppColors.CalorieText else AppColors.ProgressOver
                     )
                     Text(
-                        text = "Current sum: ${totalPercentage.toInt()}% (Carbs ${carbPctVal.toInt()}%, Protein ${proteinPctVal.toInt()}%, Fat ${fatPctVal.toInt()}%)",
+                        text = "Current sum: ${totalPercentage.roundToInt()}% (Carbs ${carbPctVal.roundToInt()}%, Protein ${proteinPctVal.roundToInt()}%, Fat ${fatPctVal.roundToInt()}%)",
                         style = AppTypography.Caption,
                         color = AppColors.TextSecondary
                     )
@@ -282,7 +453,7 @@ fun DailyGoalsScreen(
 
         Spacer(modifier = Modifier.height(AppSpacing.xl))
 
-        // 4. Save Button
+        // 5. Save Button
         PrimaryButton(
             text = "Save Goals",
             enabled = isFormValid,
@@ -292,6 +463,8 @@ fun DailyGoalsScreen(
                     carbsPct = carbPctVal,
                     proteinPct = proteinPctVal,
                     fatPct = fatPctVal,
+                    fitnessGoal = selectedGoal,
+                    maintenanceCalories = maintenanceVal,
                     onSuccess = onSaveSuccess
                 )
             }

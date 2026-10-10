@@ -9,13 +9,15 @@ data class RecipeIngredient(
     val id: Long = 0,
     val food: Food,
     val serving: Serving,
-    val quantity: Double
+    val quantity: Double,
+    /**
+     * Nutrition of one unit of [quantity], saved with the recipe so later edits to the
+     * source food never change a saved recipe.
+     */
+    val snapshotPerUnit: Nutrition? = null
 ) {
     val nutrition: Nutrition
-        get() {
-            val multiplier = serving.calculateGramMultiplier(quantity)
-            return food.nutrition.scale(multiplier)
-        }
+        get() = snapshotPerUnit?.scale(quantity) ?: food.nutritionFor(serving, quantity)
 }
 
 /**
@@ -30,21 +32,34 @@ data class Recipe(
     val servingsProduced: Int = 1,
     val ingredients: List<RecipeIngredient> = emptyList(),
     val instructions: String? = null,
-    val createdAt: Instant = Instant.now()
+    val createdAt: Instant = Instant.now(),
+    /**
+     * Per-serving nutrition stored with the recipe. Used only when the ingredient list is
+     * unavailable: recipes saved before ingredients were persisted kept just these values.
+     */
+    val savedNutritionPerServing: Nutrition? = null
 ) {
+    private val servingsDivisor: Double
+        get() = if (servingsProduced > 0) servingsProduced.toDouble() else 1.0
+
     /**
      * Total composite nutritional facts across all ingredients.
      */
     val totalNutrition: Nutrition
-        get() = ingredients.fold(Nutrition.ZERO) { acc, ing -> acc + ing.nutrition }
+        get() {
+            if (ingredients.isEmpty() && savedNutritionPerServing != null) {
+                return savedNutritionPerServing.scale(servingsDivisor)
+            }
+            return ingredients.fold(Nutrition.ZERO) { acc, ing -> acc + ing.nutrition }
+        }
 
     /**
      * Nutrition per single serving produced by this recipe.
      */
     val nutritionPerServing: Nutrition
         get() {
-            val divisor = if (servingsProduced > 0) servingsProduced.toDouble() else 1.0
-            return totalNutrition.scale(1.0 / divisor)
+            if (ingredients.isEmpty() && savedNutritionPerServing != null) return savedNutritionPerServing
+            return totalNutrition.scale(1.0 / servingsDivisor)
         }
 
     /**
@@ -53,7 +68,8 @@ data class Recipe(
     fun toFood(): Food {
         val serving = Serving(
             id = 1,
-            description = "1 of $servingsProduced servings",
+            // Same label as diary entries for recipes, so a logged serving matches this one
+            description = "Serving",
             unit = ServingUnit.SERVING,
             quantity = 1.0,
             gramWeight = 100.0,
@@ -61,7 +77,7 @@ data class Recipe(
         )
 
         return Food(
-            id = id,
+            id = FOOD_ID_OFFSET + id,
             uuid = uuid,
             source = FoodSource.RECIPE,
             name = name,
@@ -71,5 +87,22 @@ data class Recipe(
             nutrition = nutritionPerServing,
             servings = listOf(serving)
         )
+    }
+
+    companion object {
+        /**
+         * Logged recipes get food ids in their own range (AGENTS.md section 4.2), so a diary
+         * entry for recipe #1 can never be mistaken for custom food #1. Entries logged by
+         * earlier versions used the raw recipe id.
+         */
+        const val FOOD_ID_OFFSET = 200_000_000L
+        const val FOOD_ID_RANGE_END = FOOD_ID_OFFSET + 100_000_000L
+
+        /** Food id for a restored recipe entry whose recipe could not be identified. */
+        const val UNLINKED_FOOD_ID = FOOD_ID_OFFSET
+
+        /** Recipe row id for a food id in the recipe range, or null for any other food id. */
+        fun rowIdOrNull(foodId: Long): Long? =
+            if (foodId > FOOD_ID_OFFSET && foodId < FOOD_ID_RANGE_END) foodId - FOOD_ID_OFFSET else null
     }
 }

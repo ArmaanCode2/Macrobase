@@ -21,14 +21,15 @@ This document serves as a living catalog of historical bugs, dangerous patterns,
 - **Root Cause**: `DiaryEntryEntity` in Room omitted columns for `loggedFiber`, `loggedSugar`, and `loggedSodium`. While `Food` and `Nutrition` supported secondary nutrients, writing an entry to Room dropped them, and reading back mapped them to `null` $\rightarrow$ `0.0`.
 - **Guardrail**:
   - Database schema is at `USER_DATABASE_VERSION = 3`.
-  - Columns `loggedFiber`, `loggedSugar`, and `loggedSodium` (`REAL NOT NULL DEFAULT 0.0`) are persisted in `diary_entries`.
+  - Columns `loggedFiber`, `loggedSugar`, `loggedSodium`, `loggedSaturatedFat`, `loggedTransFat` and `loggedCholesterol` (`REAL`, nullable) are persisted in `diary_entries`. `null` means not stated; never coerce it to `0.0` (BUG-037).
   - `MIGRATION_2_3` safely migrates older databases without data loss.
   - When adding any new nutrient, you must update:
     1. `DiaryEntryEntity` (Room entity)
-    2. `UserDatabase` migration script (`MIGRATION_X_Y`)
-    3. `DatabaseConfig.USER_DATABASE_VERSION`
-    4. `DiModules.kt` Room builder
-    5. `DiaryRepositoryImpl` (`addEntry`, `addEntries`, `updateEntry`, `toDomain`)
+    2. `UserDatabase` migration script (`MIGRATION_X_Y`) and `UserDatabase.ALL_MIGRATIONS`
+    3. `DatabaseConfig.USER_DATABASE_VERSION`, and commit the new `app/schemas/.../<version>.json`
+    4. A migration test from the previous schema JSON (`P3PhaseOneDataSafetyTests`)
+    5. `DiaryRepositoryImpl.toEntity` and `toDomain`
+    6. The diary backup DTO, `BackupJsonSerializer` and `PortabilityRepositoryImpl` (export and import)
 
 ---
 

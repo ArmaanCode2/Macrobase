@@ -32,6 +32,7 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.domain.model.Food
+import kotlin.math.roundToInt
 
 /**
  * Standard Full Width Hero Button matching UI_UX_SPECIFICATION.md
@@ -133,7 +134,7 @@ fun MacroProgressStrip(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "${proteinGrams.toInt()}g ", style = AppTypography.Header3, color = AppColors.MacroProtein)
+            Text(text = "${proteinGrams.roundToInt()}g ", style = AppTypography.Header3, color = AppColors.MacroProtein)
             Text(text = "Protein", style = AppTypography.Body2, color = AppColors.TextSecondary)
         }
         Box(modifier = Modifier.size(width = 1.dp, height = 20.dp).background(AppColors.Divider))
@@ -143,7 +144,7 @@ fun MacroProgressStrip(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "${carbsGrams.toInt()}g ", style = AppTypography.Header3, color = AppColors.MacroCarbs)
+            Text(text = "${carbsGrams.roundToInt()}g ", style = AppTypography.Header3, color = AppColors.MacroCarbs)
             Text(text = "Carb", style = AppTypography.Body2, color = AppColors.TextSecondary)
         }
         Box(modifier = Modifier.size(width = 1.dp, height = 20.dp).background(AppColors.Divider))
@@ -153,7 +154,7 @@ fun MacroProgressStrip(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "${fatGrams.toInt()}g ", style = AppTypography.Header3, color = AppColors.MacroFat)
+            Text(text = "${fatGrams.roundToInt()}g ", style = AppTypography.Header3, color = AppColors.MacroFat)
             Text(text = "Fat", style = AppTypography.Body2, color = AppColors.TextSecondary)
         }
     }
@@ -205,9 +206,9 @@ fun FoodResultItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val sub = food.brand ?: food.defaultServing?.description ?: food.servingBasis
+            // The calorie number on the right is per this basis (BUG-036)
             Text(
-                text = sub,
+                text = food.listSubtitle,
                 style = AppTypography.Caption,
                 color = AppColors.TextSecondary,
                 maxLines = 1,
@@ -221,7 +222,7 @@ fun FoodResultItem(
             horizontalArrangement = Arrangement.End
         ) {
             Text(
-                text = "${food.nutrition.calories.toInt()}",
+                text = "${food.nutrition.calories.roundToInt()}",
                 style = AppTypography.Body1,
                 color = AppColors.CalorieText
             )
