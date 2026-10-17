@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The 4 x 1 home-screen widget, Mentor style. Text sizes stay as they were so it still fits one cell row. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/bg_widget_calm_green"
+    android:background="@drawable/bg_widget_mentor"
     android:gravity="center_vertical"
     android:orientation="vertical"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
@@ -21,23 +22,24 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentStart="true"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08"
             android:text="MACROBASE"
-            android:textColor="#121212"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+            android:textColor="#EDF2EE"
+            android:textSize="11sp" />
 
         <TextView
             android:id="@+id/tv_widget_date"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentEnd="true"
+            android:fontFamily="sans-serif"
             android:text="Mon, Sep 7"
-            android:textColor="#3E4A3E"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+            android:textColor="#A7B0A9"
+            android:textSize="11sp" />
     </RelativeLayout>
 
-    <!-- Row 2: Calories Intake & Dynamic Status -->
+    <!-- Row 2: Calories Intake & Dynamic Status (the status colour is set in code) -->
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -48,27 +50,27 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentStart="true"
+            android:fontFamily="sans-serif-medium"
             android:text="0 kcal intake"
-            android:textColor="#121212"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textColor="#EDF2EE"
+            android:textSize="12sp" />
 
         <TextView
             android:id="@+id/tv_widget_remaining"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_alignParentEnd="true"
+            android:fontFamily="sans-serif-medium"
             android:text="2000 kcal remaining"
-            android:textColor="#121212"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textColor="#EDF2EE"
+            android:textSize="12sp" />
     </RelativeLayout>
 
     <!-- Row 3: Progress Bar & Percentage -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
+        android:layout_marginTop="4dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
@@ -88,10 +90,12 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
+            android:fontFamily="sans-serif"
+            android:gravity="end"
+            android:minWidth="30dp"
             android:text="0%"
-            android:textColor="#121212"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+            android:textColor="#A7B0A9"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <!-- Row 4: Macronutrients Split -->
@@ -100,9 +104,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="3dp"
+        android:fontFamily="sans-serif"
         android:gravity="center"
         android:text="Protein: 0/0g   Carb: 0/0g   Fat: 0/0g"
-        android:textColor="#121212"
-        android:textSize="11sp"
-        android:textStyle="bold" />
+        android:textColor="#A7B0A9"
+        android:textSize="11sp" />
 </LinearLayout>

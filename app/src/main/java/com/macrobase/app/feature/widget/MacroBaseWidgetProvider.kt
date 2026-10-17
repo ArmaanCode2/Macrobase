@@ -87,23 +87,7 @@ class MacroBaseWidgetProvider : AppWidgetProvider() {
         // 3. Dynamic Calorie Intake & Status Calculation
         val intake = summary?.totalCaloriesIntake ?: 0.0
         val targetCal = goal.dailyCalorieGoal
-        val diff = targetCal - intake
-        val (statusText, statusColor) = when {
-            targetCal <= 0.0 -> {
-                "${intake.roundToInt()} kcal" to 0xFF121212.toInt()
-            }
-            intake > targetCal + 25.0 -> {
-                val overAmount = (intake - targetCal).roundToInt()
-                "$overAmount kcal over" to 0xFFB71C1C.toInt() // Subtle dark crimson
-            }
-            kotlin.math.abs(diff) <= 50.0 && intake > 0.0 -> {
-                "Target Hit \u2713" to 0xFF1B5E20.toInt() // Deep forest green
-            }
-            else -> {
-                val remaining = diff.coerceAtLeast(0.0).roundToInt()
-                "$remaining kcal remaining" to 0xFF121212.toInt() // Charcoal black
-            }
-        }
+        val (statusText, statusColor) = widgetCalorieStatus(intake, targetCal)
         views.setTextViewText(R.id.tv_widget_intake, "${intake.roundToInt()} kcal intake")
         views.setTextViewText(R.id.tv_widget_remaining, statusText)
         views.setTextColor(R.id.tv_widget_remaining, statusColor)
@@ -214,6 +198,32 @@ class MacroBaseWidgetProvider : AppWidgetProvider() {
                     context.sendBroadcast(intent)
                 }
             }
+        }
+    }
+}
+
+/** The widget's text colours (Mentor): values, an over-target status and a target hit. */
+internal val WIDGET_TEXT_COLOR = 0xFFEDF2EE.toInt()
+internal val WIDGET_OVER_COLOR = 0xFFFF8A7E.toInt()
+internal val WIDGET_HIT_COLOR = 0xFF6FE07C.toInt()
+
+/** The status beside the intake and its colour: over, target hit, or what remains. */
+internal fun widgetCalorieStatus(intake: Double, targetCal: Double): Pair<String, Int> {
+    val diff = targetCal - intake
+    return when {
+        targetCal <= 0.0 -> {
+            "${intake.roundToInt()} kcal" to WIDGET_TEXT_COLOR
+        }
+        intake > targetCal + 25.0 -> {
+            val overAmount = (intake - targetCal).roundToInt()
+            "$overAmount kcal over" to WIDGET_OVER_COLOR
+        }
+        kotlin.math.abs(diff) <= 50.0 && intake > 0.0 -> {
+            "Target Hit \u2713" to WIDGET_HIT_COLOR
+        }
+        else -> {
+            val remaining = diff.coerceAtLeast(0.0).roundToInt()
+            "$remaining kcal remaining" to WIDGET_TEXT_COLOR
         }
     }
 }
