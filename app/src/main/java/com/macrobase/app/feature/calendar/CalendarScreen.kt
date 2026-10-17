@@ -445,7 +445,7 @@ fun CalendarDayCell(
     val textColor = if (!cell.isCurrentMonth) {
         AppColors.TextMuted.copy(alpha = 0.3f)
     } else {
-        AppColors.TextPrimary
+        CalendarPerformanceConfig.getTextColorForCategory(cell.performanceCategory)
     }
 
     Box(

@@ -58,7 +58,7 @@ fun CalendarDayCell(
         Text(
             text = "${day.date.dayOfMonth}",
             style = AppTypography.Header3,
-            color = AppColors.TextPrimary
+            color = CalendarPerformanceConfig.getTextColorForCategory(day.performanceCategory)
         )
     }
 }

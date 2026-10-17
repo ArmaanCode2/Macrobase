@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds install next to the real app (applicationIdSuffix ".debug") with their own data.
+     A different name keeps the two apart on the phone, so real meals never go into the debug app. -->
+<resources>
+    <string name="app_name">MacroBase Debug</string>
+</resources>

@@ -60,7 +60,7 @@ fun PrimaryButton(
         Text(
             text = text,
             style = AppTypography.Button,
-            color = if (enabled) AppColors.TextPrimary else AppColors.TextSecondary
+            color = if (enabled) AppColors.OnPrimary else AppColors.TextSecondary
         )
     }
 }

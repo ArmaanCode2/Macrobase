@@ -623,7 +623,7 @@ fun FoodDetailScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
-                    .background(AppColors.Primary)
+                    .background(AppColors.Background)
                     .padding(horizontal = AppSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -684,7 +684,7 @@ fun FoodDetailScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .background(AppColors.Primary)
+                .background(AppColors.Background)
                 .padding(horizontal = AppSpacing.xs),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -916,11 +916,11 @@ fun FoodDetailScreen(
                                 subheadContentColor = AppColors.TextSecondary,
                                 yearContentColor = AppColors.TextPrimary,
                                 currentYearContentColor = AppColors.Primary,
-                                selectedYearContentColor = AppColors.TextPrimary,
+                                selectedYearContentColor = AppColors.OnPrimary,
                                 selectedYearContainerColor = AppColors.Primary,
                                 dayContentColor = AppColors.TextPrimary,
                                 disabledDayContentColor = AppColors.TextDisabled,
-                                selectedDayContentColor = AppColors.TextPrimary,
+                                selectedDayContentColor = AppColors.OnPrimary,
                                 selectedDayContainerColor = AppColors.Primary,
                                 todayDateBorderColor = AppColors.Primary,
                                 todayContentColor = AppColors.Primary
@@ -1058,7 +1058,7 @@ fun FoodDetailScreen(
             shape = RoundedCornerShape(2.dp),
             colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
         ) {
-            Text(logLabel, style = AppTypography.Header3, color = AppColors.TextPrimary)
+            Text(logLabel, style = AppTypography.Header3, color = AppColors.OnPrimary)
         }
 
         if (!viewModel.isEditingDiary()) {

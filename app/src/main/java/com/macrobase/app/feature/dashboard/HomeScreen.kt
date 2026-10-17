@@ -642,7 +642,7 @@ fun DashboardMealSection(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Add Food",
-                        tint = AppColors.TextPrimary,
+                        tint = AppColors.OnPrimary,
                         modifier = Modifier.size(12.dp)
                     )
                 }

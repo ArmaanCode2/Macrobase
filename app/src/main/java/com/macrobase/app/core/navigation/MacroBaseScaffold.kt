@@ -186,7 +186,7 @@ fun MacroBaseScaffold(
                                 }
                             },
                             colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                                containerColor = AppColors.Primary
+                                containerColor = AppColors.Background
                             )
                         )
                     } else {
@@ -209,7 +209,7 @@ fun MacroBaseScaffold(
                                 }
                             },
                             colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                                containerColor = AppColors.Primary
+                                containerColor = AppColors.Background
                             )
                         )
                     }
@@ -256,7 +256,7 @@ fun MacroBaseScaffold(
                                 .clickable { navController.navigateToTopLevel(Screen.Statistics, homeViewModel) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Screen.Statistics.icon!!, contentDescription = bottomTabLabel(Screen.Statistics), tint = AppColors.TextPrimary, modifier = Modifier.size(28.dp))
+                            Icon(Screen.Statistics.icon!!, contentDescription = bottomTabLabel(Screen.Statistics), tint = AppColors.OnPrimary, modifier = Modifier.size(28.dp))
                         }
                     }
                 }

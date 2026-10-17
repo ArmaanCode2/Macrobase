@@ -48,4 +48,13 @@ object CalendarPerformanceConfig {
             PerformanceCategory.HIGH_OVER_TARGET -> AppColors.CalendarRedAlert
         }
     }
+
+    /** The day number's color on [getColorForCategory]: dark ink on the bright "on target" green. */
+    fun getTextColorForCategory(category: PerformanceCategory): Color {
+        return when (category) {
+            PerformanceCategory.OPTIMAL_TARGET -> AppColors.CalendarOptimalInk
+            PerformanceCategory.UNDER_BUDGET -> AppColors.CalendarUnderInk
+            else -> AppColors.TextPrimary
+        }
+    }
 }

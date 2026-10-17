@@ -227,7 +227,7 @@ fun RecipesScreen(
             FloatingActionButton(
                 onClick = onCreateClick,
                 containerColor = AppColors.Primary,
-                contentColor = AppColors.TextPrimary
+                contentColor = AppColors.OnPrimary
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Create Recipe")
             }
@@ -478,7 +478,7 @@ fun RecipeCard(
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
                     modifier = Modifier.height(Dimensions.ButtonHeightSmall)
                 ) {
-                    Text("(+) Log Recipe", style = AppTypography.Caption, color = AppColors.TextPrimary)
+                    Text("(+) Log Recipe", style = AppTypography.Caption, color = AppColors.OnPrimary)
                 }
             }
         }
@@ -597,7 +597,7 @@ fun EditRecipeScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
                 modifier = Modifier.height(Dimensions.ButtonHeightSmall)
             ) {
-                Text("+ Add Ingredient", style = AppTypography.Caption)
+                Text("+ Add Ingredient", style = AppTypography.Caption, color = AppColors.OnPrimary)
             }
         }
 

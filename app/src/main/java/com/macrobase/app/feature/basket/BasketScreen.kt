@@ -342,7 +342,7 @@ fun BasketScreen(
                     shape = RoundedCornerShape(2.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
                 ) {
-                    Text(logButtonLabel, style = AppTypography.Header3, color = AppColors.TextPrimary)
+                    Text(logButtonLabel, style = AppTypography.Header3, color = AppColors.OnPrimary)
                 }
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))

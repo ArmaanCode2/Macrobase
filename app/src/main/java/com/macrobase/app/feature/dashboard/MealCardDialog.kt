@@ -184,7 +184,7 @@ internal fun MealCardDialog(
                     shape = RoundedCornerShape(2.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AppColors.Primary,
-                        contentColor = AppColors.TextPrimary,
+                        contentColor = AppColors.OnPrimary,
                         disabledContainerColor = AppColors.Surface,
                         disabledContentColor = AppColors.TextDisabled
                     )

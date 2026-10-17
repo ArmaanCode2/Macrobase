@@ -132,10 +132,10 @@ fun MealAndDayPicker(
                     subheadContentColor = AppColors.TextPrimary,
                     yearContentColor = AppColors.TextPrimary,
                     currentYearContentColor = AppColors.Primary,
-                    selectedYearContentColor = AppColors.TextPrimary,
+                    selectedYearContentColor = AppColors.OnPrimary,
                     selectedYearContainerColor = AppColors.Primary,
                     dayContentColor = AppColors.TextPrimary,
-                    selectedDayContentColor = AppColors.TextPrimary,
+                    selectedDayContentColor = AppColors.OnPrimary,
                     selectedDayContainerColor = AppColors.Primary,
                     todayDateBorderColor = AppColors.Primary,
                     todayContentColor = AppColors.Primary

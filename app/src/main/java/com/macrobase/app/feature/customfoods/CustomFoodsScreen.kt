@@ -231,7 +231,7 @@ fun CustomFoodsScreen(
                     onCreateClick()
                 },
                 containerColor = AppColors.Primary,
-                contentColor = AppColors.TextPrimary
+                contentColor = AppColors.OnPrimary
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Create Custom Food")
             }

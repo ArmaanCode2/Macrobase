@@ -51,7 +51,7 @@ fun AppDrawer(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
-                .background(AppColors.Primary)
+                .background(AppColors.Capsule)
                 .padding(AppSpacing.lg),
             contentAlignment = Alignment.BottomStart
         ) {
