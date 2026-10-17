@@ -4,7 +4,7 @@ import com.macrobase.app.feature.detail.steppedQuantity
 import com.macrobase.app.feature.detail.QuantityStepper
 import com.macrobase.app.feature.detail.MacroTiles
 import com.macrobase.app.core.navigation.ReportContentScrolled
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.MbMotion
 import com.macrobase.app.core.designsystem.components.MbButtonKind
 import com.macrobase.app.core.designsystem.components.MbButton
@@ -165,7 +165,7 @@ fun BasketScreen(
             }
         } else {
             val scrollState = rememberScrollState()
-            ReportContentScrolled(scrollState.isScrolled)
+            ReportContentScrolled(scrollState.rememberIsScrolled())
             val today = LocalDate.now()
 
             Box(modifier = Modifier.weight(1f)) {

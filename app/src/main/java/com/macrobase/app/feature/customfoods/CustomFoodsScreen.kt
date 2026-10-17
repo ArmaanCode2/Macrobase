@@ -1,7 +1,7 @@
 package com.macrobase.app.feature.customfoods
 
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import com.macrobase.app.core.navigation.ReportContentScrolled
-import com.macrobase.app.core.designsystem.components.isScrolled
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.designsystem.components.mbSearchPillFrame
@@ -57,7 +57,6 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -284,12 +283,8 @@ fun CustomFoodsScreen(
         )
 
         if (uiState.isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = AppColors.Primary)
-            }
+            // A spinner only if the list takes a while, so a quick load never flashes one
+            MbDelayedProgress(modifier = Modifier.fillMaxSize())
         } else if (uiState.allCustomFoods.isEmpty()) {
             EmptyStateCard(
                 icon = Icons.Default.Fastfood,
@@ -533,7 +528,7 @@ fun EditCustomFoodScreen(
         numberInputs.none { it.error != null } && isCustomUnitValid
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

@@ -108,8 +108,15 @@ fun MbHeader(
     }
 }
 
-/** True once a scrolling column has moved off its top, for [MbHeader]'s band. */
-val ScrollState.isScrolled: Boolean get() = value > 0
+/**
+ * True once a scrolling column has moved off its top, for [MbHeader]'s band. It changes only when
+ * the column crosses its top edge, so the screen does not recompose on every pixel of scrolling.
+ */
+@Composable
+fun ScrollState.rememberIsScrolled(): Boolean {
+    val scrolled by remember(this) { derivedStateOf { value > 0 } }
+    return scrolled
+}
 
 /** True once a lazy list has moved off its top, for [MbHeader]'s band. */
 @Composable

@@ -1,6 +1,5 @@
 package com.macrobase.app.feature.rank
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -30,8 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.macrobase.app.core.designsystem.AppColors
@@ -191,7 +188,7 @@ private fun RankLadderItemRow(
     isMax: Boolean
 ) {
     val drawableRes = remember(rankTier.rank) {
-        RankImageResolver.getRankDrawableRes(rankTier)
+        RankImageResolver.getRankThumbnailRes(rankTier.rank)
     }
     val shape = RoundedCornerShape(18.dp)
 
@@ -214,10 +211,9 @@ private fun RankLadderItemRow(
             contentAlignment = Alignment.Center
         ) {
             if (drawableRes != 0) {
-                Image(
-                    painter = painterResource(id = drawableRes),
+                RankPicture(
+                    id = drawableRes,
                     contentDescription = rankTier.displayName,
-                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(2.dp)

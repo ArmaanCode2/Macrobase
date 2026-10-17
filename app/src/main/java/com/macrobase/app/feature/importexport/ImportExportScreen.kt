@@ -59,7 +59,7 @@ import com.macrobase.app.core.designsystem.components.MbButtonKind
 import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbIconCircle
 import com.macrobase.app.core.designsystem.components.MbPanel
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.domain.model.BackupPreview
 import com.macrobase.app.domain.model.BackupRecordCountsDto
@@ -274,7 +274,7 @@ fun ImportExportScreen(
     }
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

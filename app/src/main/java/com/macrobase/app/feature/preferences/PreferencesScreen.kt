@@ -61,7 +61,7 @@ import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbRowTile
 import com.macrobase.app.core.designsystem.components.MbTextField
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.designsystem.components.mbSelectable
 import com.macrobase.app.core.navigation.LocalDockInset
@@ -650,7 +650,7 @@ fun PreferencesScreen(
     val previewGoal = check.goal
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

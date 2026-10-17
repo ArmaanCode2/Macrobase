@@ -50,7 +50,7 @@ import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Ph
 import com.macrobase.app.core.designsystem.components.MbIconButton
 import com.macrobase.app.core.designsystem.components.MbPanel
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.core.navigation.ReportContentScrolled
@@ -109,15 +109,31 @@ class CalendarViewModel(
     )
 
     fun onPreviousMonth() {
-        _displayedYearMonth.value = _displayedYearMonth.value.minusMonths(1)
+        showMonth(_displayedYearMonth.value.minusMonths(1))
     }
 
     fun onNextMonth() {
-        _displayedYearMonth.value = _displayedYearMonth.value.plusMonths(1)
+        showMonth(_displayedYearMonth.value.plusMonths(1))
     }
 
     fun onSelectMonth(yearMonth: YearMonth) {
+        showMonth(yearMonth)
+    }
+
+    // Whether the calendar shows the current month, so it moves on with it when a new month starts
+    private var followsCurrentMonth = true
+
+    private fun showMonth(yearMonth: YearMonth) {
         _displayedYearMonth.value = yearMonth
+        followsCurrentMonth = yearMonth == YearMonth.now(clock)
+    }
+
+    /**
+     * The screen is shown again. A kept calendar that showed the current month moves on to the
+     * month it is now; one the user moved to another month stays there.
+     */
+    fun onShown() {
+        if (followsCurrentMonth) _displayedYearMonth.value = YearMonth.now(clock)
     }
 
     private fun calculateMonthState(
@@ -275,7 +291,7 @@ fun FoodLoggingCalendar(
     showTitle: Boolean = true
 ) {
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

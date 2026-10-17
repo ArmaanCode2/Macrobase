@@ -56,7 +56,7 @@ import com.macrobase.app.core.designsystem.components.MbIconButton
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbRowTile
 import com.macrobase.app.core.designsystem.components.MbTextField
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.hasThousandsSeparator
@@ -229,7 +229,7 @@ fun WaterScreen(
     }
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

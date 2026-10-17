@@ -1,5 +1,7 @@
 package com.macrobase.app
 
+import com.macrobase.app.domain.repository.StatisticsRepository
+import org.junit.Assert.assertSame
 import com.macrobase.app.data.repository.StatisticsRepositoryImpl
 import com.macrobase.app.data.repository.rank.RankRepositoryImpl
 import com.macrobase.app.domain.model.FitnessGoal
@@ -223,6 +225,30 @@ class P3PhaseFiveRankAndStatsTests {
 
         assertEquals(7, state.macroStats!!.loggedDaysCount)
         assertEquals(2000.0, state.macroStats!!.averageCalories, 1e-9)
+    }
+
+    // Switching views in the dock shows at once, over the figures already loaded, without running the queries again
+    @Test
+    fun switchingStatsViewsKeepsTheLoadedFigures() = runTest {
+        val repository = CountingStatistics(statistics((0L..6L).map { perfectDay(today.minusDays(it)) }))
+        val vm = StatisticsViewModel(GetStatisticsUseCase(repository), P2PhaseFourRankReplayTests.Prefs(), clock)
+        val loaded = withTimeout(5_000) { vm.uiState.first { it.consistencyStats != null && it.macroStats != null } }
+        val queriesBefore = repository.consistencyQueries
+
+        vm.onSelectTab(3)
+        val switched = withTimeout(5_000) { vm.uiState.first { it.selectedTab == 3 } }
+
+        assertSame(loaded.consistencyStats, switched.consistencyStats)
+        assertSame(loaded.macroStats, switched.macroStats)
+        assertEquals(queriesBefore, repository.consistencyQueries)
+    }
+
+    /** Counts how often the consistency figures are asked for. */
+    private class CountingStatistics(private val inner: StatisticsRepository) : StatisticsRepository by inner {
+        var consistencyQueries = 0
+
+        override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate) =
+            inner.observeNutritionConsistency(startDate, endDate).also { consistencyQueries++ }
     }
 
     // "6 Months" and "1 Year" mean the same span on the consistency and weight tabs

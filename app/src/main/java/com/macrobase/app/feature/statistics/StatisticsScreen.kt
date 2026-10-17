@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.statistics
 
+import androidx.compose.runtime.LaunchedEffect
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -69,7 +71,7 @@ import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
 import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbSheet
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.DeclareDockViews
 import com.macrobase.app.core.navigation.LocalDockInset
@@ -176,10 +178,14 @@ class StatisticsViewModel(
     private val _macroInterval = MutableStateFlow(MacroInterval.DAYS_30)
     val macroInterval: StateFlow<MacroInterval> = _macroInterval.asStateFlow()
 
-    val uiState: StateFlow<StatisticsUiState> = combine(
-        combine(_selectedTab, _weightInterval, _weightCustomFrom) { tab, wInt, wFrom -> Triple(tab, wInt, wFrom) },
-        combine(_weightCustomTo, _consistencyInterval, _macroInterval) { wTo, cInt, mInt -> Triple(wTo, cInt, mInt) }
-    ) { (tab, wInt, wFrom), (wTo, cInt, mInt) ->
+    /**
+     * The figures behind the Weight, Consistency and Averages views. The chosen view is not part of
+     * this, so switching views neither restarts these queries nor waits for them.
+     */
+    private val statsData: StateFlow<StatisticsUiState> = combine(
+        combine(_weightInterval, _weightCustomFrom, _weightCustomTo) { wInt, wFrom, wTo -> Triple(wInt, wFrom, wTo) },
+        combine(_consistencyInterval, _macroInterval) { cInt, mInt -> cInt to mInt }
+    ) { (wInt, wFrom, wTo), (cInt, mInt) ->
         val (weightFrom, weightTo) = calculateWeightDateRange(wInt, wFrom, wTo)
         val today = LocalDate.now(clock)
         // "30 Days" is today and the 29 before it, not 31 days (BUG-033)
@@ -189,7 +195,7 @@ class StatisticsViewModel(
         val lastEndedDay = today.minusDays(1)
         val mFrom = windowStart(lastEndedDay, mInt.days)
 
-        StatsParams(tab, wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
+        StatsParams(wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
     }.flatMapLatest { p ->
         combine(
             getStatisticsUseCase.observeWeightStatistics(p.weightFrom, p.weightTo),
@@ -198,7 +204,6 @@ class StatisticsViewModel(
             preferencesRepository.observePreferences()
         ) { weightStats, consistencyStats, macroStats, prefs ->
             StatisticsUiState(
-                selectedTab = p.tab,
                 weightInterval = p.wInt,
                 weightFromDate = p.weightFrom,
                 weightToDate = p.weightTo,
@@ -214,11 +219,18 @@ class StatisticsViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = StatisticsUiState()
+        initialValue = StatisticsUiState(isLoading = true)
     )
 
+    /** The figures with the chosen view: a view change shows at once, over the figures already loaded. */
+    val uiState: StateFlow<StatisticsUiState> = combine(statsData, _selectedTab) { data, tab -> data.copy(selectedTab = tab) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = StatisticsUiState(isLoading = true)
+        )
+
     private data class StatsParams(
-        val tab: Int,
         val wInt: WeightTimeInterval,
         val weightFrom: LocalDate,
         val weightTo: LocalDate,
@@ -305,6 +317,9 @@ fun StatisticsScreen(
         onSelect = { viewModel.onSelectTab(it) }
     )
 
+    // A kept Stats screen opened in a new month shows that month
+    LaunchedEffect(calendarViewModel) { calendarViewModel.onShown() }
+
     // Each view scrolls on its own, under the header and behind the dock, and ends clear of the dock
     Box(modifier = modifier.fillMaxSize()) {
         when (uiState.selectedTab) {
@@ -314,9 +329,16 @@ fun StatisticsScreen(
                 onNextMonth = { calendarViewModel.onNextMonth() },
                 onDateClick = onDateClick
             )
-            1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
-            2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
-            3 -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+            // Until the first figures arrive, a spinner (after a moment) instead of "no data"
+            1, 2, 3 -> if (uiState.isLoading) {
+                MbDelayedProgress(modifier = Modifier.fillMaxSize())
+            } else {
+                when (uiState.selectedTab) {
+                    1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
+                    2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
+                    else -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+                }
+            }
             4 -> RankHistoryTabRoute(viewModel = viewModel)
         }
     }
@@ -333,7 +355,7 @@ internal fun StatsPage(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = Modifier

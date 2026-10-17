@@ -1,5 +1,6 @@
 package com.macrobase.app.core.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +55,9 @@ import org.koin.androidx.compose.koinViewModel
 
 /** The route without its arguments, such as "home" for "home?dateEpochDay={dateEpochDay}". */
 private fun String.routeBase(): String = substringBefore("?").substringBefore("/")
+
+/** The tab roots that Back leaves for Home while keeping them to come back to. */
+private val TabsKeptOnBack = setOf(Screen.Statistics, Screen.Rank, Screen.Preferences).map { it.route.routeBase() }.toSet()
 
 /** Whether [route] is one of the five tab roots, whatever its arguments. */
 internal fun isTabRootRoute(route: String?): Boolean =
@@ -148,6 +152,10 @@ fun MacroBaseScaffold(
                 // Consumed, so a screen's own Scaffold does not add the system bars a second time
                 content(Modifier.padding(paddingValues).consumeWindowInsets(paddingValues))
             }
+
+            // Back from Stats, Rank or Profile keeps the tab, as the Home tab does. Composed after the
+            // NavHost, so it is asked first; Home and Foods keep the NavHost's own Back.
+            BackHandler(enabled = routeBase in TabsKeptOnBack) { navController.backToHomeKeepingTab() }
 
             if (isTabRoot && !imeVisible) {
                 Dock(
@@ -293,7 +301,8 @@ private fun barIcon(screen: Screen): Ph = when (screen) {
  */
 fun NavHostController.navigateToTopLevel(screen: Screen, homeViewModel: HomeViewModel?) {
     when (screen) {
-        Screen.Home -> navigateToTodayDashboard(homeViewModel)
+        // The tab being left is kept, as on a switch between tabs, so it comes back as it was
+        Screen.Home -> navigateToTodayDashboard(homeViewModel, keepTabLeft = true)
         // Never restored, so a half-filled food form saved by a tab switch never comes back
         Screen.CustomFoods -> navigateToTab(Screen.CustomFoods.route, restoreState = false)
         else -> navigateToTab(screen.route.substringBefore("?"))
@@ -304,16 +313,35 @@ fun NavHostController.navigateToTopLevel(screen: Screen, homeViewModel: HomeView
  * Today's dashboard, with every screen above it closed. The Home tab and a widget tap both come
  * here, so they behave the same from any screen.
  *
- * Nothing is saved or restored here. A tab's `popUpTo(home) { saveState = true }` also files the
- * screens it closed under Home itself, so `restoreState` on Home brought those screens back
- * instead of the dashboard.
+ * Home itself is never restored: a tab's `popUpTo(home) { saveState = true }` also files the
+ * screens it closed under Home, so `restoreState` on Home brought those screens back instead of
+ * the dashboard. With [keepTabLeft] (the Home tab) the tab being left is saved, so Stats, Rank or
+ * Profile come back with their ViewModel, figures and scroll position instead of loading again.
  */
-fun NavHostController.navigateToTodayDashboard(homeViewModel: HomeViewModel?) {
+fun NavHostController.navigateToTodayDashboard(homeViewModel: HomeViewModel?, keepTabLeft: Boolean = false) {
     homeViewModel?.resetToToday()
+    val save = keepTabLeft && savesTabLeft(openRoutes())
     navigate(Screen.Home.todayRoute()) {
-        popUpTo(Screen.Home.route.substringBefore("?"))
+        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = save }
         launchSingleTop = true
     }
+}
+
+/**
+ * Whether the screens open above Home are saved when they are left, to come back to. The Foods
+ * tab is never restored (a half-filled food form must not come back), so its screens are never
+ * saved either: a saved copy would only keep its ViewModels in memory.
+ */
+internal fun savesTabLeft(openRoutes: List<String?>): Boolean = openRoutes.none { it == Screen.CustomFoods.route }
+
+private fun NavHostController.openRoutes(): List<String?> = currentBackStack.value.map { it.destination.route }
+
+/**
+ * Back from Stats, Rank or Profile: Home, as before, with the tab kept to come back to, like a tap
+ * on the Home tab but without moving Home to today.
+ */
+fun NavHostController.backToHomeKeepingTab() {
+    popBackStack(Screen.Home.route.substringBefore("?"), inclusive = false, saveState = savesTabLeft(openRoutes()))
 }
 
 /**
@@ -321,8 +349,9 @@ fun NavHostController.navigateToTodayDashboard(homeViewModel: HomeViewModel?) {
  * with [restoreState] this tab's saved screens come back, otherwise it opens fresh.
  */
 fun NavHostController.navigateToTab(route: String, restoreState: Boolean = true) {
+    val save = savesTabLeft(openRoutes())
     navigate(route) {
-        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
+        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = save }
         launchSingleTop = true
         this.restoreState = restoreState
     }

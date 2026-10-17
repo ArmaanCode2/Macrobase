@@ -70,7 +70,7 @@ import com.macrobase.app.core.designsystem.components.MbIconButton
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbRowTile
 import com.macrobase.app.core.designsystem.components.MbTextField
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.formatDecimalInput
@@ -324,7 +324,7 @@ fun WeightScreen(
     var rangeEndToPick by remember { mutableStateOf<RangeEnd?>(null) }
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
     val margin = Modifier.padding(horizontal = AppSpacing.screenMargin)
 
     Column(

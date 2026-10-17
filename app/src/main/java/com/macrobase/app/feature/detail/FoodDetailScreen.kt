@@ -2,7 +2,7 @@ package com.macrobase.app.feature.detail
 
 import com.macrobase.app.feature.basket.basketDateLabel
 import com.macrobase.app.core.designsystem.components.MealAndDayPicker
-import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.MbHeader
 import com.macrobase.app.core.designsystem.components.MbDangerGhostButton
 import com.macrobase.app.core.designsystem.components.MbButtonKind
@@ -727,7 +727,7 @@ fun FoodDetailScreen(
         MbHeader(
             title = if (isDiaryEdit) "Edit entry" else "Food detail",
             onBack = onNavigateBack,
-            scrolled = scrollState.isScrolled,
+            scrolled = scrollState.rememberIsScrolled(),
             applyStatusBarInset = false
         )
 

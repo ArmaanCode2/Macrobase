@@ -28,4 +28,19 @@ object RankImageResolver {
             Rank.GIGACHAD -> R.drawable.rank_gigachad
         }
     }
+
+    /** The small picture for a row of the rank ladder: decoding it costs about a seventh of the full one. */
+    @DrawableRes
+    fun getRankThumbnailRes(rank: Rank): Int {
+        return when (rank) {
+            Rank.FAT_BEAR -> R.drawable.rank_fat_bear_thumb
+            Rank.AVERAGE -> R.drawable.rank_average_thumb
+            Rank.CARB_MERCHANT -> R.drawable.rank_carb_merchant_thumb
+            Rank.PROTEIN_ALCHEMIST -> R.drawable.rank_protein_alchemist_thumb
+            Rank.GYM_CAT -> R.drawable.rank_gym_cat_thumb
+            Rank.MUSCLE_BUSTER -> R.drawable.rank_muscle_buster_thumb
+            Rank.FART_MONSTER -> R.drawable.rank_fart_monster_thumb
+            Rank.GIGACHAD -> R.drawable.rank_gigachad_thumb
+        }
+    }
 }

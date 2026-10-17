@@ -1,5 +1,6 @@
 package com.macrobase.app.core.di
 
+import com.macrobase.app.core.util.CalculationLane
 import com.macrobase.app.data.database.BuiltInDatabaseManager
 import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.provider.FoodDataProvider
@@ -110,12 +111,13 @@ val repositoryModule = module {
     single<java.time.Clock> { com.macrobase.app.core.util.DeviceClock }
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
     single<GoalsRepository> { GoalsRepositoryImpl(get()) }
-    single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get(), get()) }
-    single<FoodRepository> { FoodRepositoryImpl(get(), get(), get()) }
+    // Heavier calculations run on the shared calculation lane, off the main thread
+    single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
+    single<FoodRepository> { FoodRepositoryImpl(get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
     single<RecipeRepository> { RecipeRepositoryImpl(get()) }
     single<WeightRepository> { WeightRepositoryImpl(get()) }
     single<WaterRepository> { WaterRepositoryImpl(get()) }
-    single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get(), get()) }
+    single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
     single<PortabilityRepository> {
         val context = get<Context>()
         PortabilityRepositoryImpl(get(), get(), get(), onUserDataChanged = { MacroBaseWidgetProvider.updateAllWidgets(context) })
@@ -133,7 +135,8 @@ val repositoryModule = module {
             diaryRepository = get(),
             foodRepository = get(),
             preferencesRepository = get(),
-            clock = get()
+            clock = get(),
+            dispatcher = CalculationLane.replay
         )
     }
 }

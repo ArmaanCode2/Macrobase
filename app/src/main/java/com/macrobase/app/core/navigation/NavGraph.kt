@@ -294,6 +294,7 @@ fun NavGraph(
         // Food Logging Calendar
         screen(navController, Screen.Calendar.route) {
             val viewModel: CalendarViewModel = koinViewModel()
+            LaunchedEffect(viewModel) { viewModel.onShown() }
             CalendarScreen(
                 viewModel = viewModel,
                 onDateClick = { selectedDate ->
@@ -374,8 +375,9 @@ fun NavGraph(
                 onDateClick = { selectedDate ->
                     homeViewModel.onSelectDate(selectedDate)
                     navController.navigate(Screen.Home.dateRoute(selectedDate)) {
+                        // Stats is kept, so it comes back as it was
                         popUpTo(Screen.Home.route.substringBefore("?")) {
-                            saveState = false
+                            saveState = true
                         }
                         launchSingleTop = true
                     }

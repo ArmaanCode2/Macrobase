@@ -1,5 +1,6 @@
 package com.macrobase.app.data.repository.rank
 
+import com.macrobase.app.core.util.settleAfterFirst
 import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.data.repository.FoodRepositoryImpl
@@ -89,8 +90,9 @@ class RankRepositoryImpl(
     private fun observeRankProfile(today: LocalDate): Flow<RankProfile> = combine(
         // A replay covers the whole diary: only a real change to these starts another
         goalsRepository.observeGoals().distinctUntilChanged(),
-        // The rating is replayed over every logged day (BUG-023)
-        diaryRepository.observeLoggedFoodNutrients(HISTORY_START, today),
+        // The rating is replayed over every logged day (BUG-023). A burst of diary changes (several
+        // foods logged, deleted or moved) is replayed once, after it settles
+        diaryRepository.observeLoggedFoodNutrients(HISTORY_START, today).settleAfterFirst(DIARY_SETTLE_MS),
         (preferencesRepository?.observeSeenRankRulesVersion() ?: flowOf(RankScoringConfig.RULES_VERSION)).distinctUntilChanged(),
         (preferencesRepository?.observeSeenRankSeason() ?: flowOf(Long.MAX_VALUE)).distinctUntilChanged()
     ) { goals, foods, seenRulesVersion, seenSeasonOn ->
@@ -444,6 +446,9 @@ class RankRepositoryImpl(
     private companion object {
         /** Earlier than any diary entry, so the query returns every logged day. */
         val HISTORY_START: LocalDate = LocalDate.of(1970, 1, 1)
+
+        /** How long the diary must stay unchanged before a change is replayed. */
+        const val DIARY_SETTLE_MS = 400L
 
         /**
          * A food from the built-in catalog: any positive id outside the custom food and recipe

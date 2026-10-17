@@ -1,8 +1,8 @@
 package com.macrobase.app.feature.recipes
 
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.core.navigation.ReportContentScrolled
-import com.macrobase.app.core.designsystem.components.isScrolled
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.designsystem.components.mealLabel
@@ -115,7 +115,6 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
-import androidx.compose.material3.CircularProgressIndicator
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -250,12 +249,8 @@ fun RecipesScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         if (uiState.isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = AppColors.Primary)
-            }
+            // A spinner only if the recipes take a while, so a quick load never flashes one
+            MbDelayedProgress(modifier = Modifier.fillMaxSize())
         } else if (uiState.recipes.isEmpty()) {
             EmptyStateCard(
                 icon = Icons.Default.RestaurantMenu,
@@ -548,7 +543,7 @@ fun EditRecipeScreen(
     val isFormValid = name.isNotBlank() && servingsCount > 0 && ingredients.isNotEmpty()
 
     val scrollState = rememberScrollState()
-    ReportContentScrolled(scrollState.isScrolled)
+    ReportContentScrolled(scrollState.rememberIsScrolled())
 
     Column(
         modifier = modifier

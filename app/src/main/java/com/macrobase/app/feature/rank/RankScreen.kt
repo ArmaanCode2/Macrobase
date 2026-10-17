@@ -1,6 +1,7 @@
 package com.macrobase.app.feature.rank
 
-import androidx.compose.foundation.Image
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -31,10 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -53,7 +52,6 @@ import com.macrobase.app.core.designsystem.components.MbHeader
 import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbIconButton
 import com.macrobase.app.core.designsystem.components.MbPanel
-import com.macrobase.app.core.designsystem.components.isScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.domain.model.FitnessGoal
@@ -82,6 +80,7 @@ fun RankScreen(
     val profile = uiState.rankProfile
     var showLadderSheet by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+    val scrolled = scrollState.rememberIsScrolled()
     val scope = rememberCoroutineScope()
     // Where the history card starts in the scrolled column, so a new page opens at its top
     var historyTop by remember { mutableIntStateOf(0) }
@@ -97,14 +96,22 @@ fun RankScreen(
 
     Column(modifier = modifier.fillMaxSize()) {
         // Pinned header; the (i) opens the full rank ladder
-        MbHeader(title = "Rank", scrolled = scrollState.isScrolled, applyStatusBarInset = false) {
+        MbHeader(title = "Rank", scrolled = scrolled, applyStatusBarInset = false) {
             MbIconButton(
                 icon = Ph.Info.light,
                 contentDescription = "View all ranks",
-                onClick = { showLadderSheet = true },
+                // The ladder marks your rank, so it opens once the rank is known
+                onClick = { if (!uiState.isLoading) showLadderSheet = true },
                 size = Dimensions.HeaderButton,
                 outlined = true
             )
+        }
+
+        // The first visit works out the rank from the whole diary; until then nothing is shown
+        // rather than a made-up starting rank
+        if (uiState.isLoading) {
+            MbDelayedProgress(modifier = Modifier.fillMaxSize())
+            return@Column
         }
 
         Column(
@@ -235,10 +242,9 @@ private fun RankImageHeader(
         contentAlignment = Alignment.Center
     ) {
         if (drawableRes != 0) {
-            Image(
-                painter = painterResource(id = drawableRes),
+            RankPicture(
+                id = drawableRes,
                 contentDescription = rankTier.displayName,
-                contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(4.dp)
@@ -451,8 +457,8 @@ internal fun calorieZoneSubtitle(strategy: FitnessGoal, zone: ClosedFloatingPoin
     return "Zone: $low \u2013 $high kcal \u2022 $rule"
 }
 
-/** Days per history page. */
-private const val HISTORY_PAGE_DAYS = 30
+/** Days in a page of "Recent RR movement"; older pages are drawn when the user pages back. */
+private const val HISTORY_PAGE_DAYS = 15
 
 /** "Oct 05", as each history row names a day; English like the rest of the screen. */
 private val historyDateFormat = DateTimeFormatter.ofPattern("MMM dd", Locale.US)
@@ -484,7 +490,10 @@ internal fun historyReasonLine(entry: RankHistoryEntry, stillEating: Boolean = f
     }
 }
 
-/** "Sep 15 \u2013 Oct 14" for a page of [entries], the newest first. */
+/** The history split into pages of [HISTORY_PAGE_DAYS] days, the newest page first. */
+internal fun historyPages(history: List<RankHistoryEntry>): List<List<RankHistoryEntry>> = history.chunked(HISTORY_PAGE_DAYS)
+
+/** "Oct 1 \u2013 Oct 15" for a page of [entries], the newest first. */
 internal fun historyPageRange(entries: List<RankHistoryEntry>): String {
     val newest = entries.first().date.format(historyDateFormat)
     val oldest = entries.last().date.format(historyDateFormat)
@@ -500,8 +509,8 @@ private fun RecentHistoryCard(
     modifier: Modifier = Modifier
 ) {
     val today = LocalDate.now()
-    // The first page holds today and the 29 days before it, each later page the 30 days before
-    val pages = remember(history) { history.chunked(HISTORY_PAGE_DAYS) }
+    // The first page holds today and the 14 days before it, each later page the 15 days before
+    val pages = remember(history) { historyPages(history) }
     // Back on the first page whenever the screen opens again
     var page by remember { mutableIntStateOf(0) }
     val shownPage = page.coerceIn(0, maxOf(0, pages.lastIndex))
