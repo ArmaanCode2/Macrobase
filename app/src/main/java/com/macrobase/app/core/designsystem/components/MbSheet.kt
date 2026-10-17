@@ -76,7 +76,7 @@ fun MbSheet(
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        modifier = modifier.topEdgeBorder(AppColors.Edge2, 28.dp),
+        modifier = modifier,
         sheetState = sheetState,
         shape = AppShapes.BottomSheet,
         containerColor = AppColors.SheetFill,
@@ -84,12 +84,21 @@ fun MbSheet(
         tonalElevation = 0.dp,
         scrimColor = AppColors.Scrim,
         dragHandle = {
+            // The top line is drawn here, inside the sheet: the sheet's own modifier sits outside
+            // its drag offset, so a line drawn there stays at the top of the screen
             Box(
                 modifier = Modifier
-                    .padding(top = 10.dp, bottom = 2.dp)
-                    .size(width = 40.dp, height = 4.dp)
-                    .background(AppColors.DividerStrong, RoundedCornerShape(2.dp))
-            )
+                    .fillMaxWidth()
+                    .topEdgeBorder(AppColors.Edge2, 28.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 2.dp)
+                        .size(width = 40.dp, height = 4.dp)
+                        .background(AppColors.DividerStrong, RoundedCornerShape(2.dp))
+                )
+            }
         }
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
