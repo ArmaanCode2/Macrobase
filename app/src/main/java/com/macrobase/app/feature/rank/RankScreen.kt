@@ -1,5 +1,8 @@
 package com.macrobase.app.feature.rank
 
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.navigation.LocalDockInset
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,7 +102,6 @@ fun RankScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .verticalScroll(scrollState)
             .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
     ) {
@@ -289,8 +291,10 @@ fun RankScreen(
             modifier = Modifier.onGloballyPositioned { historyTop = it.positionInParent().y.roundToInt() }
         )
 
-        Spacer(modifier = Modifier.height(AppSpacing.lg))
+        // Clears the bottom dock
+        Spacer(modifier = Modifier.height(AppSpacing.lg + LocalDockInset.current))
     }
+    ReportContentScrolled(scrollState.isScrolled)
 }
 
 /** Why the rating stops below [gate], the first rating of a rank that needs a clean week. */

@@ -54,6 +54,7 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.core.designsystem.components.MacroProgressStrip
+import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.Meal
@@ -63,10 +64,12 @@ import com.macrobase.app.domain.usecase.GetDailyDiaryUseCase
 import com.macrobase.app.domain.usecase.GetFoodDetailsUseCase
 import com.macrobase.app.domain.usecase.MoveDiaryEntriesUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -76,6 +79,7 @@ import com.macrobase.app.domain.model.WeightEntry
 import com.macrobase.app.domain.usecase.GetWeightForDateUseCase
 import java.time.Clock
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.Locale
 
@@ -98,6 +102,16 @@ import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.MealConfiguration
 import androidx.compose.foundation.layout.defaultMinSize
+
+/**
+ * The meal to log to at [time] on the device clock: before 11:00 Breakfast, before 16:00 Lunch,
+ * otherwise Dinner. The "+" sheet starts on it.
+ */
+internal fun mealForTime(time: LocalTime): MealType = when {
+    time.isBefore(LocalTime.of(11, 0)) -> MealType.BREAKFAST
+    time.isBefore(LocalTime.of(16, 0)) -> MealType.LUNCH
+    else -> MealType.DINNER
+}
 
 /** A day total of a nutrient that may be unknown: "12.5g", or "-" when no entry states it. */
 internal fun formatOptionalTotal(value: Double?, unit: String): String =
@@ -211,6 +225,27 @@ class HomeViewModel(
         viewModelScope.launch { meal.entries.forEach { addToBasket(it) } }
     }
 
+    /** The meal to log to now, by this ViewModel's clock. */
+    fun currentMeal(): MealType = mealForTime(LocalTime.now(clock))
+
+    /** The diary of any [date], for the "+" sheet's copy from yesterday. */
+    fun summaryFor(date: LocalDate): Flow<DailyNutritionSummary> = getDailyDiaryUseCase(date)
+
+    /**
+     * Puts the foods of [meal] on [date] in the basket, in the meal's order, already set to today
+     * and [toMeal], so logging them never logs [date] again. Items already in the basket keep
+     * their own day and meal. [onDone] runs once every food is in.
+     */
+    fun copyMealFrom(date: LocalDate, meal: MealType, toMeal: MealType = meal, onDone: () -> Unit = {}) {
+        _revealedEntryId.value = null
+        viewModelScope.launch {
+            val entries = getDailyDiaryUseCase(date).first().meals.firstOrNull { it.type == meal }?.entries.orEmpty()
+            val today = today()
+            entries.forEach { addToBasket(it, date = today, mealType = toMeal) }
+            onDone()
+        }
+    }
+
     /** Moves every food of [meal] to [mealType] on [date]; what each food logged stays as it was. */
     fun moveMeal(meal: Meal, date: LocalDate, mealType: MealType) {
         val move = moveDiaryEntriesUseCase ?: return
@@ -228,7 +263,7 @@ class HomeViewModel(
         viewModelScope.launch { deleteDiaryEntryUseCase(entryIds) }
     }
 
-    private suspend fun addToBasket(entry: DiaryEntry) {
+    private suspend fun addToBasket(entry: DiaryEntry, date: LocalDate = entry.date, mealType: MealType = entry.mealType) {
         val fullFood = getFoodDetailsUseCase?.invoke(entry.food.id)
             ?.takeIf { it.isSameFoodAs(entry.food) && it.canScale(it.resolveLoggedServing(entry.serving)) }
             ?: entry.food
@@ -239,8 +274,8 @@ class HomeViewModel(
             serving = matchedServing,
             quantity = entry.quantity,
             calculatedNutrition = entry.calculatedNutrition,
-            date = entry.date,
-            mealType = entry.mealType
+            date = date,
+            mealType = mealType
         )
     }
 }
@@ -265,7 +300,6 @@ fun HomeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .verticalScroll(rememberScrollState())
     ) {
         // 1. Date Selector Ribbon - Compact and centered
@@ -469,7 +503,8 @@ fun HomeScreen(
         }
         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
 
-        Spacer(modifier = Modifier.height(AppSpacing.xl))
+        // Clears the bottom dock
+        Spacer(modifier = Modifier.height(AppSpacing.xl + LocalDockInset.current))
     }
 
     // Meal card: totals, and Copy / Move / Delete for the whole meal

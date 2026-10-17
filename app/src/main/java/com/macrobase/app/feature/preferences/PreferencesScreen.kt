@@ -1,5 +1,8 @@
 package com.macrobase.app.feature.preferences
 
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.navigation.LocalDockInset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -626,13 +629,14 @@ fun PreferencesScreen(
     val previewGoal = check.goal
 
     fun label(name: String, field: PreferenceField) = "$name (${PreferencesViewModel.unitLabel(field, unit)})"
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.isScrolled)
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
     ) {
         Text(text = "User Profile & Preferences", style = AppTypography.Header1)
         Text(
@@ -1198,6 +1202,19 @@ fun PreferencesScreen(
                 )
             }
         }
+
+        // The version line the side drawer used to show
+        Text(
+            text = "Offline Nutrition Tracker v${com.macrobase.app.BuildConfig.VERSION_NAME}",
+            style = AppTypography.Caption,
+            color = AppColors.TextMuted,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = AppSpacing.xl),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        // Clears the bottom dock
+        Spacer(modifier = Modifier.height(LocalDockInset.current))
     }
 }
 

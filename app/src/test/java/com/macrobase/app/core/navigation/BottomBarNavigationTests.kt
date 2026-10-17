@@ -36,14 +36,14 @@ class BottomBarNavigationTests {
 
     private val today = LocalDate.of(2026, 10, 13)
 
-    // MacroBaseScaffold draws the bar from this list, Statistics as the raised middle button
+    // MacroBaseScaffold draws the bar from this list; the active tab shows its label
     @Test
     fun theBarIsHomeCustomFoodsStatsRankSettingsAndEachTabOpensItsScreen() {
         assertEquals(
             listOf(Screen.Home, Screen.CustomFoods, Screen.Statistics, Screen.Rank, Screen.Preferences),
             Screen.bottomNavScreens
         )
-        assertEquals(listOf("Home", "Custom Foods", "Stats", "Rank", "Settings"), Screen.bottomNavScreens.map(::bottomTabLabel))
+        assertEquals(listOf("Home", "Foods", "Stats", "Rank", "Profile"), Screen.bottomNavScreens.map(::bottomTabLabel))
 
         val navController = navController()
         Screen.bottomNavScreens.reversed().forEach { screen ->

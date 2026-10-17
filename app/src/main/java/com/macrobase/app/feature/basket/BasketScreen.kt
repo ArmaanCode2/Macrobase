@@ -104,7 +104,6 @@ fun BasketScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         if (items.isEmpty()) {
             Box(

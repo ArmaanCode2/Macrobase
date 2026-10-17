@@ -215,7 +215,6 @@ fun WaterScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         // 1. Top Bar with back navigation
         Row(

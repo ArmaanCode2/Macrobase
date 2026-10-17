@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.statistics
 
+import com.macrobase.app.core.navigation.LocalDockInset
 import kotlin.math.roundToInt
 import android.app.DatePickerDialog
 import androidx.compose.foundation.background
@@ -285,7 +286,6 @@ fun StatisticsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         // Tab Navigation Header
         ScrollableTabRow(
@@ -317,18 +317,20 @@ fun StatisticsScreen(
             }
         }
 
-        // Tab Content
-        when (uiState.selectedTab) {
-            0 -> FoodLoggingCalendar(
-                uiState = calendarUiState,
-                onPreviousMonth = { calendarViewModel.onPreviousMonth() },
-                onNextMonth = { calendarViewModel.onNextMonth() },
-                onDateClick = onDateClick
-            )
-            1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
-            2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
-            3 -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
-            4 -> RankHistoryTabRoute(viewModel = viewModel)
+        // Tab Content, kept above the bottom dock
+        Box(modifier = Modifier.weight(1f).padding(bottom = LocalDockInset.current)) {
+            when (uiState.selectedTab) {
+                0 -> FoodLoggingCalendar(
+                    uiState = calendarUiState,
+                    onPreviousMonth = { calendarViewModel.onPreviousMonth() },
+                    onNextMonth = { calendarViewModel.onNextMonth() },
+                    onDateClick = onDateClick
+                )
+                1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
+                2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
+                3 -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+                4 -> RankHistoryTabRoute(viewModel = viewModel)
+            }
         }
     }
 }

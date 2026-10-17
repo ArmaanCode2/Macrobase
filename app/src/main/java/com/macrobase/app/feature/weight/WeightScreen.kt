@@ -45,10 +45,12 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -287,7 +289,8 @@ class WeightViewModel(
 fun WeightScreen(
     viewModel: WeightViewModel,
     onNavigateBack: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    openLogOnStart: Boolean = false
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
@@ -298,13 +301,22 @@ fun WeightScreen(
     val shortDateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd") }
 
     var showLogDialog by remember { mutableStateOf(false) }
+
+    // "Log weight" from Home or the "+" sheet opens the dialog once; coming back to this screen
+    // later must not open it again
+    var startLogHandled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(openLogOnStart) {
+        if (openLogOnStart && !startLogHandled) {
+            startLogHandled = true
+            showLogDialog = true
+        }
+    }
     var entryToEdit by remember { mutableStateOf<WeightEntry?>(null) }
     var showIntervalDropdown by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         // 1. Top Bar
         Row(

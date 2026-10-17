@@ -616,7 +616,6 @@ fun FoodDetailScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .background(AppColors.Background)
         ) {
             // Top Header Bar matching reference
             Row(
@@ -677,7 +676,6 @@ fun FoodDetailScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         // Top Header Bar matching reference
         Row(

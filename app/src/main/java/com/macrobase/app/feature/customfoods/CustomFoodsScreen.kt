@@ -45,6 +45,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import com.macrobase.app.core.navigation.LocalDockInset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -223,26 +226,15 @@ fun CustomFoodsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
+    // "Create custom food" is in the "+" sheet; a button of its own here would sit under the dock
     Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    focusManager.clearFocus()
-                    onCreateClick()
-                },
-                containerColor = AppColors.Primary,
-                contentColor = AppColors.OnPrimary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Create Custom Food")
-            }
-        },
-        containerColor = AppColors.Background
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
             modifier = modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(AppColors.Background)
                 .clickable(
                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                     indication = null
@@ -339,7 +331,10 @@ fun CustomFoodsScreen(
                     )
                 }
 
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = LocalDockInset.current)
+                ) {
                     items(uiState.filteredFoods, key = { it.id }) { item ->
                         CustomFoodRow(
                             food = item,
@@ -541,7 +536,6 @@ fun EditCustomFoodScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .padding(AppSpacing.lg)
             .verticalScroll(rememberScrollState())
     ) {

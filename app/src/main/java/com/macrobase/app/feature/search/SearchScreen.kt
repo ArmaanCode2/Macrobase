@@ -157,7 +157,6 @@ fun SearchScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
         // 1. Embedded Search Field
         Box(

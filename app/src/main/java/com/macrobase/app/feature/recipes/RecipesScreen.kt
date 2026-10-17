@@ -232,13 +232,12 @@ fun RecipesScreen(
                 Icon(Icons.Default.Add, contentDescription = "Create Recipe")
             }
         },
-        containerColor = AppColors.Background
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { padding ->
         Column(
             modifier = modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(AppColors.Background)
         ) {
             if (uiState.isLoading) {
                 Box(
@@ -528,7 +527,6 @@ fun EditRecipeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .padding(AppSpacing.lg)
             .verticalScroll(rememberScrollState())
     ) {

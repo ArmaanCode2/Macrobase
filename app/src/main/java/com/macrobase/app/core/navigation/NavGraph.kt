@@ -210,10 +210,15 @@ fun NavGraph(
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
+                },
+                navArgument("openLog") {
+                    type = NavType.BoolType
+                    defaultValue = false
                 }
             )
         ) { backStackEntry ->
             val dateEpochDayArg = backStackEntry.arguments?.getString("dateEpochDay")?.toLongOrNull()
+            val openLog = backStackEntry.arguments?.getBoolean("openLog") ?: false
             val viewModel: WeightViewModel = koinViewModel()
             androidx.compose.runtime.LaunchedEffect(dateEpochDayArg) {
                 if (dateEpochDayArg != null) {
@@ -222,7 +227,8 @@ fun NavGraph(
             }
             WeightScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                openLogOnStart = openLog
             )
         }
 

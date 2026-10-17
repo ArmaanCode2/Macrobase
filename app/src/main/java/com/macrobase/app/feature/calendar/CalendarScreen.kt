@@ -257,7 +257,6 @@ fun FoodLoggingCalendar(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
             .padding(AppSpacing.lg)
             .verticalScroll(rememberScrollState())
     ) {
