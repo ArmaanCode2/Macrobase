@@ -1,5 +1,9 @@
 package com.macrobase.app.core.navigation
 
+import com.macrobase.app.feature.foods.FOODS_VIEW_RECIPES
+import com.macrobase.app.feature.foods.FOODS_VIEW_CUSTOM
+import com.macrobase.app.feature.foods.FOODS_VIEW_KEY
+import com.macrobase.app.feature.foods.FoodsScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -291,15 +295,9 @@ fun NavGraph(
             )
         }
 
-        // Custom Foods
-        composable(Screen.CustomFoods.route) {
-            val viewModel: CustomFoodsViewModel = koinViewModel()
-            CustomFoodsScreen(
-                viewModel = viewModel,
-                onCreateClick = { navController.navigate(Screen.EditCustomFood.createRoute()) },
-                onEditClick = { foodId -> navController.navigate(Screen.EditCustomFood.createRoute(foodId)) },
-                onFoodClick = { foodId -> navController.navigate(Screen.FoodDetail.createRoute(foodId)) }
-            )
+        // Foods tab: custom foods and recipes, switched in the dock
+        composable(Screen.CustomFoods.route) { backStackEntry ->
+            FoodsDestination(navController, backStackEntry, initialView = FOODS_VIEW_CUSTOM, showSwitchInContent = false)
         }
 
         // Edit / Create Custom Food
@@ -346,20 +344,9 @@ fun NavGraph(
             )
         }
 
-        // Recipes List
-        composable(Screen.Recipes.route) {
-            val viewModel: RecipesViewModel = koinViewModel()
-            RecipesScreen(
-                viewModel = viewModel,
-                onCreateClick = { navController.navigate(Screen.EditRecipe.createRoute()) },
-                onEditClick = { recipeId -> navController.navigate(Screen.EditRecipe.createRoute(recipeId)) },
-                // Back to the existing dashboard rather than stacking a second one on top
-                onLogSuccess = {
-                    if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
-                        navController.navigate(Screen.Home.todayRoute())
-                    }
-                }
-            )
+        // Recipes opened as a pushed screen: the Foods views with their switch at the top
+        composable(Screen.Recipes.route) { backStackEntry ->
+            FoodsDestination(navController, backStackEntry, initialView = FOODS_VIEW_RECIPES, showSwitchInContent = true)
         }
 
         // Edit / Create Recipe
@@ -423,4 +410,51 @@ fun NavGraph(
             com.macrobase.app.feature.rank.RankScreen(viewModel = viewModel)
         }
     }
+}
+
+/**
+ * The Foods views on [backStackEntry]: the chosen view lives in its saved state, so the "+" sheet's
+ * "Log a recipe" can open the tab on Recipes.
+ */
+@Composable
+private fun FoodsDestination(
+    navController: NavHostController,
+    backStackEntry: NavBackStackEntry,
+    initialView: Int,
+    showSwitchInContent: Boolean
+) {
+    val customFoodsViewModel: CustomFoodsViewModel = koinViewModel()
+    val recipesViewModel: RecipesViewModel = koinViewModel()
+    val selectedView by backStackEntry.savedStateHandle.getStateFlow(FOODS_VIEW_KEY, initialView).collectAsState()
+    FoodsScreen(
+        selectedView = selectedView,
+        onSelectView = { backStackEntry.savedStateHandle[FOODS_VIEW_KEY] = it },
+        showSwitchInContent = showSwitchInContent,
+        customFoods = {
+            CustomFoodsScreen(
+                viewModel = customFoodsViewModel,
+                onCreateClick = { navController.navigate(Screen.EditCustomFood.createRoute()) },
+                onEditClick = { foodId -> navController.navigate(Screen.EditCustomFood.createRoute(foodId)) },
+                onFoodClick = { foodId -> navController.navigate(Screen.FoodDetail.createRoute(foodId)) },
+                onScanClick = {
+                    // The scan fills a new custom food form: the form opens first, so the result lands in it
+                    navController.navigate(Screen.EditCustomFood.createRoute())
+                    navController.navigate(Screen.NutritionLabelScanner.route)
+                }
+            )
+        },
+        recipes = {
+            RecipesScreen(
+                viewModel = recipesViewModel,
+                onCreateClick = { navController.navigate(Screen.EditRecipe.createRoute()) },
+                onEditClick = { recipeId -> navController.navigate(Screen.EditRecipe.createRoute(recipeId)) },
+                // Back to the existing dashboard rather than stacking a second one on top
+                onLogSuccess = {
+                    if (!navController.popBackStack(Screen.Home.route, inclusive = false)) {
+                        navController.navigate(Screen.Home.todayRoute())
+                    }
+                }
+            )
+        }
+    )
 }

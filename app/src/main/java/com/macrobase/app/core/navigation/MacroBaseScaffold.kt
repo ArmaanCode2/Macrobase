@@ -48,6 +48,8 @@ import com.macrobase.app.core.designsystem.components.MbFab
 import com.macrobase.app.core.designsystem.components.MbHeader
 import com.macrobase.app.core.designsystem.components.MbViewSwitch
 import com.macrobase.app.feature.dashboard.HomeViewModel
+import com.macrobase.app.feature.foods.FOODS_VIEW_KEY
+import com.macrobase.app.feature.foods.FOODS_VIEW_RECIPES
 import org.koin.androidx.compose.koinViewModel
 
 /** The route without its arguments, such as "home" for "home?dateEpochDay={dateEpochDay}". */
@@ -166,7 +168,11 @@ fun MacroBaseScaffold(
                 },
                 onScanLabel = openScanner,
                 onCreateCustomFood = { navController.navigate(Screen.EditCustomFood.createRoute()) },
-                onLogRecipe = { navController.navigate(Screen.Recipes.route) },
+                onLogRecipe = {
+                    // The Foods tab, on its Recipes view
+                    navController.navigateToTopLevel(Screen.CustomFoods, homeViewModel)
+                    navController.currentBackStackEntry?.savedStateHandle?.set(FOODS_VIEW_KEY, FOODS_VIEW_RECIPES)
+                },
                 onOpenBasket = openBasket,
                 onLogWater = { navController.navigate(Screen.Water.createRoute()) },
                 onLogWeight = { navController.navigate(Screen.Weight.createRoute(openLog = true)) }

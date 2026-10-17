@@ -1,5 +1,31 @@
 package com.macrobase.app.feature.customfoods
 
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.mbSearchPillFrame
+import com.macrobase.app.core.designsystem.components.MbScanButton
+import com.macrobase.app.core.designsystem.components.MbFilledPlusButton
+import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbRowTile
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.Ph
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -221,132 +247,158 @@ fun CustomFoodsScreen(
     onCreateClick: () -> Unit,
     onEditClick: (Long) -> Unit,
     onFoodClick: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onScanClick: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val listState = rememberLazyListState()
+    ReportContentScrolled(listState.rememberIsScrolled())
 
-    // "Create custom food" is in the "+" sheet; a button of its own here would sit under the dock
-    Scaffold(
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(padding)
-                .clickable(
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    indication = null
-                ) { focusManager.clearFocus() }
-        ) {
-            // Search field
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+            ) { focusManager.clearFocus() }
+    ) {
+        // Search, with Create and Scan inside the bar
+        CustomFoodsSearchBar(
+            query = uiState.searchQuery,
+            onQueryChange = { viewModel.onSearchQueryChange(it) },
+            onClear = {
+                viewModel.onSearchQueryChange("")
+                focusManager.clearFocus()
+            },
+            onSearchAction = { focusManager.clearFocus() },
+            onCreate = {
+                focusManager.clearFocus()
+                onCreateClick()
+            },
+            onScan = {
+                focusManager.clearFocus()
+                onScanClick()
+            },
+            modifier = Modifier.padding(horizontal = AppSpacing.screenMargin, vertical = 8.dp)
+        )
+
+        if (uiState.isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(AppColors.Surface)
-                    .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
             ) {
-                TextField(
-                    value = uiState.searchQuery,
-                    onValueChange = { viewModel.onSearchQueryChange(it) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    placeholder = {
-                        Text(
-                            text = "Search custom foods...",
-                            style = AppTypography.Body1,
-                            color = AppColors.TextSecondary
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = AppColors.TextSecondary
-                        )
-                    },
-                    trailingIcon = {
-                        if (uiState.searchQuery.isNotEmpty()) {
-                            IconButton(onClick = {
-                                viewModel.onSearchQueryChange("")
-                                focusManager.clearFocus()
-                            }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = AppColors.TextSecondary)
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = AppColors.SurfaceInput,
-                        unfocusedContainerColor = AppColors.SurfaceInput,
-                        focusedTextColor = AppColors.TextPrimary,
-                        unfocusedTextColor = AppColors.TextPrimary,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
-                )
+                CircularProgressIndicator(color = AppColors.Primary)
             }
-
-            if (uiState.isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AppColors.Primary)
-                }
-            } else if (uiState.allCustomFoods.isEmpty()) {
-                EmptyStateCard(
-                    icon = Icons.Default.Fastfood,
-                    title = "No Custom Foods",
-                    subtitle = "Create and save your custom ingredients or foods to easily search and log them anytime.",
-                    actionButtonText = "+ Create Custom Food",
-                    onActionClick = onCreateClick,
-                    modifier = Modifier.padding(top = AppSpacing.xl)
-                )
-            } else if (uiState.filteredFoods.isEmpty()) {
-                EmptyStateCard(
-                    icon = Icons.Default.Search,
-                    title = "No Matches Found",
-                    subtitle = "No custom foods match '${uiState.searchQuery}'.",
-                    modifier = Modifier.padding(top = AppSpacing.xl)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Dimensions.SectionHeaderHeight)
-                        .background(AppColors.SurfaceAlt)
-                        .padding(horizontal = AppSpacing.lg),
-                    contentAlignment = Alignment.CenterStart
-                ) {
+        } else if (uiState.allCustomFoods.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.Fastfood,
+                title = "No Custom Foods",
+                subtitle = "Create and save your custom ingredients or foods to easily search and log them anytime.",
+                actionButtonText = "+ Create Custom Food",
+                onActionClick = onCreateClick,
+                modifier = Modifier.padding(top = AppSpacing.xl)
+            )
+        } else if (uiState.filteredFoods.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.Search,
+                title = "No Matches Found",
+                subtitle = "No custom foods match '${uiState.searchQuery}'.",
+                modifier = Modifier.padding(top = AppSpacing.xl)
+            )
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = AppSpacing.screenMargin,
+                    end = AppSpacing.screenMargin,
+                    top = 4.dp,
+                    bottom = LocalDockInset.current + AppSpacing.md
+                ),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)
+            ) {
+                item(key = "count") {
                     Text(
-                        text = "CUSTOM FOODS (${uiState.filteredFoods.size})",
+                        text = "Custom foods (${uiState.filteredFoods.size})",
                         style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
+                        color = AppColors.TextMuted,
+                        modifier = Modifier.padding(bottom = 2.dp)
                     )
                 }
-
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = LocalDockInset.current)
-                ) {
-                    items(uiState.filteredFoods, key = { it.id }) { item ->
-                        CustomFoodRow(
-                            food = item,
-                            onClick = { onFoodClick(item.id) },
-                            onEdit = { onEditClick(item.id) },
-                            onDelete = { viewModel.deleteCustomFood(item.id) {} }
-                        )
-                        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-                    }
+                items(uiState.filteredFoods, key = { it.id }) { item ->
+                    CustomFoodRow(
+                        food = item,
+                        onClick = { onFoodClick(item.id) },
+                        onEdit = { onEditClick(item.id) },
+                        onDelete = { viewModel.deleteCustomFood(item.id) {} }
+                    )
                 }
             }
         }
+    }
+}
+
+/**
+ * C14 The custom foods search: a real input with the name-or-brand filter, its clear button, a filled
+ * "+" that creates a custom food and an outlined scan button.
+ */
+@Composable
+private fun CustomFoodsSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    onSearchAction: () -> Unit,
+    onCreate: () -> Unit,
+    onScan: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .mbSearchPillFrame(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        MbIcon(
+            icon = Ph.MagnifyingGlass.light,
+            contentDescription = null,
+            size = 18.dp,
+            tint = AppColors.TextMuted,
+            modifier = Modifier.padding(start = 10.dp)
+        )
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = AppTypography.Body1.copy(color = AppColors.TextPrimary),
+            cursorBrush = SolidColor(AppColors.Primary),
+            keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearchAction() }),
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 4.dp)
+                .semantics { contentDescription = "Search custom foods" },
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.heightIn(min = 42.dp), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "Search custom foods\u2026",
+                            style = AppTypography.Body1.copy(fontSize = 14.5.sp, fontWeight = FontWeight.Light),
+                            color = AppColors.TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+        if (query.isNotEmpty()) {
+            MbIconButton(icon = Ph.X.light, contentDescription = "Clear", onClick = onClear, size = 36.dp, iconSize = 16.dp)
+        }
+        MbFilledPlusButton(onClick = onCreate, contentDescription = "Create custom food")
+        MbScanButton(onClick = onScan, contentDescription = "Scan a label")
     }
 }
 
@@ -358,70 +410,17 @@ fun CustomFoodRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    MbRowTile(
+        title = food.name,
+        subtitle = food.listSubtitle,
+        icon = Ph.ForkKnife.light,
+        value = "${food.nutrition.calories.roundToInt()}",
+        onClick = onClick,
+        showChevron = false,
         modifier = modifier
-            .fillMaxWidth()
-            .height(Dimensions.FoodRowHeight)
-            .background(AppColors.Background)
-            .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.lg),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(Dimensions.FoodThumbnailSize)
-                .clip(RoundedCornerShape(4.dp))
-                .background(AppColors.Surface),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Fastfood,
-                contentDescription = null,
-                tint = AppColors.Primary,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = AppSpacing.md)
-        ) {
-            Text(
-                text = food.name,
-                style = AppTypography.Body1,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            val sub = food.listSubtitle
-            Text(
-                text = sub,
-                style = AppTypography.Body2,
-                color = AppColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = "${food.nutrition.calories.roundToInt()}",
-                style = AppTypography.ValueMd,
-                color = AppColors.CalorieText
-            )
-            Text(
-                text = "Cal",
-                style = AppTypography.Caption
-            )
-        }
-
-        IconButton(onClick = onEdit, modifier = Modifier.padding(start = AppSpacing.xs).size(32.dp)) {
-            Icon(Icons.Default.Edit, contentDescription = "Edit Custom Food", tint = AppColors.TextSecondary, modifier = Modifier.size(18.dp))
-        }
-
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Delete, contentDescription = "Delete Custom Food", tint = AppColors.TextSecondary, modifier = Modifier.size(18.dp))
-        }
+        MbIconButton(icon = Ph.PencilSimple.light, contentDescription = "Edit Custom Food", onClick = onEdit, size = 40.dp, iconSize = 18.dp)
+        MbIconButton(icon = Ph.Trash.light, contentDescription = "Delete Custom Food", onClick = onDelete, size = 40.dp, iconSize = 18.dp)
     }
 }
 
@@ -533,303 +532,209 @@ fun EditCustomFoodScreen(
     val isFormValid = name.isNotBlank() && caloriesInput.value != null && (servingSizeInput.value ?: 0.0) > 0.0 &&
         numberInputs.none { it.error != null } && isCustomUnitValid
 
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.isScrolled)
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin, vertical = AppSpacing.sm)
     ) {
         Text(text = if (isEditing) "Edit Custom Food" else "Create Custom Food", style = AppTypography.Header1)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
         // Optional on-device scanner option (for new foods)
         if (!isEditing) {
-            Button(
+            MbButton(
+                text = "Scan Nutrition Label",
                 onClick = onScanLabelClick,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                shape = AppShapes.Button,
-                modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-            ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null, tint = AppColors.Primary)
-                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                Text("Scan Nutrition Label", style = AppTypography.Button, color = AppColors.TextPrimary)
-            }
-            Spacer(modifier = Modifier.height(AppSpacing.md))
+                kind = MbButtonKind.Secondary,
+                icon = Ph.Scan.light,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(AppSpacing.lg))
         }
 
         // Detected values review banner
         if (activeDraftForBanner != null && !isEditing) {
             val draft = activeDraftForBanner!!
-            Surface(
-                color = AppColors.SurfaceAlt,
-                shape = AppShapes.Card,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(AppSpacing.md)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f, fill = false)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.QrCodeScanner,
-                                contentDescription = null,
-                                tint = AppColors.CalorieText,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(AppSpacing.xs))
-                            Text(
-                                text = "Values detected (${draft.detectedBasis.displayName})",
-                                style = AppTypography.Header3,
-                                color = AppColors.CalorieText
-                            )
-                        }
-                        IconButton(
-                            onClick = { activeDraftForBanner = null },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Dismiss",
-                                tint = AppColors.TextSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+            MbPanel(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MbIcon(icon = Ph.Scan.light, contentDescription = null, size = 20.dp, tint = AppColors.CalorieText)
+                    Spacer(modifier = Modifier.width(AppSpacing.sm))
+                    Text(
+                        text = "Values detected (${draft.detectedBasis.displayName})",
+                        style = AppTypography.Header3,
+                        color = AppColors.CalorieText,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MbIconButton(
+                        icon = Ph.X.light,
+                        contentDescription = "Dismiss",
+                        onClick = { activeDraftForBanner = null },
+                        size = 36.dp,
+                        iconSize = 16.dp
+                    )
+                }
+                Spacer(modifier = Modifier.height(AppSpacing.xs))
+                Text(
+                    text = "Values detected from nutrition label. Please review before creating.",
+                    style = AppTypography.Body2,
+                    color = AppColors.TextSecondary
+                )
+                if (!draft.normalizationNote.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(AppSpacing.xs))
                     Text(
-                        text = "Values detected from nutrition label. Please review before creating.",
-                        style = AppTypography.Body2,
-                        color = AppColors.TextSecondary
+                        text = draft.normalizationNote!!,
+                        style = AppTypography.Caption,
+                        color = AppColors.Primary
                     )
-                    if (!draft.normalizationNote.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
+                }
+                // A value no food can have, or calories that do not match the macros (BUG-042)
+                if (draft.criticalWarnings.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    draft.criticalWarnings.forEach { warning ->
                         Text(
-                            text = draft.normalizationNote!!,
+                            text = "\u2022 $warning",
                             style = AppTypography.Caption,
-                            color = AppColors.Primary
+                            color = AppColors.Error
                         )
                     }
-                    // A value no food can have, or calories that do not match the macros (BUG-042)
-                    if (draft.criticalWarnings.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        draft.criticalWarnings.forEach { warning ->
-                            Text(
-                                text = "\u2022 $warning",
-                                style = AppTypography.Caption,
-                                color = AppColors.AlertRed
-                            )
-                        }
-                    }
-                    if (draft.warnings.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        draft.warnings.forEach { warning ->
-                            Text(
-                                text = "\u2022 $warning",
-                                style = AppTypography.Caption,
-                                color = AppColors.MacroCarbs
-                            )
-                        }
+                }
+                if (draft.warnings.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    draft.warnings.forEach { warning ->
+                        Text(
+                            text = "\u2022 $warning",
+                            style = AppTypography.Caption,
+                            color = AppColors.Warning
+                        )
                     }
                 }
             }
             Spacer(modifier = Modifier.height(AppSpacing.md))
         }
 
-        // Required Fields Section
-        Text(text = "REQUIRED INFORMATION", style = AppTypography.Caption, color = AppColors.TextSecondary)
-        Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Food Name *") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = brand,
-            onValueChange = { brand = it },
-            label = { Text("Brand / Origin (Optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
-        ) {
-            OutlinedTextField(
-                value = servingSize,
-                onValueChange = { servingSize = it },
-                label = { Text("Serving Size *") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                isError = servingSizeInput.error != null,
-                supportingText = servingSizeInput.error?.let { message -> { Text(message) } },
-                modifier = Modifier.weight(1f)
+        FormSection("Required information") {
+            MbTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = "Food Name *",
+                modifier = Modifier.fillMaxWidth()
             )
-
-            var unitExpanded by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier.weight(1.5f)
+            MbTextField(
+                value = brand,
+                onValueChange = { brand = it },
+                label = "Brand / Origin (Optional)",
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
             ) {
-                OutlinedTextField(
-                    value = selectedServingUnit.displayName,
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = false,
-                    label = { Text("Unit *") },
-                    trailingIcon = {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select Unit", tint = AppColors.TextSecondary)
-                    },
-                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        disabledTextColor = AppColors.TextPrimary,
-                        disabledBorderColor = AppColors.Divider,
-                        disabledLabelColor = AppColors.TextSecondary,
-                        disabledTrailingIconColor = AppColors.TextSecondary
-                    ),
+                MbTextField(
+                    value = servingSize,
+                    onValueChange = { servingSize = it },
+                    label = "Serving Size *",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    errorText = servingSizeInput.error,
+                    modifier = Modifier.weight(1f)
+                )
+                ServingUnitPicker(
+                    selected = selectedServingUnit,
+                    onSelect = { selectedServingUnit = it },
+                    modifier = Modifier.weight(1.5f)
+                )
+            }
+            if (selectedServingUnit == ServingUnit.CUSTOM) {
+                MbTextField(
+                    value = customUnitName,
+                    onValueChange = { customUnitName = it },
+                    label = "Custom Unit Name * (e.g. roti, slice, bowl, scoop)",
                     modifier = Modifier.fillMaxWidth()
                 )
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable { unitExpanded = true }
-                )
-
-                DropdownMenu(
-                    expanded = unitExpanded,
-                    onDismissRequest = { unitExpanded = false },
-                    modifier = Modifier.background(AppColors.SurfaceAlt)
-                ) {
-                    ServingUnit.entries.forEach { u ->
-                        DropdownMenuItem(
-                            text = { Text(u.displayName, style = AppTypography.Body1, color = AppColors.TextPrimary) },
-                            onClick = {
-                                selectedServingUnit = u
-                                unitExpanded = false
-                            }
-                        )
-                    }
-                }
             }
-        }
-
-        if (selectedServingUnit == ServingUnit.CUSTOM) {
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-            OutlinedTextField(
-                value = customUnitName,
-                onValueChange = { customUnitName = it },
-                label = { Text("Custom Unit Name * (e.g. roti, slice, bowl, scoop)") },
-                singleLine = true,
+            MbTextField(
+                value = calories,
+                onValueChange = { calories = it },
+                label = "Calories (kcal) *",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = caloriesInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
+        FormSection("Macronutrients (per serving)") {
+            MbTextField(
+                value = protein,
+                onValueChange = { protein = it },
+                label = "Protein (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = proteinInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = carbs,
+                onValueChange = { carbs = it },
+                label = "Carbohydrates (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = carbsInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = fat,
+                onValueChange = { fat = it },
+                label = "Fat (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = fatInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
-        OutlinedTextField(
-            value = calories,
-            onValueChange = { calories = it },
-            label = { Text("Calories (kcal) *") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = caloriesInput.error != null,
-            supportingText = caloriesInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        Text(text = "MACRONUTRIENTS (PER SERVING)", style = AppTypography.Caption, color = AppColors.TextSecondary)
-        Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-        OutlinedTextField(
-            value = protein,
-            onValueChange = { protein = it },
-            label = { Text("Protein (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = proteinInput.error != null,
-            supportingText = proteinInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = carbs,
-            onValueChange = { carbs = it },
-            label = { Text("Carbohydrates (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = carbsInput.error != null,
-            supportingText = carbsInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = fat,
-            onValueChange = { fat = it },
-            label = { Text("Fat (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = fatInput.error != null,
-            supportingText = fatInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        Text(text = "ADDITIONAL NUTRIENTS (OPTIONAL)", style = AppTypography.Caption, color = AppColors.TextSecondary)
-        Text(
-            text = "Saturated fat, fiber, sugar and sodium count toward your rank's food quality. " +
-                "A blank field counts as unknown.",
-            style = AppTypography.Caption,
-            color = AppColors.TextSecondary
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-        OutlinedTextField(
-            value = saturatedFat,
-            onValueChange = { saturatedFat = it },
-            label = { Text("Saturated Fat (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = saturatedFatInput.error != null,
-            supportingText = saturatedFatInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = fiber,
-            onValueChange = { fiber = it },
-            label = { Text("Dietary Fiber (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = fiberInput.error != null,
-            supportingText = fiberInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = sugar,
-            onValueChange = { sugar = it },
-            label = { Text("Total Sugars (g)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = sugarInput.error != null,
-            supportingText = sugarInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-        OutlinedTextField(
-            value = sodium,
-            onValueChange = { sodium = it },
-            label = { Text("Sodium (mg)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = sodiumInput.error != null,
-            supportingText = sodiumInput.error?.let { message -> { Text(message) } },
-            modifier = Modifier.fillMaxWidth()
-        )
+        FormSection("Additional nutrients (optional)") {
+            Text(
+                text = "Saturated fat, fiber, sugar and sodium count toward your rank's food quality. " +
+                    "A blank field counts as unknown.",
+                style = AppTypography.Body2.copy(fontSize = 13.sp),
+                color = AppColors.TextSecondary
+            )
+            MbTextField(
+                value = saturatedFat,
+                onValueChange = { saturatedFat = it },
+                label = "Saturated Fat (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = saturatedFatInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = fiber,
+                onValueChange = { fiber = it },
+                label = "Dietary Fiber (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = fiberInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = sugar,
+                onValueChange = { sugar = it },
+                label = "Total Sugars (g)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = sugarInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = sodium,
+                onValueChange = { sodium = it },
+                label = "Sodium (mg)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = sodiumInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.height(AppSpacing.xl))
 
@@ -866,18 +771,83 @@ fun EditCustomFoodScreen(
         )
 
         if (isEditing) {
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-            Button(
+            Spacer(modifier = Modifier.height(AppSpacing.md))
+            MbButton(
+                text = "Delete Custom Food",
                 onClick = {
                     viewModel.deleteCustomFood(existingFood!!.id, onComplete = onSaveSuccess)
                 },
-                modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight),
-                shape = AppShapes.Button,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.ProgressOver)
+                kind = MbButtonKind.Danger,
+                icon = Ph.Trash.light,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(modifier = Modifier.height(AppSpacing.xxl))
+    }
+}
+
+/** A titled group of the custom food form. */
+@Composable
+private fun FormSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = AppSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+    ) {
+        Text(
+            text = title,
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.semantics { heading() }
+        )
+        content()
+    }
+}
+
+/** The serving unit, a field that opens the list of all 14 units ("Custom..." included). */
+@Composable
+private fun ServingUnitPicker(selected: ServingUnit, onSelect: (ServingUnit) -> Unit, modifier: Modifier = Modifier) {
+    var unitExpanded by remember { mutableStateOf(false) }
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(text = "Unit *", style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.TextSecondary)
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(AppShapes.InputBox)
+                    .background(AppColors.FieldFill)
+                    .border(1.dp, AppColors.FieldBorder, AppShapes.InputBox)
+                    .mbClickable(pressedScale = 0.98f, onClickLabel = "Select Unit") { unitExpanded = true }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Delete, contentDescription = null, tint = AppColors.TextPrimary)
-                Spacer(modifier = Modifier.size(AppSpacing.xs))
-                Text(text = "Delete Custom Food", style = AppTypography.Button, color = AppColors.TextPrimary)
+                Text(
+                    text = selected.displayName,
+                    style = AppTypography.Body1,
+                    color = AppColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                MbIcon(icon = Ph.CaretDown.light, contentDescription = null, size = 16.dp, tint = AppColors.TextSecondary)
+            }
+            DropdownMenu(
+                expanded = unitExpanded,
+                onDismissRequest = { unitExpanded = false },
+                modifier = Modifier.background(AppColors.SheetFill)
+            ) {
+                ServingUnit.entries.forEach { u ->
+                    DropdownMenuItem(
+                        text = { Text(u.displayName, style = AppTypography.Body1, color = AppColors.TextPrimary) },
+                        onClick = {
+                            onSelect(u)
+                            unitExpanded = false
+                        }
+                    )
+                }
             }
         }
     }

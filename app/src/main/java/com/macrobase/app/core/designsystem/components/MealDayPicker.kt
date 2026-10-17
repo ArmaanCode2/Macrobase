@@ -62,7 +62,8 @@ private val MealGrid = listOf(
 /**
  * C11 "When" table: the 6 meal buttons and the Yesterday / Today / Choose a day row, 3 x 3 equal
  * cells. A null [selectedMeal] or [selectedDate] leaves that row with nothing selected (a basket
- * whose items differ). An optional [header] ("Log to Breakfast, Today") sits above the grid.
+ * whose items differ). An optional [header] ("Log to Breakfast, Today") sits above the grid. With
+ * [showDays] false only the meals show, for a log that is always today.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,7 +74,8 @@ fun MealAndDayPicker(
     onMealSelected: (MealType) -> Unit,
     onDateSelected: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
-    header: String? = null
+    header: String? = null,
+    showDays: Boolean = true
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -103,7 +105,7 @@ fun MealAndDayPicker(
             }
         }
 
-        Row(
+        if (showDays) Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 6.dp)
