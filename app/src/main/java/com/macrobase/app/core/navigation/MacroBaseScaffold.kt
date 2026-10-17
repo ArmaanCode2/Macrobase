@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.material3.Scaffold
+import com.macrobase.app.core.designsystem.AppTypography
+import androidx.compose.material3.Text
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -100,8 +102,9 @@ fun MacroBaseScaffold(
             Scaffold(
                 topBar = {
                     when {
-                        // Home, the immersive scanner and Food Detail draw their own top
-                        isScanner || isFoodDetail || routeBase == Screen.Home.route.routeBase() -> Unit
+                        // Home, Search (its field sits in the header), the immersive scanner and Food Detail draw their own top
+                        isScanner || isFoodDetail || routeBase == Screen.Home.route.routeBase() ||
+                            routeBase == Screen.Search.route.routeBase() -> Unit
                         isTabRoot -> MbHeader(
                             title = tabTitle(Screen.bottomNavScreens[tabIndex]),
                             scrolled = chrome.contentScrolled
@@ -114,7 +117,16 @@ fun MacroBaseScaffold(
                             title = getScreenTitle(currentRoute),
                             onBack = { navController.popBackStack() },
                             scrolled = chrome.contentScrolled
-                        )
+                        ) {
+                            if (routeBase == Screen.Basket.route.routeBase() && basketItems.isNotEmpty()) {
+                                Text(
+                                    text = if (basketItems.size == 1) "1 item" else "${basketItems.size} items",
+                                    style = AppTypography.Body2,
+                                    color = AppColors.TextSecondary,
+                                    modifier = Modifier.padding(end = 6.dp)
+                                )
+                            }
+                        }
                     }
                 },
                 containerColor = Color.Transparent,

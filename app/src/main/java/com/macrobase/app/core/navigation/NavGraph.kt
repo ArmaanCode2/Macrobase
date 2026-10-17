@@ -150,7 +150,8 @@ fun NavGraph(
                 },
                 onCreateCustomFood = {
                     navController.navigate(Screen.EditCustomFood.createRoute())
-                }
+                },
+                onNavigateBack = { navController.popIfCurrent(backStackEntry) }
             )
         }
 
