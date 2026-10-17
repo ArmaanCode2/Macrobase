@@ -1,68 +1,75 @@
 package com.macrobase.app.feature.preferences
 
-import com.macrobase.app.core.designsystem.components.isScrolled
-import com.macrobase.app.core.navigation.ReportContentScrolled
-import com.macrobase.app.core.navigation.LocalDockInset
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ImportExport
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.ui.platform.LocalContext
-import com.macrobase.app.feature.widget.WidgetPinHelper
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.RankScoringConfig
+import com.macrobase.app.core.designsystem.AppBrushes
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.components.PrimaryButton
+import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbChip
+import com.macrobase.app.core.designsystem.components.MbChipRow
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbRowTile
+import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.mbSelectable
+import com.macrobase.app.core.navigation.LocalDockInset
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.util.briefErrorText
+import com.macrobase.app.core.util.formatDecimalInput
+import com.macrobase.app.core.util.hasThousandsSeparator
+import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.domain.model.FitnessGoal
 import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.GoalStrategyHelper
@@ -70,28 +77,25 @@ import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.repository.PreferencesRepository
+import com.macrobase.app.domain.usecase.CancelScheduledGoalUseCase
 import com.macrobase.app.domain.usecase.GetGoalsUseCase
 import com.macrobase.app.domain.usecase.UpdateGoalsUseCase
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.roundToInt
-import java.util.Locale
-import com.macrobase.app.core.util.briefErrorText
-import com.macrobase.app.core.util.formatDecimalInput
-import com.macrobase.app.core.util.hasThousandsSeparator
-import com.macrobase.app.core.util.parseDecimalInput
-import com.macrobase.app.domain.usecase.CancelScheduledGoalUseCase
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.combine
+import com.macrobase.app.feature.widget.WidgetPinHelper
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /** A numeric field of the preferences form. */
 enum class PreferenceField { HEIGHT, WEIGHT, TARGET_WEIGHT, WATER, MAINTENANCE, CALORIES, CARBS, PROTEIN, FAT }
@@ -152,6 +156,10 @@ class PreferencesViewModel(
     /** Live goals, for the pending-change banner. */
     val goals: StateFlow<Goal> = getGoalsUseCase()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Goal())
+
+    /** The saved name, for the profile card; the form keeps what is being typed. */
+    val savedPreferences: StateFlow<UserPreferences> = preferencesRepository.observePreferences()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserPreferences())
 
     private val _form = MutableStateFlow(PreferencesFormState())
     val form: StateFlow<PreferencesFormState> = _form.asStateFlow()
@@ -611,15 +619,28 @@ internal fun todayStrategyWarning(
         "${if (credit <= 0.0) "loses" else "earns less"} RR. The change starts tomorrow."
 }
 
+/** "Cutting \u2022 2,100 kcal a day": the profile card's line, from the saved goals. */
+internal fun profileStrategyLine(goal: Goal): String =
+    "${goal.fitnessGoal.displayName} \u2022 ${formatKcal(goal.dailyCalorieGoal)} kcal a day"
+
+/** The profile card's name; "Your profile" before a name is saved. */
+internal fun profileDisplayName(firstName: String, lastName: String): String =
+    listOf(firstName.trim(), lastName.trim()).filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { "Your profile" }
+
 @Composable
 fun PreferencesScreen(
     viewModel: PreferencesViewModel,
     onNavigateToImportExport: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenWeight: () -> Unit = {},
+    onOpenWater: () -> Unit = {},
+    onOpenRank: () -> Unit = {}
 ) {
     val goals by viewModel.goals.collectAsState()
+    val savedPreferences by viewModel.savedPreferences.collectAsState()
     val form by viewModel.form.collectAsState()
     val check = remember(form) { viewModel.check(form) }
+    val context = LocalContext.current
 
     val unit = form.unitSystem
     val currentKg = check.value(PreferenceField.WEIGHT)
@@ -628,464 +649,241 @@ fun PreferencesScreen(
     val contradictionWarning = GoalStrategyHelper.getContradictionWarning(form.selectedGoal, currentKg, targetKg, unit)
     val previewGoal = check.goal
 
-    fun label(name: String, field: PreferenceField) = "$name (${PreferencesViewModel.unitLabel(field, unit)})"
     val scrollState = rememberScrollState()
     ReportContentScrolled(scrollState.isScrolled)
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(AppSpacing.lg)
             .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin)
+            .padding(top = AppSpacing.sm)
     ) {
-        Text(text = "User Profile & Preferences", style = AppTypography.Header1)
-        Text(
-            text = "Manage your biometrics, lifestyle strategy, calorie targets, and hydration goals.",
-            style = AppTypography.Body2,
-            color = AppColors.TextSecondary,
-            modifier = Modifier.padding(top = AppSpacing.xs)
+        ProfileCard(
+            name = profileDisplayName(savedPreferences.firstName, savedPreferences.lastName),
+            initial = savedPreferences.firstName.trim().firstOrNull()?.uppercaseChar(),
+            strategyLine = profileStrategyLine(goals)
         )
 
         Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        // Next-Day Evaluation Schedule Notice Banner
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(AppColors.SurfaceAlt)
-                .border(1.dp, AppColors.Divider, RoundedCornerShape(8.dp))
-                .padding(AppSpacing.md)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = AppColors.Primary,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .padding(top = 2.dp)
+        // Next-Day Evaluation Schedule notice, with the pending change and its cancel (BUG-031)
+        NoticePanel(icon = Ph.Info.light, tint = AppColors.Primary) {
+            Text(text = "Next-Day Evaluation Schedule", style = AppTypography.Header3, color = AppColors.TextPrimary)
+            Text(
+                text = "Note: Changing your strategy or maintenance calories takes effect starting tomorrow. Today's rating will be evaluated under your current strategy.",
+                style = NoteStyle,
+                color = AppColors.TextSecondary
+            )
+            if (goals.scheduledFitnessGoal != null && (goals.scheduledFitnessGoal != goals.fitnessGoal || goals.scheduledMaintenanceCalories != goals.maintenanceCalories)) {
+                Text(
+                    text = "Pending: Switching to ${goals.scheduledFitnessGoal?.displayName} (${goals.scheduledMaintenanceCalories?.roundToInt()} kcal) starting tomorrow.",
+                    style = NoteStyle,
+                    color = AppColors.AccentStrong
                 )
-                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                Column {
-                    Text(
-                        text = "Next-Day Evaluation Schedule",
-                        style = AppTypography.Body2.copy(fontWeight = FontWeight.Bold),
-                        color = AppColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Note: Changing your strategy or maintenance calories takes effect starting tomorrow. Today's rating will be evaluated under your current strategy.",
-                        style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
-                    )
-                    if (goals.scheduledFitnessGoal != null && (goals.scheduledFitnessGoal != goals.fitnessGoal || goals.scheduledMaintenanceCalories != goals.maintenanceCalories)) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Pending: Switching to ${goals.scheduledFitnessGoal?.displayName} (${goals.scheduledMaintenanceCalories?.roundToInt()} kcal) starting tomorrow.",
-                            style = AppTypography.Caption.copy(fontWeight = FontWeight.SemiBold, color = AppColors.Primary)
-                        )
-                        // A change of mind before tomorrow (BUG-031)
-                        TextButton(
-                            onClick = { viewModel.cancelScheduledChange() },
-                            enabled = !form.isSaving,
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(
-                                text = "Cancel this change (stay on ${goals.fitnessGoal.displayName})",
-                                style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold, color = AppColors.Primary)
-                            )
-                        }
-                    }
-                    form.cancelMessage?.let { message ->
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = message, style = AppTypography.Caption, color = AppColors.ProgressOver)
-                    }
-                }
+                InlineAction(
+                    text = "Cancel this change (stay on ${goals.fitnessGoal.displayName})",
+                    enabled = !form.isSaving,
+                    onClick = { viewModel.cancelScheduledChange() }
+                )
+            }
+            form.cancelMessage?.let { message ->
+                Text(text = message, style = NoteStyle, color = AppColors.ProgressOver)
             }
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 1. Personal Information Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "PERSONAL INFORMATION", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                OutlinedTextField(
+        ProfileSection(title = "Personal information") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FieldGap)
+            ) {
+                MbTextField(
                     value = form.firstName,
                     onValueChange = viewModel::onFirstNameChanged,
-                    label = { Text("First Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(AppColors.Primary)
+                    label = "First name",
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                OutlinedTextField(
+                MbTextField(
                     value = form.lastName,
                     onValueChange = viewModel::onLastNameChanged,
-                    label = { Text("Last Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(AppColors.Primary)
-                )
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                OutlinedTextField(
-                    value = form.timeZone,
-                    onValueChange = viewModel::onTimeZoneChanged,
-                    label = { Text("Time Zone (e.g. UTC, America/New_York)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(AppColors.Primary)
+                    label = "Last name",
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                    modifier = Modifier.weight(1f)
                 )
             }
+            MbTextField(
+                value = form.timeZone,
+                onValueChange = viewModel::onTimeZoneChanged,
+                label = "Time zone",
+                helpText = "For example UTC or America/New_York",
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 2. Measurement System Selection Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "MEASUREMENT SYSTEM", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                listOf(
-                    UnitSystem.METRIC to "Metric (kg, cm, mL)",
-                    UnitSystem.IMPERIAL to "Imperial (lb, in, fl oz)"
-                ).forEach { (system, title) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.onUnitSystemChanged(system) },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = unit == system,
-                            onClick = { viewModel.onUnitSystemChanged(system) },
-                            colors = RadioButtonDefaults.colors(selectedColor = AppColors.Primary)
-                        )
-                        Text(text = title, style = AppTypography.Body1)
-                    }
-                }
-            }
+        ProfileSection(title = "Measurement system") {
+            UnitSystemSwitch(selected = unit, onSelect = viewModel::onUnitSystemChanged)
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 3. Body Composition & Strategy Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "BODY COMPOSITION & STRATEGY", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                PreferenceNumberField(
-                    field = PreferenceField.HEIGHT,
-                    label = label("Height", PreferenceField.HEIGHT),
-                    form = form,
-                    check = check,
-                    onChange = viewModel::onFieldChanged,
-                    keyboardType = KeyboardType.Decimal,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
-                ) {
-                    PreferenceNumberField(
-                        field = PreferenceField.WEIGHT,
-                        label = label("Current Weight", PreferenceField.WEIGHT),
-                        form = form,
-                        check = check,
-                        onChange = viewModel::onFieldChanged,
-                        keyboardType = KeyboardType.Decimal,
-                        modifier = Modifier.weight(1f)
-                    )
-                    PreferenceNumberField(
-                        field = PreferenceField.TARGET_WEIGHT,
-                        label = label("Target Weight", PreferenceField.TARGET_WEIGHT),
-                        form = form,
-                        check = check,
-                        onChange = viewModel::onFieldChanged,
-                        keyboardType = KeyboardType.Decimal,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                Text(text = "LIFESTYLE STRATEGY", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-                // Strategy Segmented Control / FilterChips
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-                ) {
-                    val strategies = listOf(FitnessGoal.BULKING, FitnessGoal.MAINTAINING, FitnessGoal.CUTTING)
-                    strategies.forEach { strategy ->
-                        FilterChip(
-                            selected = form.selectedGoal == strategy,
-                            onClick = { viewModel.onStrategySelected(strategy) },
-                            label = { Text(strategy.displayName) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = AppColors.Primary,
-                                selectedLabelColor = AppColors.Background,
-                                containerColor = AppColors.SurfaceAlt,
-                                labelColor = AppColors.TextSecondary
-                            )
-                        )
-                    }
-                }
-
-                // Dynamic Contradiction Warning Banner
-                if (contradictionWarning != null) {
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFFFA000).copy(alpha = 0.15f))
-                            .border(1.dp, Color(0xFFFFA000).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                            .padding(AppSpacing.sm)
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.Top) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFA000),
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .padding(top = 2.dp)
-                                )
-                                Spacer(modifier = Modifier.width(AppSpacing.xs))
-                                Text(
-                                    text = contradictionWarning,
-                                    style = AppTypography.Caption,
-                                    color = AppColors.TextPrimary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(AppSpacing.xs))
-                            TextButton(
-                                onClick = { viewModel.onAutoMatchStrategy() },
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    text = "Auto-match to weights (${autoDetectedGoal.displayName})",
-                                    style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold, color = AppColors.Primary)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                // Dynamic Strategy Tip Box: the rank's calorie zone for the maintenance in the form
-                val typedMaintenance = check.value(PreferenceField.MAINTENANCE)
-                val helperText = strategyRankHint(form.selectedGoal, typedMaintenance)
-                val typedCalories = check.value(PreferenceField.CALORIES)
-                val targetWarning = listOfNotNull(
-                    todayStrategyWarning(goals.fitnessGoal, goals.maintenanceCalories, form.selectedGoal, typedMaintenance, typedCalories),
-                    calorieTargetWarning(form.selectedGoal, typedMaintenance, typedCalories)
-                ).joinToString("\n").ifEmpty { null }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(AppColors.SurfaceAlt)
-                        .padding(AppSpacing.sm)
-                ) {
-                    Column {
-                        Text(
-                            text = helperText,
-                            style = AppTypography.Caption,
-                            color = AppColors.TextSecondary
-                        )
-                        if (targetWarning != null) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = targetWarning,
-                                style = AppTypography.Caption.copy(fontWeight = FontWeight.SemiBold),
-                                color = Color(0xFFFFA000)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 4. Calorie & Energy Targets Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "CALORIE & ENERGY TARGETS", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                PreferenceNumberField(
-                    field = PreferenceField.MAINTENANCE,
-                    label = "Maintenance Calories (kcal)",
-                    form = form,
-                    check = check,
-                    onChange = viewModel::onFieldChanged,
-                    keyboardType = KeyboardType.Decimal,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                PreferenceNumberField(
-                    field = PreferenceField.CALORIES,
-                    label = "Daily Calorie Target (kcal)",
-                    form = form,
-                    check = check,
-                    onChange = viewModel::onFieldChanged,
-                    keyboardType = KeyboardType.Decimal,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 5. Macronutrient Split Configuration Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "MACRONUTRIENT SPLIT (% OF CALORIES)", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                listOf(
-                    Triple(PreferenceField.CARBS, "Carbs", AppColors.MacroCarbs),
-                    Triple(PreferenceField.PROTEIN, "Protein", AppColors.MacroProtein),
-                    Triple(PreferenceField.FAT, "Fat", AppColors.MacroFat)
-                ).forEachIndexed { index, (field, name, color) ->
-                    if (index > 0) Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    val grams = when (field) {
-                        PreferenceField.CARBS -> previewGoal.carbGrams
-                        PreferenceField.PROTEIN -> previewGoal.proteinGrams
-                        else -> previewGoal.fatGrams
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        PreferenceNumberField(
-                            field = field,
-                            label = "$name (%)",
-                            form = form,
-                            check = check,
-                            onChange = viewModel::onFieldChanged,
-                            keyboardType = KeyboardType.Decimal,
-                            focusedColor = color,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "$name Target", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                            Text(text = "${grams.roundToInt()} g", style = AppTypography.Header2, color = color)
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 100% Macro Validation Banner
-        val isValidSum = check.isMacroSumValid
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (isValidSum) AppColors.SurfaceAlt else AppColors.ProgressOver.copy(alpha = 0.15f))
-                .padding(AppSpacing.md)
-        ) {
+        ProfileSection(title = "Body and strategy") {
+            PreferenceNumberField(
+                field = PreferenceField.HEIGHT,
+                label = "Height",
+                form = form,
+                check = check,
+                onChange = viewModel::onFieldChanged,
+                modifier = Modifier.fillMaxWidth()
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(FieldGap)
             ) {
-                Icon(
-                    imageVector = if (isValidSum) Icons.Default.CheckCircle else Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = if (isValidSum) AppColors.CalorieText else AppColors.ProgressOver,
-                    modifier = Modifier.size(24.dp)
+                PreferenceNumberField(
+                    field = PreferenceField.WEIGHT,
+                    label = "Current weight",
+                    form = form,
+                    check = check,
+                    onChange = viewModel::onFieldChanged,
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.size(AppSpacing.sm))
-                Column {
+                PreferenceNumberField(
+                    field = PreferenceField.TARGET_WEIGHT,
+                    label = "Target weight",
+                    form = form,
+                    check = check,
+                    onChange = viewModel::onFieldChanged,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Text(text = "Lifestyle strategy", style = FieldLabelStyle, color = AppColors.TextSecondary)
+            MbChipRow {
+                listOf(FitnessGoal.BULKING, FitnessGoal.MAINTAINING, FitnessGoal.CUTTING).forEach { strategy ->
+                    MbChip(
+                        text = strategy.displayName,
+                        selected = form.selectedGoal == strategy,
+                        onClick = { viewModel.onStrategySelected(strategy) }
+                    )
+                }
+            }
+
+            // The strategy contradicts the weights
+            if (contradictionWarning != null) {
+                NoticePanel(icon = Ph.Warning.light, tint = AppColors.Warning, fill = AppColors.WarningSurface) {
+                    Text(text = contradictionWarning, style = NoteStyle, color = AppColors.TextPrimary)
+                    InlineAction(
+                        text = "Auto-match to weights (${autoDetectedGoal.displayName})",
+                        onClick = { viewModel.onAutoMatchStrategy() }
+                    )
+                }
+            }
+
+            // The rank's calorie zone for the maintenance in the form
+            val typedMaintenance = check.value(PreferenceField.MAINTENANCE)
+            val typedCalories = check.value(PreferenceField.CALORIES)
+            val targetWarning = listOfNotNull(
+                todayStrategyWarning(goals.fitnessGoal, goals.maintenanceCalories, form.selectedGoal, typedMaintenance, typedCalories),
+                calorieTargetWarning(form.selectedGoal, typedMaintenance, typedCalories)
+            ).joinToString("\n").ifEmpty { null }
+            NoticePanel(icon = Ph.Target.light, tint = AppColors.TextSecondary) {
+                Text(text = strategyRankHint(form.selectedGoal, typedMaintenance), style = NoteStyle, color = AppColors.TextSecondary)
+                if (targetWarning != null) {
+                    Text(text = targetWarning, style = NoteStyle, color = AppColors.Warning)
+                }
+            }
+        }
+
+        ProfileSection(title = "Calorie targets") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FieldGap)
+            ) {
+                PreferenceNumberField(
+                    field = PreferenceField.MAINTENANCE,
+                    label = "Maintenance calories",
+                    form = form,
+                    check = check,
+                    onChange = viewModel::onFieldChanged,
+                    modifier = Modifier.weight(1f)
+                )
+                PreferenceNumberField(
+                    field = PreferenceField.CALORIES,
+                    label = "Daily calorie target",
+                    form = form,
+                    check = check,
+                    onChange = viewModel::onFieldChanged,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        ProfileSection(title = "Macro split (% of calories)") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(FieldGap)
+            ) {
+                listOf(
+                    Triple(PreferenceField.CARBS, "Carbs", previewGoal.carbGrams),
+                    Triple(PreferenceField.PROTEIN, "Protein", previewGoal.proteinGrams),
+                    Triple(PreferenceField.FAT, "Fat", previewGoal.fatGrams)
+                ).forEach { (field, name, grams) ->
+                    PreferenceNumberField(
+                        field = field,
+                        label = name,
+                        form = form,
+                        check = check,
+                        onChange = viewModel::onFieldChanged,
+                        helpText = "${grams.roundToInt()} g",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // The 100% check; two decimals, as validated: 33.33 three times is 99.99%, not 100% (BUG-026)
+            val isValidSum = check.isMacroSumValid
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                MbIcon(
+                    icon = if (isValidSum) Ph.CheckCircle.light else Ph.WarningCircle.light,
+                    contentDescription = null,
+                    size = 20.dp,
+                    tint = if (isValidSum) AppColors.CalorieText else AppColors.ProgressOver
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = if (isValidSum) "Macro split totals 100%" else "Macro split must total exactly 100%",
-                        style = AppTypography.Header3,
+                        style = AppTypography.Body1,
                         color = if (isValidSum) AppColors.CalorieText else AppColors.ProgressOver
                     )
                     Text(
-                        // Two decimals, as validated: 33.33 three times is 99.99%, not 100% (BUG-026)
                         text = "Current sum: ${PreferencesViewModel.formatPlain(previewGoal.totalPercentageExact)}% " +
                             "(Carbs ${PreferencesViewModel.formatPlain(previewGoal.carbPercentage)}%, " +
                             "Protein ${PreferencesViewModel.formatPlain(previewGoal.proteinPercentage)}%, " +
                             "Fat ${PreferencesViewModel.formatPlain(previewGoal.fatPercentage)}%)",
-                        style = AppTypography.Caption,
+                        style = NoteStyle,
                         color = AppColors.TextSecondary
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 6. Hydration Target Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "HYDRATION TARGET", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                PreferenceNumberField(
-                    field = PreferenceField.WATER,
-                    label = label("Daily Water Goal", PreferenceField.WATER),
-                    form = form,
-                    check = check,
-                    onChange = viewModel::onFieldChanged,
-                    keyboardType = KeyboardType.Decimal,
-                    imeAction = ImeAction.Done,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+        ProfileSection(title = "Hydration target") {
+            PreferenceNumberField(
+                field = PreferenceField.WATER,
+                label = "Daily water goal",
+                form = form,
+                check = check,
+                onChange = viewModel::onFieldChanged,
+                imeAction = ImeAction.Done,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.lg))
+        Spacer(modifier = Modifier.height(AppSpacing.sectionGap))
 
         // Why the last save failed, or what still blocks it (BUG-026)
         form.saveError?.let { error ->
@@ -1097,108 +895,68 @@ fun PreferencesScreen(
             )
         }
 
-        // Unified Save Button
-        PrimaryButton(
-            text = "Save Preferences & Goals",
+        MbButton(
+            text = "Save preferences and goals",
+            onClick = { viewModel.save() },
             enabled = form.isLoaded && !form.isSaving && check.isValid,
-            onClick = { viewModel.save() }
+            modifier = Modifier.fillMaxWidth()
         )
 
-        // Save confirmation banner
+        // Save confirmation banner (decision D7)
         if (form.showSavedMessage) {
             Spacer(modifier = Modifier.height(AppSpacing.sm))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF4CAF50).copy(alpha = 0.15f))
-                    .border(1.dp, Color(0xFF4CAF50).copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                    .padding(AppSpacing.sm),
+                    .clip(AppShapes.CardSmall)
+                    .background(AppColors.SuccessSurface)
+                    .border(1.dp, AppColors.Success.copy(alpha = 0.3f), AppShapes.CardSmall)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = Color(0xFF4CAF50),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(AppSpacing.xs))
+                MbIcon(icon = Ph.CheckCircle.light, contentDescription = null, size = 18.dp, tint = AppColors.Success)
                 Text(
                     text = "Preferences and goals saved successfully!",
-                    style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF4CAF50)
+                    style = AppTypography.Body2,
+                    color = AppColors.Success
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        HorizontalDivider(color = AppColors.Divider)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 7. Data & Backup Navigation Link
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onNavigateToImportExport() }
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(AppSpacing.md),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.ImportExport, contentDescription = null, tint = AppColors.Primary)
-                    Spacer(modifier = Modifier.size(AppSpacing.sm))
-                    Column {
-                        Text(text = "Data & Backup", style = AppTypography.Header3)
-                        Text(
-                            text = "Export and restore your offline database.",
-                            style = AppTypography.Caption,
-                            color = AppColors.TextSecondary
-                        )
-                    }
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AppColors.TextSecondary)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // 8. Home Screen Widget Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Widgets,
-                        contentDescription = null,
-                        tint = AppColors.Primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    Column {
-                        Text(text = "Home Screen Widget", style = AppTypography.Header3)
-                        Text(
-                            text = "Track calories, macros, and remaining meals directly from your home screen.",
-                            style = AppTypography.Caption,
-                            color = AppColors.TextSecondary
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-                val context = LocalContext.current
-                PrimaryButton(
-                    text = "Add Widget to Home Screen",
-                    onClick = {
-                        WidgetPinHelper.pinWidgetToHomeScreen(context)
-                    }
+        ProfileSection(title = "More") {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)) {
+                MbRowTile(
+                    title = "Weight tracker",
+                    subtitle = "Log your weight and see the trend",
+                    icon = Ph.Scales.light,
+                    onClick = onOpenWeight
+                )
+                MbRowTile(
+                    title = "Water tracker",
+                    subtitle = "Log water and see each day's total",
+                    icon = Ph.Drop.light,
+                    onClick = onOpenWater
+                )
+                MbRowTile(
+                    title = "Rank",
+                    subtitle = "Your rank and lifestyle score",
+                    icon = Ph.Trophy.light,
+                    onClick = onOpenRank
+                )
+                MbRowTile(
+                    title = "Data & backup",
+                    subtitle = "Export and restore your offline database.",
+                    icon = Ph.Database.light,
+                    onClick = onNavigateToImportExport
+                )
+                // The app's pin flow; it shows its own message where pinning is not supported
+                MbRowTile(
+                    title = "Home screen widget",
+                    subtitle = "Track calories, macros, and remaining meals directly from your home screen.",
+                    icon = Ph.SquaresFour.light,
+                    subtitleMaxLines = 2,
+                    onClick = { WidgetPinHelper.pinWidgetToHomeScreen(context) }
                 )
             }
         }
@@ -1208,17 +966,167 @@ fun PreferencesScreen(
             text = "Offline Nutrition Tracker v${com.macrobase.app.BuildConfig.VERSION_NAME}",
             style = AppTypography.Caption,
             color = AppColors.TextMuted,
+            textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = AppSpacing.xl),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                .padding(top = AppSpacing.xl)
         )
         // Clears the bottom dock
         Spacer(modifier = Modifier.height(LocalDockInset.current))
     }
 }
 
-/** A numeric field of the form, with its error shown under it. */
+private val FieldGap = 12.dp
+private val NoteStyle = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 18.sp)
+private val FieldLabelStyle = AppTypography.Body2.copy(fontSize = 13.sp)
+
+/** A form section: a sentence-case heading, then its fields. */
+@Composable
+private fun ProfileSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = AppSpacing.sectionGap),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+    ) {
+        Text(
+            text = title,
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.semantics { heading() }
+        )
+        content()
+    }
+}
+
+/** The card at the top: the avatar initial, the saved name, and the strategy with its daily target. */
+@Composable
+private fun ProfileCard(name: String, initial: Char?, strategyLine: String) {
+    MbPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .drawBehind { rotate(110f) { drawCircle(AppBrushes.AvatarRing) } }
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.AvatarFill),
+                contentAlignment = Alignment.Center
+            ) {
+                if (initial != null) {
+                    Text(
+                        text = initial.toString(),
+                        style = AppTypography.Header1.copy(fontSize = 22.sp),
+                        color = AppColors.AvatarInk,
+                        modifier = Modifier.clearAndSetSemantics { }
+                    )
+                } else {
+                    MbIcon(icon = Ph.User.light, contentDescription = null, size = 24.dp, tint = AppColors.AvatarInk)
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = name,
+                    style = AppTypography.Header2,
+                    color = AppColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(text = strategyLine, style = AppTypography.Body2, color = AppColors.TextSecondary)
+            }
+        }
+    }
+}
+
+/** A rounded notice: an icon at the top left, then its lines. */
+@Composable
+private fun NoticePanel(
+    @DrawableRes icon: Int,
+    tint: Color,
+    fill: Color = AppColors.RowFill,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = AppShapes.CardSmall
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, if (fill == AppColors.RowFill) AppColors.Edge else tint.copy(alpha = 0.35f), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        MbIcon(icon = icon, contentDescription = null, size = 18.dp, tint = tint, modifier = Modifier.padding(top = 1.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
+    }
+}
+
+/** A text action inside a notice, at least 44 dp tall. */
+@Composable
+private fun InlineAction(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Box(
+        modifier = Modifier
+            .defaultMinSize(minHeight = Dimensions.MinTouchTarget)
+            .alpha(if (enabled) 1f else 0.42f)
+            .mbClickable(enabled = enabled, role = Role.Button, pressedScale = 0.98f, onClick = onClick),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(text = text, style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.Primary)
+    }
+}
+
+/** The measurement system as two halves; the selected one is tinted green. */
+@Composable
+private fun UnitSystemSwitch(selected: UnitSystem, onSelect: (UnitSystem) -> Unit) {
+    val outer = AppShapes.PillButton
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup()
+            .clip(outer)
+            .background(AppColors.FieldFill)
+            .border(1.dp, AppColors.FieldBorder, outer)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        listOf(
+            Triple(UnitSystem.METRIC, "Metric", "kg, cm, mL"),
+            Triple(UnitSystem.IMPERIAL, "Imperial", "lb, in, fl oz")
+        ).forEach { (system, title, units) ->
+            val isSelected = selected == system
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minHeight = 52.dp)
+                    .mbSelectable(selected = isSelected, pressedScale = 0.98f, onClick = { onSelect(system) })
+                    .clip(outer)
+                    .background(if (isSelected) AppColors.ChipOnFill else Color.Transparent)
+                    .border(1.dp, if (isSelected) AppColors.ChipOnBorder else Color.Transparent, outer)
+                    .padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = title,
+                    style = AppTypography.Body1,
+                    color = if (isSelected) AppColors.ChipOnInk else AppColors.TextPrimary
+                )
+                Text(
+                    text = units,
+                    style = AppTypography.Caption,
+                    color = if (isSelected) AppColors.ChipOnInk.copy(alpha = 0.8f) else AppColors.TextMuted
+                )
+            }
+        }
+    }
+}
+
+/** A numeric field of the form: its unit inside on the right, and its error under it. */
 @Composable
 private fun PreferenceNumberField(
     field: PreferenceField,
@@ -1226,30 +1134,18 @@ private fun PreferenceNumberField(
     form: PreferencesFormState,
     check: PreferencesCheck,
     onChange: (PreferenceField, String) -> Unit,
-    keyboardType: KeyboardType,
     modifier: Modifier = Modifier,
-    imeAction: ImeAction = ImeAction.Next,
-    focusedColor: Color = AppColors.Primary
+    helpText: String? = null,
+    imeAction: ImeAction = ImeAction.Next
 ) {
-    val error = check.error(field)
-    OutlinedTextField(
+    MbTextField(
         value = form.text(field),
         onValueChange = { onChange(field, it) },
-        label = { Text(label) },
-        isError = error != null,
-        supportingText = error?.let { message -> { Text(message) } },
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
-        singleLine = true,
-        modifier = modifier,
-        colors = fieldColors(focusedColor)
+        label = label,
+        suffix = PreferencesViewModel.unitLabel(field, form.unitSystem),
+        helpText = helpText,
+        errorText = check.error(field),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = imeAction),
+        modifier = modifier
     )
 }
-
-@Composable
-private fun fieldColors(focusedColor: Color) = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = focusedColor,
-    unfocusedBorderColor = AppColors.Divider,
-    focusedTextColor = AppColors.TextPrimary,
-    unfocusedTextColor = AppColors.TextPrimary,
-    errorBorderColor = AppColors.ProgressOver
-)

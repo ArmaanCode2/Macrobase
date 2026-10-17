@@ -10,7 +10,7 @@ import com.macrobase.app.feature.statistics.MacroInterval
 import com.macrobase.app.feature.statistics.RankHistoryInterval
 import com.macrobase.app.feature.statistics.StatisticsViews
 import com.macrobase.app.feature.statistics.heatmapCellSize
-import com.macrobase.app.feature.statistics.weightIntervalChipLabel
+import com.macrobase.app.feature.weight.weightIntervalChipLabel
 import com.macrobase.app.feature.weight.WeightTimeInterval
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

@@ -1,47 +1,25 @@
 package com.macrobase.app.feature.weight
 
-import android.app.DatePickerDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,16 +36,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -76,7 +60,19 @@ import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbChip
+import com.macrobase.app.core.designsystem.components.MbChipRow
+import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbRowTile
+import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.formatDecimalInput
 import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.domain.model.UnitConversions
@@ -285,6 +281,20 @@ class WeightViewModel(
     }
 }
 
+/**
+ * An interval's name for its chip, in sentence case ("1 Year" shows as "1 year"). The enum's
+ * label stays as it is.
+ */
+internal fun weightIntervalChipLabel(interval: WeightTimeInterval): String =
+    interval.label.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) }
+
+/** Which end of the custom range the date picker sets. */
+private enum class RangeEnd { FROM, TO }
+
+/**
+ * The weight tracker. The scaffold draws the pinned "Weight" header with its back arrow, so this
+ * screen starts with the date ribbon; [onNavigateBack] stays for the navigation graph.
+ */
 @Composable
 fun WeightScreen(
     viewModel: WeightViewModel,
@@ -292,7 +302,6 @@ fun WeightScreen(
     modifier: Modifier = Modifier,
     openLogOnStart: Boolean = false
 ) {
-    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val isImperial = uiState.unitSystem == UnitSystem.IMPERIAL
     val unitLabel = if (isImperial) "lb" else "kg"
@@ -312,358 +321,181 @@ fun WeightScreen(
         }
     }
     var entryToEdit by remember { mutableStateOf<WeightEntry?>(null) }
-    var showIntervalDropdown by remember { mutableStateOf(false) }
+    var rangeEndToPick by remember { mutableStateOf<RangeEnd?>(null) }
+
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.isScrolled)
+    val margin = Modifier.padding(horizontal = AppSpacing.screenMargin)
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
     ) {
-        // 1. Top Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically
+        // 1. Date ribbon
+        TrackerDateRibbon(
+            label = uiState.selectedDate.format(dateFormatter),
+            onPrevious = { viewModel.onPreviousDay() },
+            onNext = { viewModel.onNextDay() },
+            modifier = margin
+        )
+
+        // 2. Interval chips, scrolling sideways from edge to edge
+        MbChipRow(
+            modifier = Modifier.padding(top = 4.dp),
+            contentPadding = PaddingValues(horizontal = AppSpacing.screenMargin)
         ) {
-            IconButton(onClick = onNavigateBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = AppColors.TextPrimary
+            WeightTimeInterval.entries.forEach { interval ->
+                MbChip(
+                    text = weightIntervalChipLabel(interval),
+                    selected = uiState.selectedInterval == interval,
+                    onClick = { viewModel.onSelectInterval(interval) }
                 )
             }
-            Text(text = "Weight Graph", style = AppTypography.Header1)
         }
 
-        // 2. Date Selector Ribbon
+        // 3. From / To: picking either day sets a custom range
         Row(
-            modifier = Modifier
+            modifier = margin
                 .fillMaxWidth()
-                .height(Dimensions.DateRibbonHeight)
-                .background(AppColors.SurfaceAlt)
-                .padding(horizontal = AppSpacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IconButton(onClick = { viewModel.onPreviousDay() }) {
-                Icon(
-                    imageVector = Icons.Default.ChevronLeft,
-                    contentDescription = "Previous Day",
-                    tint = AppColors.TextPrimary
-                )
-            }
-
-            Text(
-                text = uiState.selectedDate.format(dateFormatter),
-                style = AppTypography.Header2
+            RangeDateButton(
+                text = "From ${uiState.fromDate.format(shortDateFormatter)}",
+                highlighted = uiState.selectedInterval == WeightTimeInterval.CUSTOM,
+                onClick = { rangeEndToPick = RangeEnd.FROM },
+                modifier = Modifier.weight(1f)
             )
-
-            IconButton(onClick = { viewModel.onNextDay() }) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Next Day",
-                    tint = AppColors.TextPrimary
-                )
-            }
+            RangeDateButton(
+                text = "To ${uiState.toDate.format(shortDateFormatter)}",
+                highlighted = uiState.selectedInterval == WeightTimeInterval.CUSTOM,
+                onClick = { rangeEndToPick = RangeEnd.TO },
+                modifier = Modifier.weight(1f)
+            )
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(AppSpacing.lg)
-                .verticalScroll(rememberScrollState())
+        // 4. Start / Current / Change
+        val startDisplay = formatWeightValue(uiState.metrics.startWeightKg, isImperial)
+        val currentDisplay = formatWeightValue(uiState.metrics.currentWeightKg, isImperial)
+        val deltaVal = uiState.metrics.deltaWeightKg
+        val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
+        val percentDisplay = uiState.metrics.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
+
+        val changeColor = if (deltaVal != null) {
+            if (deltaVal <= 0.0) AppColors.Success else AppColors.Error
+        } else AppColors.TextSecondary
+
+        Row(
+            modifier = margin
+                .fillMaxWidth()
+                .padding(top = 14.dp)
+                .height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 3. Main Weight Graph Container Card (Surface #1E1E1E, Radius 8dp, Padding 16dp)
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(AppSpacing.md)) {
-                    // Header & Range Controls
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "Weight Graph", style = AppTypography.Header2)
+            WeightStatTile(label = "Start", value = startDisplay, modifier = Modifier.weight(1f).fillMaxHeight())
+            WeightStatTile(label = "Current", value = currentDisplay, modifier = Modifier.weight(1f).fillMaxHeight())
+            WeightStatTile(
+                label = "Change $percentDisplay".trimEnd(),
+                value = deltaDisplay,
+                valueColor = changeColor,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+        }
 
-                        // Interval Dropdown
-                        Box {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(AppColors.SurfaceAlt)
-                                    .clickable { showIntervalDropdown = true }
-                                    .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = uiState.selectedInterval.label,
-                                    style = AppTypography.Caption,
-                                    color = AppColors.WaterCyan
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Default.ChevronRight,
-                                    contentDescription = null,
-                                    tint = AppColors.WaterCyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showIntervalDropdown,
-                                onDismissRequest = { showIntervalDropdown = false },
-                                modifier = Modifier.background(AppColors.Surface)
-                            ) {
-                                WeightTimeInterval.entries.forEach { interval ->
-                                    DropdownMenuItem(
-                                        text = { Text(interval.label, color = AppColors.TextPrimary) },
-                                        onClick = {
-                                            viewModel.onSelectInterval(interval)
-                                            showIntervalDropdown = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-                    // From - To Date Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable {
-                                    val d = uiState.fromDate
-                                    DatePickerDialog(context, { _, y, m, day ->
-                                        val newFrom = LocalDate.of(y, m + 1, day)
-                                        viewModel.onSetCustomRange(newFrom, uiState.toDate)
-                                    }, d.year, d.monthValue - 1, d.dayOfMonth).show()
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "From ${uiState.fromDate.format(shortDateFormatter)}", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable {
-                                    val d = uiState.toDate
-                                    DatePickerDialog(context, { _, y, m, day ->
-                                        val newTo = LocalDate.of(y, m + 1, day)
-                                        viewModel.onSetCustomRange(uiState.fromDate, newTo)
-                                    }, d.year, d.monthValue - 1, d.dayOfMonth).show()
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.CalendarToday, contentDescription = null, tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "To ${uiState.toDate.format(shortDateFormatter)}", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-                    HorizontalDivider(color = AppColors.Divider)
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                    // Metric Strip: START / CURRENT / CHANGE (3 Columns)
-                    val startDisplay = formatWeightValue(uiState.metrics.startWeightKg, isImperial)
-                    val currentDisplay = formatWeightValue(uiState.metrics.currentWeightKg, isImperial)
-                    val deltaVal = uiState.metrics.deltaWeightKg
-                    val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
-                    val percentDisplay = uiState.metrics.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
-
-                    val changeColor = if (deltaVal != null) {
-                        if (deltaVal <= 0.0) Color(0xFF00C853) else AppColors.ProgressOver
-                    } else AppColors.TextSecondary
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Start
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = startDisplay, style = AppTypography.Header2)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = "START", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-
-                        Box(modifier = Modifier.width(1.dp).height(36.dp).background(AppColors.Divider))
-
-                        // Current
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = currentDisplay, style = AppTypography.Header2)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = "CURRENT", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-
-                        Box(modifier = Modifier.width(1.dp).height(36.dp).background(AppColors.Divider))
-
-                        // Change
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = deltaDisplay, style = AppTypography.Header2, color = changeColor)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = "CHANGE $percentDisplay", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.lg))
-
-                    // Graph Canvas or Empty State
-                    if (uiState.hasSufficientDataForGraph) {
-                        WeightLineGraph(
-                            entries = uiState.entries,
-                            isImperial = isImperial,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = AppSpacing.lg),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Log at least 2 weight entries to generate progress graph",
-                                style = AppTypography.Body2,
-                                color = AppColors.TextMuted
-                            )
-                            Spacer(modifier = Modifier.height(AppSpacing.md))
-                            Button(
-                                onClick = { showLogDialog = true },
-                                shape = AppShapes.PillButton,
-                                colors = ButtonDefaults.buttonColors(containerColor = AppColors.WaterCyan)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = AppColors.Background, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("+ Log Weight", color = AppColors.Background, style = AppTypography.Button)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(AppSpacing.lg))
-
-            // 4. Quick Action Button & Header for Selected Date
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Weight Logs (${uiState.entries.size})",
-                    style = AppTypography.Header2
+        // 5. Graph or empty state
+        MbPanel(
+            modifier = margin
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            contentPadding = PaddingValues(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp)
+        ) {
+            if (uiState.hasSufficientDataForGraph) {
+                WeightLineGraph(
+                    entries = uiState.entries,
+                    isImperial = isImperial,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
                 )
-                Button(
-                    onClick = { showLogDialog = true },
-                    shape = AppShapes.PillButton,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = AppColors.WaterCyan, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (uiState.selectedDateWeight != null) "Edit Today" else "+ Log Weight",
-                        color = AppColors.WaterCyan,
-                        style = AppTypography.Caption
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-            // 5. Weight Entries List
-            if (uiState.entries.isEmpty()) {
-                Card(
-                    shape = AppShapes.Card,
-                    colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(AppSpacing.lg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "No weight logs for this interval.", style = AppTypography.Body2, color = AppColors.TextMuted)
-                    }
-                }
             } else {
-                uiState.entries.reversed().forEach { entry ->
-                    val displayWeight = formatWeightValue(entry.weightKg, isImperial)
+                Text(
+                    text = "Log at least 2 weight entries to generate progress graph",
+                    style = AppTypography.Body2,
+                    color = AppColors.TextSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 30.dp)
+                )
+            }
+        }
 
-                    Card(
-                        shape = AppShapes.Card,
-                        colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = AppSpacing.xs)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Scale,
-                                    contentDescription = null,
-                                    tint = AppColors.MacroProtein,
-                                    modifier = Modifier.size(20.dp)
+        // 6. Log or edit the selected day
+        val hasSelectedDateWeight = uiState.selectedDateWeight != null
+        MbButton(
+            text = if (hasSelectedDateWeight) "Edit Today" else "Log Weight",
+            onClick = { showLogDialog = true },
+            icon = if (hasSelectedDateWeight) Ph.PencilSimple.regular else Ph.Plus.regular,
+            modifier = margin
+                .fillMaxWidth()
+                .padding(top = 14.dp)
+        )
+
+        // 7. Weight Entries List
+        TrackerSection(title = "Weight logs (${uiState.entries.size})", modifier = margin) {
+            if (uiState.entries.isEmpty()) {
+                Text(text = "No weight logs for this interval.", style = AppTypography.Body2, color = AppColors.TextMuted)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)) {
+                    uiState.entries.reversed().forEach { entry ->
+                        val displayWeight = formatWeightValue(entry.weightKg, isImperial)
+                        val displayDate = entry.date.format(dateFormatter)
+
+                        MbRowTile(
+                            title = displayWeight,
+                            subtitle = displayDate,
+                            icon = Ph.Scales.light,
+                            trailing = {
+                                MbIconButton(
+                                    icon = Ph.PencilSimple.light,
+                                    contentDescription = "Edit $displayWeight on $displayDate",
+                                    onClick = { entryToEdit = entry },
+                                    iconSize = 19.dp
                                 )
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                                Column {
-                                    Text(text = displayWeight, style = AppTypography.Header3)
-                                    Text(
-                                        text = entry.date.format(dateFormatter),
-                                        style = AppTypography.Caption,
-                                        color = AppColors.TextSecondary
-                                    )
-                                }
+                                MbIconButton(
+                                    icon = Ph.Trash.light,
+                                    contentDescription = "Delete $displayWeight on $displayDate",
+                                    onClick = { viewModel.deleteWeight(entry.date) },
+                                    iconSize = 19.dp,
+                                    tint = AppColors.Error
+                                )
                             }
-
-                            Row {
-                                IconButton(onClick = { entryToEdit = entry }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit",
-                                        tint = AppColors.TextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.deleteWeight(entry.date) }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = AppColors.ProgressOver,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
+                        )
                     }
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(AppSpacing.xxl))
     }
 
-    // 6. Log Weight Dialog
+    // From / To date picker: same days allowed as before; the picked day sets the custom range
+    rangeEndToPick?.let { end ->
+        MbDatePickerDialog(
+            initialDate = if (end == RangeEnd.FROM) uiState.fromDate else uiState.toDate,
+            onDateSelected = { picked ->
+                if (end == RangeEnd.FROM) {
+                    viewModel.onSetCustomRange(picked, uiState.toDate)
+                } else {
+                    viewModel.onSetCustomRange(uiState.fromDate, picked)
+                }
+            },
+            onDismiss = { rangeEndToPick = null }
+        )
+    }
+
+    // 8. Log Weight Dialog
     if (showLogDialog) {
         val prefillKg = remember { uiState.selectedDateWeight?.weightKg }
         var inputWeight by remember {
@@ -673,68 +505,57 @@ fun WeightScreen(
 
         AlertDialog(
             onDismissRequest = { showLogDialog = false },
-            title = { Text("Log Body Weight", style = AppTypography.Header2) },
+            title = { Text("Log Body Weight", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                     Text(
                         text = "Enter weight for ${uiState.selectedDate.format(dateFormatter)} ($unitLabel):",
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    OutlinedTextField(
+                    MbTextField(
                         value = inputWeight,
                         onValueChange = {
                             inputWeight = it
                             errorMessage = null
                         },
-                        label = { Text("Weight ($unitLabel)") },
+                        label = "Weight ($unitLabel)",
+                        suffix = unitLabel,
+                        errorText = errorMessage,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                        singleLine = true,
-                        isError = errorMessage != null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AppColors.WaterCyan,
-                            unfocusedBorderColor = AppColors.TextSecondary,
-                            errorBorderColor = AppColors.ProgressOver
-                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (errorMessage != null) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(text = errorMessage ?: "", style = AppTypography.Caption, color = AppColors.ProgressOver)
-                    }
                 }
             },
             confirmButton = {
-                Button(
+                MbButton(
+                    text = "Save",
                     onClick = {
                         val kg = weightFromInput(inputWeight, prefillKg, isImperial)
                         if (kg == null || kg <= 0.0) {
                             errorMessage = "Please enter a valid positive number"
-                            return@Button
+                            return@MbButton
                         }
                         if (kg < 20.0 || kg > 500.0) {
                             errorMessage = "Weight must be between 20.0 kg and 500.0 kg"
-                            return@Button
+                            return@MbButton
                         }
                         viewModel.logWeight(uiState.selectedDate, kg)
                         showLogDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.WaterCyan)
-                ) {
-                    Text("Save", color = AppColors.Background)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showLogDialog = false }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 
-    // 7. Edit Weight Dialog
+    // 9. Edit Weight Dialog
     entryToEdit?.let { entry ->
         val initVal = weightPrefillText(entry.weightKg, isImperial)
         var editInput by remember { mutableStateOf(initVal) }
@@ -742,74 +563,158 @@ fun WeightScreen(
 
         AlertDialog(
             onDismissRequest = { entryToEdit = null },
-            title = { Text("Edit Weight Log", style = AppTypography.Header2) },
+            title = { Text("Edit Weight Log", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                     Text(
                         text = "Update weight for ${entry.date.format(dateFormatter)} ($unitLabel):",
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    OutlinedTextField(
+                    MbTextField(
                         value = editInput,
                         onValueChange = {
                             editInput = it
                             editError = null
                         },
-                        label = { Text("Weight ($unitLabel)") },
+                        label = "Weight ($unitLabel)",
+                        suffix = unitLabel,
+                        errorText = editError,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                        singleLine = true,
-                        isError = editError != null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AppColors.WaterCyan,
-                            unfocusedBorderColor = AppColors.TextSecondary,
-                            errorBorderColor = AppColors.ProgressOver
-                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (editError != null) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(text = editError ?: "", style = AppTypography.Caption, color = AppColors.ProgressOver)
-                    }
                 }
             },
             confirmButton = {
-                Button(
+                MbButton(
+                    text = "Save",
                     onClick = {
                         val kg = weightFromInput(editInput, entry.weightKg, isImperial)
                         if (kg == null || kg <= 0.0) {
                             editError = "Please enter a valid positive number"
-                            return@Button
+                            return@MbButton
                         }
                         if (kg < 20.0 || kg > 500.0) {
                             editError = "Weight must be between 20.0 kg and 500.0 kg"
-                            return@Button
+                            return@MbButton
                         }
                         viewModel.logWeight(entry.date, kg)
                         entryToEdit = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.WaterCyan)
-                ) {
-                    Text("Save", color = AppColors.Background)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { entryToEdit = null }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
+        )
+    }
+}
+
+/** Previous day / the day / next day, as the app had it, with round caret buttons. */
+@Composable
+private fun TrackerDateRibbon(label: String, onPrevious: () -> Unit, onNext: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIconButton(
+            icon = Ph.CaretLeft.light,
+            contentDescription = "Previous Day",
+            onClick = onPrevious,
+            tint = AppColors.TextPrimary
+        )
+        Text(
+            text = label,
+            style = AppTypography.Header3.copy(fontSize = 16.sp),
+            color = AppColors.TextPrimary
+        )
+        MbIconButton(
+            icon = Ph.CaretRight.light,
+            contentDescription = "Next Day",
+            onClick = onNext,
+            tint = AppColors.TextPrimary
+        )
+    }
+}
+
+/** A titled block of the tracker ("Weight logs (N)"), 22 dp below the one above. */
+@Composable
+private fun TrackerSection(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = modifier.fillMaxWidth().padding(top = AppSpacing.sectionGap)) {
+        Text(
+            text = title,
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary,
+            modifier = Modifier
+                .padding(bottom = 10.dp)
+                .semantics { heading() }
+        )
+        content()
+    }
+}
+
+/** One of the Start / Current / Change tiles: a small panel with a caption and the value. */
+@Composable
+private fun WeightStatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = AppColors.TextPrimary
+) {
+    MbPanel(
+        modifier = modifier.semantics(mergeDescendants = true) {},
+        shape = AppShapes.CardSmall,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = label,
+            style = AppTypography.Caption,
+            color = AppColors.TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(text = value, style = AppTypography.ValueMd, color = valueColor)
+    }
+}
+
+/** The From or To day of the range, as a field-like button that opens the date picker. */
+@Composable
+private fun RangeDateButton(text: String, highlighted: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = AppShapes.InputBox
+    Row(
+        modifier = modifier
+            .height(44.dp)
+            .mbClickable(pressedScale = 0.98f, onClick = onClick)
+            .clip(shape)
+            .background(AppColors.FieldFill)
+            .border(1.dp, if (highlighted) AppColors.ChipOnBorder else AppColors.FieldBorder, shape)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIcon(icon = Ph.CalendarBlank.light, contentDescription = null, size = 16.dp, tint = AppColors.TextSecondary)
+        Text(
+            text = text,
+            style = AppTypography.Body2,
+            color = AppColors.TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
 
 /**
- * Dedicated Canvas-based Cubic Bezier Line Graph matching Section 8 of UI_UX_SPECIFICATION.md.
- */
-/**
- * Dedicated Canvas-based Cubic Bezier Line Graph matching Section 8 of UI_UX_SPECIFICATION.md
- * with interactive data point selection and tooltip overlay.
+ * The weight line graph (design.txt C18), also shown by Statistics: a smooth line with the area
+ * below it, the latest point as a dot ringed in the canvas colour, gridlines with their weights and
+ * dates along the bottom. A tap selects the nearest point and shows its date and weight in a chip.
  */
 @Composable
 fun WeightLineGraph(
@@ -830,8 +735,18 @@ fun WeightLineGraph(
     val maxW = remember(weights) { ceil(weights.maxOrNull() ?: 100.0) + 1.0 }
     val rangeW = remember(minW, maxW) { (maxW - minW).coerceAtLeast(1.0) }
 
-    val graphCyan = Color(0xFF81D4FA)
-    val textGray = android.graphics.Color.parseColor("#888888")
+    val textMeasurer = rememberTextMeasurer()
+    val axisStyle = remember { AppTypography.Caption.copy(fontSize = 10.sp, lineHeight = 12.sp, color = AppColors.TextMuted) }
+    val tooltipDateStyle = remember { AppTypography.Caption.copy(fontSize = 10.sp, lineHeight = 13.sp, color = AppColors.TextSecondary) }
+    val tooltipWeightStyle = remember { AppTypography.Caption.copy(fontSize = 12.sp, lineHeight = 16.sp, color = AppColors.TextPrimary) }
+
+    val graphDescription = remember(entries, isImperial) {
+        if (entries.isEmpty()) {
+            "Weight graph"
+        } else {
+            "Weight from ${formatWeightValue(entries.first().weightKg, isImperial)} to ${formatWeightValue(entries.last().weightKg, isImperial)}"
+        }
+    }
 
     // Interactive tooltip state: resets when entries or date interval changes
     var selectedIndex by remember(entries) { mutableStateOf<Int?>(null) }
@@ -840,6 +755,7 @@ fun WeightLineGraph(
     Canvas(
         modifier = modifier
             .padding(horizontal = 8.dp, vertical = 8.dp)
+            .semantics { contentDescription = graphDescription }
             .pointerInput(entries, isImperial) {
                 detectTapGestures { tapOffset ->
                     val points = currentPointOffsets
@@ -860,37 +776,27 @@ fun WeightLineGraph(
         val paddingTop = 12.dp.toPx()
         val paddingRight = 16.dp.toPx()
 
-        val plotWidth = width - paddingLeft - paddingRight
         val plotHeight = height - paddingTop - paddingBottom
+        val plotBottom = paddingTop + plotHeight
 
-        // 1. Draw Y-Axis Step Lines and Labels
+        // 1. Gridlines with their weights, right-aligned left of the plot
         val ySteps = 4
         val stepWeight = rangeW / ySteps
-        val textPaint = android.graphics.Paint().apply {
-            color = textGray
-            textSize = 10.sp.toPx()
-            textAlign = android.graphics.Paint.Align.RIGHT
-            isAntiAlias = true
-        }
-
         for (i in 0..ySteps) {
             val wVal = minW + i * stepWeight
             val yPos = paddingTop + plotHeight - (i.toFloat() / ySteps.toFloat()) * plotHeight
 
-            // Grid Line
             drawLine(
-                color = Color(0xFF333333),
+                color = AppColors.ChartGrid,
                 start = Offset(paddingLeft, yPos),
                 end = Offset(width - paddingRight, yPos),
                 strokeWidth = 1.dp.toPx()
             )
 
-            // Y Label
-            drawContext.canvas.nativeCanvas.drawText(
-                String.format(Locale.US, "%.0f", wVal),
-                paddingLeft - 8.dp.toPx(),
-                yPos + 4.dp.toPx(),
-                textPaint
+            val label = textMeasurer.measure(String.format(Locale.US, "%.0f", wVal), axisStyle)
+            drawText(
+                textLayoutResult = label,
+                topLeft = Offset(paddingLeft - 8.dp.toPx() - label.size.width, yPos - label.size.height / 2f)
             )
         }
 
@@ -909,13 +815,13 @@ fun WeightLineGraph(
         )
         currentPointOffsets = pointOffsets
 
-        // 3. Construct Cubic Bezier Path
-        val linePath = Path()
-        val fillPath = Path()
-
         if (pointOffsets.isNotEmpty()) {
+            // 3. Construct Cubic Bezier Path
+            val linePath = Path()
+            val fillPath = Path()
+
             linePath.moveTo(pointOffsets.first().x, pointOffsets.first().y)
-            fillPath.moveTo(pointOffsets.first().x, paddingTop + plotHeight)
+            fillPath.moveTo(pointOffsets.first().x, plotBottom)
             fillPath.lineTo(pointOffsets.first().x, pointOffsets.first().y)
 
             for (i in 0 until pointOffsets.size - 1) {
@@ -927,126 +833,73 @@ fun WeightLineGraph(
                 fillPath.cubicTo(controlX, p0.y, controlX, p1.y, p1.x, p1.y)
             }
 
-            fillPath.lineTo(pointOffsets.last().x, paddingTop + plotHeight)
+            fillPath.lineTo(pointOffsets.last().x, plotBottom)
             fillPath.close()
 
-            // 4. Draw Gradient Fill Area Under Curve
-            val gradient = Brush.verticalGradient(
-                colors = listOf(graphCyan.copy(alpha = 0.25f), Color.Transparent),
-                startY = paddingTop,
-                endY = paddingTop + plotHeight
-            )
-            drawPath(path = fillPath, brush = gradient)
+            val activeIdx = selectedIndex
+            val selected = activeIdx?.takeIf { it in entries.indices && it in pointOffsets.indices }
 
-            // 5. Draw Plot Line
+            // 4. Area under the curve, the tapped day's dashed guide, then the line
+            drawPath(path = fillPath, color = AppColors.ChartArea)
+
+            if (selected != null) {
+                val x = pointOffsets[selected].x
+                drawLine(
+                    color = AppColors.ChartLine.copy(alpha = 0.55f),
+                    start = Offset(x, paddingTop),
+                    end = Offset(x, plotBottom),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                )
+            }
+
             drawPath(
                 path = linePath,
-                color = graphCyan,
-                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                color = AppColors.ChartLine,
+                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
 
-            // 6. Draw Circular Data Points
-            val pointRadius = 4.dp.toPx()
-            val borderThickness = 2.dp.toPx()
+            // 5. The latest point: a dot in the line colour with a 3 dp ring in the canvas colour
+            val lastPoint = pointOffsets.last()
+            drawCircle(color = AppColors.Background, radius = 7.dp.toPx(), center = lastPoint)
+            drawCircle(color = AppColors.ChartLine, radius = 4.dp.toPx(), center = lastPoint)
 
-            pointOffsets.forEachIndexed { index, pt ->
-                val isSelected = (index == selectedIndex)
-                if (isSelected) {
-                    // Outer glow halo for selected point
-                    drawCircle(
-                        color = graphCyan.copy(alpha = 0.35f),
-                        radius = pointRadius + 5.dp.toPx(),
-                        center = pt
-                    )
-                    // Outer Cyan Border
-                    drawCircle(
-                        color = graphCyan,
-                        radius = pointRadius + borderThickness,
-                        center = pt
-                    )
-                    // Inner White Fill
-                    drawCircle(
-                        color = Color.White,
-                        radius = pointRadius,
-                        center = pt
-                    )
-                } else {
-                    // Outer Cyan Border
-                    drawCircle(
-                        color = graphCyan,
-                        radius = pointRadius + borderThickness / 2f,
-                        center = pt
-                    )
-                    // Inner White Fill
-                    drawCircle(
-                        color = Color.White,
-                        radius = pointRadius,
-                        center = pt
-                    )
-                }
+            // The tapped point, when it is not the latest: a hollow dot
+            if (selected != null && selected != pointOffsets.lastIndex) {
+                val pt = pointOffsets[selected]
+                drawCircle(color = AppColors.Background, radius = 5.dp.toPx(), center = pt)
+                drawCircle(color = AppColors.ChartLine, radius = 4.dp.toPx(), center = pt, style = Stroke(width = 2.dp.toPx()))
             }
 
-            // 7. Draw X-Axis Date Labels
-            val xTextPaint = android.graphics.Paint().apply {
-                color = textGray
-                textSize = 9.sp.toPx()
-                textAlign = android.graphics.Paint.Align.CENTER
-                isAntiAlias = true
+            // 6. X-axis dates: up to 5 evenly spaced, kept inside the canvas
+            fun drawDateLabel(index: Int) {
+                val label = textMeasurer.measure(entries[index].date.format(shortDateFormatter), axisStyle)
+                val maxLeft = (width - label.size.width).coerceAtLeast(0f)
+                val left = (pointOffsets[index].x - label.size.width / 2f).coerceIn(0f, maxLeft)
+                drawText(textLayoutResult = label, topLeft = Offset(left, height - label.size.height))
             }
 
-            // Draw up to 5 evenly spaced date labels
             val step = (entries.size / 4).coerceAtLeast(1)
             for (i in entries.indices step step) {
-                val pt = pointOffsets[i]
-                val dateStr = entries[i].date.format(shortDateFormatter)
-                drawContext.canvas.nativeCanvas.drawText(
-                    dateStr,
-                    pt.x,
-                    height - 2.dp.toPx(),
-                    xTextPaint
-                )
+                drawDateLabel(i)
             }
             if ((entries.size - 1) % step != 0) {
-                val lastPt = pointOffsets.last()
-                val lastDateStr = entries.last().date.format(shortDateFormatter)
-                drawContext.canvas.nativeCanvas.drawText(
-                    lastDateStr,
-                    lastPt.x,
-                    height - 2.dp.toPx(),
-                    xTextPaint
-                )
+                drawDateLabel(entries.lastIndex)
             }
 
-            // 8. Draw Interactive Tooltip for Selected Point
-            val activeIdx = selectedIndex
-            if (activeIdx != null && activeIdx in entries.indices && activeIdx in pointOffsets.indices) {
-                val selPoint = pointOffsets[activeIdx]
-                val selEntry = entries[activeIdx]
+            // 7. Tooltip for the tapped point: a small rounded dark chip
+            if (selected != null) {
+                val selPoint = pointOffsets[selected]
+                val selEntry = entries[selected]
 
-                val dateText = selEntry.date.format(tooltipDateFormatter)
-                val weightText = formatWeightValue(selEntry.weightKg, isImperial)
+                val dateLayout = textMeasurer.measure(selEntry.date.format(tooltipDateFormatter), tooltipDateStyle)
+                val weightLayout = textMeasurer.measure(formatWeightValue(selEntry.weightKg, isImperial), tooltipWeightStyle)
 
-                val tooltipDatePaint = android.graphics.Paint().apply {
-                    color = android.graphics.Color.parseColor("#B0BEC5")
-                    textSize = 10.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    typeface = android.graphics.Typeface.DEFAULT
-                    isAntiAlias = true
-                }
-
-                val tooltipWeightPaint = android.graphics.Paint().apply {
-                    color = android.graphics.Color.WHITE
-                    textSize = 12.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    isAntiAlias = true
-                }
-
-                val dateWidth = tooltipDatePaint.measureText(dateText)
-                val weightWidth = tooltipWeightPaint.measureText(weightText)
-                val tooltipWidth = maxOf(dateWidth, weightWidth) + 20.dp.toPx()
-                val tooltipHeight = 38.dp.toPx()
-                val cornerRadius = 6.dp.toPx()
+                val padX = 10.dp.toPx()
+                val padY = 6.dp.toPx()
+                val tooltipWidth = maxOf(dateLayout.size.width, weightLayout.size.width) + 2 * padX
+                val tooltipHeight = dateLayout.size.height + weightLayout.size.height + 2 * padY
+                val cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
 
                 val bounds = WeightGraphHelper.calculateTooltipBounds(
                     point = selPoint,
@@ -1057,37 +910,28 @@ fun WeightLineGraph(
                     marginPx = 4.dp.toPx()
                 )
 
-                val centerX = bounds.leftX + bounds.width / 2f
-
-                // Background container
                 drawRoundRect(
-                    color = Color(0xFF1E1E1E),
+                    color = AppColors.SheetFill,
                     topLeft = Offset(bounds.leftX, bounds.topY),
                     size = Size(bounds.width, bounds.height),
-                    cornerRadius = CornerRadius(cornerRadius, cornerRadius)
+                    cornerRadius = cornerRadius
                 )
-
-                // Border outline
                 drawRoundRect(
-                    color = Color(0xFF424242),
+                    color = AppColors.Edge2,
                     topLeft = Offset(bounds.leftX, bounds.topY),
                     size = Size(bounds.width, bounds.height),
-                    cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+                    cornerRadius = cornerRadius,
                     style = Stroke(width = 1.dp.toPx())
                 )
 
-                // Render formatted Date & Weight
-                drawContext.canvas.nativeCanvas.drawText(
-                    dateText,
-                    centerX,
-                    bounds.topY + 14.dp.toPx(),
-                    tooltipDatePaint
+                val centerX = bounds.leftX + bounds.width / 2f
+                drawText(
+                    textLayoutResult = dateLayout,
+                    topLeft = Offset(centerX - dateLayout.size.width / 2f, bounds.topY + padY)
                 )
-                drawContext.canvas.nativeCanvas.drawText(
-                    weightText,
-                    centerX,
-                    bounds.topY + 30.dp.toPx(),
-                    tooltipWeightPaint
+                drawText(
+                    textLayoutResult = weightLayout,
+                    topLeft = Offset(centerX - weightLayout.size.width / 2f, bounds.topY + padY + dateLayout.size.height)
                 )
             }
         }

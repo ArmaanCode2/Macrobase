@@ -371,7 +371,10 @@ fun NavGraph(
             val viewModel: PreferencesViewModel = koinViewModel()
             PreferencesScreen(
                 viewModel = viewModel,
-                onNavigateToImportExport = { navController.navigate(Screen.ImportExport.route) }
+                onNavigateToImportExport = { navController.navigate(Screen.ImportExport.route) },
+                onOpenWeight = { navController.navigate(Screen.Weight.createRoute()) },
+                onOpenWater = { navController.navigate(Screen.Water.createRoute()) },
+                onOpenRank = { navController.navigateToTopLevel(Screen.Rank, homeViewModel) }
             )
         }
 
@@ -380,7 +383,10 @@ fun NavGraph(
             val viewModel: PreferencesViewModel = koinViewModel()
             PreferencesScreen(
                 viewModel = viewModel,
-                onNavigateToImportExport = { navController.navigate(Screen.ImportExport.route) }
+                onNavigateToImportExport = { navController.navigate(Screen.ImportExport.route) },
+                onOpenWeight = { navController.navigate(Screen.Weight.createRoute()) },
+                onOpenWater = { navController.navigate(Screen.Water.createRoute()) },
+                onOpenRank = { navController.navigateToTopLevel(Screen.Rank, homeViewModel) }
             )
         }
 

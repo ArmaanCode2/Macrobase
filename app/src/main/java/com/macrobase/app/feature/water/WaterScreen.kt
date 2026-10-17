@@ -1,48 +1,30 @@
 package com.macrobase.app.feature.water
 
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,16 +36,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbRowTile
+import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.hasThousandsSeparator
 import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.feature.detail.formatQuantityForInput
@@ -179,6 +174,11 @@ class WaterViewModel(
     }
 }
 
+/**
+ * The water tracker. The scaffold draws the pinned "Water" header with its back arrow, so this
+ * screen starts with the date ribbon; [onNavigateBack] stays for the navigation graph.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WaterScreen(
     viewModel: WaterViewModel,
@@ -200,10 +200,11 @@ fun WaterScreen(
 
     val isImperial = uiState.unitSystem == UnitSystem.IMPERIAL
 
-    val displayTotal = if (isImperial) {
-        "${UnitConversions.mlToFlOz(uiState.totalIntakeMl).roundToInt()} fl oz"
+    // The hero shows the number large and the goal (with its unit) small after it
+    val totalNumber = if (isImperial) {
+        UnitConversions.mlToFlOz(uiState.totalIntakeMl).roundToInt()
     } else {
-        "${uiState.totalIntakeMl.roundToInt()} mL"
+        uiState.totalIntakeMl.roundToInt()
     }
 
     val displayGoal = if (isImperial) {
@@ -212,263 +213,135 @@ fun WaterScreen(
         "${uiState.dailyGoalMl.roundToInt()} mL"
     }
 
+    // The three quick amounts; the chip's "+" icon stands for the "+" of "+250 mL"
+    val quickAddList = if (isImperial) {
+        listOf(
+            "8 oz" to UnitConversions.flOzToMl(8.0),
+            "16 oz" to UnitConversions.flOzToMl(16.0),
+            "24 oz" to UnitConversions.flOzToMl(24.0)
+        )
+    } else {
+        listOf(
+            "250 mL" to 250.0,
+            "500 mL" to 500.0,
+            "750 mL" to 750.0
+        )
+    }
+
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.isScrolled)
+
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin)
     ) {
-        // 1. Top Bar with back navigation
-        Row(
+        // 1. Date ribbon
+        TrackerDateRibbon(
+            label = uiState.selectedDate.format(dateFormatter),
+            onPrevious = { viewModel.onPreviousDay() },
+            onNext = { viewModel.onNextDay() }
+        )
+
+        // 2. Hero: intake against the goal
+        MbPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 4.dp)
+                .semantics(mergeDescendants = true) {},
+            contentPadding = PaddingValues(18.dp)
         ) {
-            IconButton(onClick = onNavigateBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = AppColors.TextPrimary
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "$totalNumber",
+                    style = AppTypography.BigStat,
+                    color = AppColors.TextPrimary,
+                    modifier = Modifier.alignByBaseline()
+                )
+                Text(
+                    text = " / $displayGoal",
+                    style = AppTypography.HeroUnit,
+                    color = AppColors.TextSecondary,
+                    modifier = Modifier.alignByBaseline()
                 )
             }
-            Text(text = "Water Tracker", style = AppTypography.Header1)
-        }
-
-        // 2. Date Selector Ribbon
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(Dimensions.DateRibbonHeight)
-                .background(AppColors.SurfaceAlt)
-                .padding(horizontal = AppSpacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { viewModel.onPreviousDay() }) {
-                Icon(
-                    imageVector = Icons.Default.ChevronLeft,
-                    contentDescription = "Previous Day",
-                    tint = AppColors.TextPrimary
-                )
-            }
-
             Text(
-                text = uiState.selectedDate.format(dateFormatter),
-                style = AppTypography.Header2
+                text = "${uiState.progressPercentage}% of your daily goal",
+                style = AppTypography.Body2,
+                color = AppColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 12.dp)
             )
-
-            IconButton(onClick = { viewModel.onNextDay() }) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Next Day",
-                    tint = AppColors.TextPrimary
-                )
-            }
+            WaterProgressBar(progress = animatedProgress)
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(AppSpacing.lg)
-                .verticalScroll(rememberScrollState())
-        ) {
-            // 3. Main Water Intake Card
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                modifier = Modifier.fillMaxWidth()
+        // 3. Quick add
+        TrackerSection(title = "Quick add") {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                    Text(text = "\uD83D\uDCA7 Water Intake", style = AppTypography.Header2)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "$displayTotal / $displayGoal",
-                            style = AppTypography.Body1,
-                            color = AppColors.TextPrimary
-                        )
-                        Text(
-                            text = "${uiState.progressPercentage}%",
-                            style = AppTypography.Header2,
-                            color = AppColors.WaterCyan
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    // Animated Smooth Progress Bar
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(Dimensions.WaterProgressHeight)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(AppColors.SurfaceAlt)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(animatedProgress)
-                                .height(Dimensions.WaterProgressHeight)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(AppColors.WaterCyan)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.lg))
-
-                    Text(text = "Quick Add:", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-                    // 4 Quick-Add Pill Buttons (+250mL, +500mL, +750mL, + Custom)
-                    val quickAddList = if (isImperial) {
-                        listOf(
-                            Triple("+8 oz", UnitConversions.flOzToMl(8.0), 8.0),
-                            Triple("+16 oz", UnitConversions.flOzToMl(16.0), 16.0),
-                            Triple("+24 oz", UnitConversions.flOzToMl(24.0), 24.0)
-                        )
-                    } else {
-                        listOf(
-                            Triple("+250 mL", 250.0, 250.0),
-                            Triple("+500 mL", 500.0, 500.0),
-                            Triple("+750 mL", 750.0, 750.0)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.xs)
-                    ) {
-                        quickAddList.forEach { (label, ml, _) ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(Dimensions.ButtonHeightSmall)
-                                    .clip(AppShapes.PillButton)
-                                    .background(AppColors.SurfaceAlt)
-                                    .border(1.dp, AppColors.WaterCyan, AppShapes.PillButton)
-                                    .clickable { viewModel.addWater(ml) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = AppTypography.Caption,
-                                    color = AppColors.TextPrimary
-                                )
-                            }
-                        }
-
-                        // Custom Pill
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(Dimensions.ButtonHeightSmall)
-                                .clip(AppShapes.PillButton)
-                                .background(AppColors.SurfaceAlt)
-                                .border(1.dp, AppColors.WaterCyan, AppShapes.PillButton)
-                                .clickable { showCustomAmountDialog = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "+ Custom",
-                                style = AppTypography.Caption,
-                                color = AppColors.WaterCyan
-                            )
-                        }
-                    }
+                quickAddList.forEach { (label, ml) ->
+                    QuickAddChip(
+                        text = label,
+                        icon = Ph.Plus.light,
+                        onClickLabel = "Add $label",
+                        onClick = { viewModel.addWater(ml) }
+                    )
                 }
+                QuickAddChip(
+                    text = "Custom",
+                    icon = Ph.PencilSimple.light,
+                    onClickLabel = "Add a custom amount",
+                    onClick = { showCustomAmountDialog = true }
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(AppSpacing.lg))
-
-            // 4. Daily Logs History Section
-            Text(
-                text = "Water Logs (${uiState.entries.size})",
-                style = AppTypography.Header2
-            )
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-
+        // 4. The day's logs
+        TrackerSection(title = "Water logs (${uiState.entries.size})") {
             if (uiState.entries.isEmpty()) {
-                Card(
-                    shape = AppShapes.Card,
-                    colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(AppSpacing.lg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No water logged for this date. Use Quick Add above to log water.",
-                            style = AppTypography.Body2,
-                            color = AppColors.TextMuted
-                        )
-                    }
-                }
+                Text(
+                    text = "No water logged for this date. Use Quick Add above to log water.",
+                    style = AppTypography.Body2,
+                    color = AppColors.TextMuted
+                )
             } else {
-                uiState.entries.forEach { entry ->
-                    val entryTime = entry.loggedAt.atZone(ZoneId.systemDefault()).format(timeFormatter)
-                    val entryAmountDisplay = if (isImperial) {
-                        "${UnitConversions.mlToFlOz(entry.amountMl).roundToInt()} fl oz"
-                    } else {
-                        "${entry.amountMl.roundToInt()} mL"
-                    }
-
-                    Card(
-                        shape = AppShapes.Card,
-                        colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = AppSpacing.xs)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Opacity,
-                                    contentDescription = null,
-                                    tint = AppColors.WaterCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                                Column {
-                                    Text(text = entryAmountDisplay, style = AppTypography.Header3)
-                                    Text(text = entryTime, style = AppTypography.Caption, color = AppColors.TextSecondary)
-                                }
-                            }
-
-                            Row {
-                                IconButton(onClick = { entryToEdit = entry }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit",
-                                        tint = AppColors.TextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.deleteWaterEntry(entry.id) }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete",
-                                        tint = AppColors.ProgressOver,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)) {
+                    uiState.entries.forEach { entry ->
+                        val entryTime = entry.loggedAt.atZone(ZoneId.systemDefault()).format(timeFormatter)
+                        val entryAmountDisplay = if (isImperial) {
+                            "${UnitConversions.mlToFlOz(entry.amountMl).roundToInt()} fl oz"
+                        } else {
+                            "${entry.amountMl.roundToInt()} mL"
                         }
+
+                        MbRowTile(
+                            title = entryAmountDisplay,
+                            subtitle = entryTime,
+                            icon = Ph.Drop.light,
+                            trailing = {
+                                MbIconButton(
+                                    icon = Ph.PencilSimple.light,
+                                    contentDescription = "Edit $entryAmountDisplay at $entryTime",
+                                    onClick = { entryToEdit = entry },
+                                    iconSize = 19.dp
+                                )
+                                MbIconButton(
+                                    icon = Ph.Trash.light,
+                                    contentDescription = "Delete $entryAmountDisplay at $entryTime",
+                                    onClick = { viewModel.deleteWaterEntry(entry.id) },
+                                    iconSize = 19.dp,
+                                    tint = AppColors.Error
+                                )
+                            }
+                        )
                     }
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(AppSpacing.xxl))
     }
 
     // 5. Custom Amount Dialog
@@ -479,68 +352,53 @@ fun WaterScreen(
 
         AlertDialog(
             onDismissRequest = { showCustomAmountDialog = false },
-            title = { Text(text = "Add Custom Water Amount", style = AppTypography.Header2) },
+            title = { Text(text = "Add Custom Water Amount", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                     Text(
                         text = "Enter water amount in $unitLabel:",
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    OutlinedTextField(
+                    MbTextField(
                         value = inputAmount,
                         onValueChange = {
                             inputAmount = it
                             errorMessage = null
                         },
-                        label = { Text("Amount ($unitLabel)") },
+                        label = "Amount ($unitLabel)",
+                        suffix = unitLabel,
+                        errorText = errorMessage,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Decimal,
                             imeAction = ImeAction.Done
                         ),
-                        singleLine = true,
-                        isError = errorMessage != null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AppColors.WaterCyan,
-                            unfocusedBorderColor = AppColors.TextSecondary,
-                            errorBorderColor = AppColors.ProgressOver
-                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (errorMessage != null) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(
-                            text = errorMessage ?: "",
-                            style = AppTypography.Caption,
-                            color = AppColors.ProgressOver
-                        )
-                    }
                 }
             },
             confirmButton = {
-                Button(
+                MbButton(
+                    text = "Add",
                     onClick = {
                         val ml = parseWaterInput(inputAmount, isImperial)
                         val problem = waterInputError(inputAmount, ml, isImperial)
                         if (ml == null || problem != null) {
                             errorMessage = problem
-                            return@Button
+                            return@MbButton
                         }
                         viewModel.addWater(ml)
                         showCustomAmountDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.WaterCyan)
-                ) {
-                    Text("Add", color = AppColors.Background)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showCustomAmountDialog = false }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 
@@ -553,70 +411,142 @@ fun WaterScreen(
 
         AlertDialog(
             onDismissRequest = { entryToEdit = null },
-            title = { Text(text = "Edit Water Entry", style = AppTypography.Header2) },
+            title = { Text(text = "Edit Water Entry", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                     Text(
                         text = "Update amount in $unitLabel:",
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    OutlinedTextField(
+                    MbTextField(
                         value = editInput,
                         onValueChange = {
                             editInput = it
                             editErrorMessage = null
                         },
-                        label = { Text("Amount ($unitLabel)") },
+                        label = "Amount ($unitLabel)",
+                        suffix = unitLabel,
+                        errorText = editErrorMessage,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Decimal,
                             imeAction = ImeAction.Done
                         ),
-                        singleLine = true,
-                        isError = editErrorMessage != null,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AppColors.WaterCyan,
-                            unfocusedBorderColor = AppColors.TextSecondary,
-                            errorBorderColor = AppColors.ProgressOver
-                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    if (editErrorMessage != null) {
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(
-                            text = editErrorMessage ?: "",
-                            style = AppTypography.Caption,
-                            color = AppColors.ProgressOver
-                        )
-                    }
                 }
             },
             confirmButton = {
-                Button(
+                MbButton(
+                    text = "Save",
                     onClick = {
                         // Saving the dialog unchanged keeps the exact stored amount (BUG-050)
                         val ml = waterFromInput(editInput, entry.amountMl, isImperial)
                         val problem = waterInputError(editInput, ml, isImperial)
                         if (ml == null || problem != null) {
                             editErrorMessage = problem
-                            return@Button
+                            return@MbButton
                         }
                         viewModel.updateWaterEntry(entry.copy(amountMl = ml))
                         entryToEdit = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.WaterCyan)
-                ) {
-                    Text("Save", color = AppColors.Background)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { entryToEdit = null }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
+    }
+}
+
+/** Previous day / the day / next day, as the app had it, with round caret buttons. */
+@Composable
+private fun TrackerDateRibbon(label: String, onPrevious: () -> Unit, onNext: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIconButton(
+            icon = Ph.CaretLeft.light,
+            contentDescription = "Previous Day",
+            onClick = onPrevious,
+            tint = AppColors.TextPrimary
+        )
+        Text(
+            text = label,
+            style = AppTypography.Header3.copy(fontSize = 16.sp),
+            color = AppColors.TextPrimary
+        )
+        MbIconButton(
+            icon = Ph.CaretRight.light,
+            contentDescription = "Next Day",
+            onClick = onNext,
+            tint = AppColors.TextPrimary
+        )
+    }
+}
+
+/** A titled block of the tracker ("Quick add", "Water logs (N)"), 22 dp below the one above. */
+@Composable
+private fun TrackerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.sectionGap)) {
+        Text(
+            text = title,
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary,
+            modifier = Modifier
+                .padding(bottom = 10.dp)
+                .semantics { heading() }
+        )
+        content()
+    }
+}
+
+/** The rounded 8 dp bar in the water colour on the faint track. */
+@Composable
+private fun WaterProgressBar(progress: Float) {
+    val shape = RoundedCornerShape(percent = 50)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(shape)
+            .background(AppColors.BarTrack)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .clip(shape)
+                .background(AppColors.WaterCyan)
+        )
+    }
+}
+
+/** A chip-style button (C4 look): it acts at once, so it is a button, not a selectable chip. */
+@Composable
+private fun QuickAddChip(text: String, @DrawableRes icon: Int, onClickLabel: String, onClick: () -> Unit) {
+    val shape = AppShapes.PillButton
+    Row(
+        modifier = Modifier
+            .height(40.dp)
+            .mbClickable(onClickLabel = onClickLabel, onClick = onClick)
+            .clip(shape)
+            .background(Color.Transparent)
+            .border(1.dp, AppColors.ChipBorder, shape)
+            .padding(horizontal = 15.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIcon(icon = icon, contentDescription = null, size = 16.dp, tint = AppColors.ChipInk)
+        Text(text = text, style = AppTypography.Chip, color = AppColors.ChipInk, maxLines = 1)
     }
 }
 

@@ -90,6 +90,7 @@ import com.macrobase.app.feature.calendar.CalendarViewModel
 import com.macrobase.app.feature.calendar.FoodLoggingCalendar
 import com.macrobase.app.feature.weight.WeightGraphHelper
 import com.macrobase.app.feature.weight.WeightLineGraph
+import com.macrobase.app.feature.weight.weightIntervalChipLabel
 import com.macrobase.app.feature.weight.WeightTimeInterval
 import com.macrobase.app.feature.weight.dateRange
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -384,19 +385,6 @@ internal fun StatsMessagePanel(text: String, modifier: Modifier = Modifier) {
                 .padding(vertical = 14.dp)
         )
     }
-}
-
-/**
- * A weight range's chip text in sentence case ("1 year", "All time"). [WeightTimeInterval.label]
- * stays as it is for the Weight screen.
- */
-internal fun weightIntervalChipLabel(interval: WeightTimeInterval): String = when (interval) {
-    WeightTimeInterval.LAST_30_DAYS -> "Last 30 days"
-    WeightTimeInterval.LAST_3_MONTHS -> "Last 3 months"
-    WeightTimeInterval.LAST_6_MONTHS -> "Last 6 months"
-    WeightTimeInterval.ONE_YEAR -> "1 year"
-    WeightTimeInterval.ALL_TIME -> "All time"
-    WeightTimeInterval.CUSTOM -> "Custom"
 }
 
 /**
