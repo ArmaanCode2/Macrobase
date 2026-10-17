@@ -1,30 +1,27 @@
 package com.macrobase.app.feature.calendar
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -35,8 +32,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,7 +47,13 @@ import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.isScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.navigation.LocalDockInset
+import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.domain.model.CalendarDaySummary
 import com.macrobase.app.domain.usecase.GetCalendarAdherenceUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -226,6 +232,7 @@ class CalendarViewModel(
     }
 }
 
+
 @Composable
 fun CalendarScreen(
     viewModel: CalendarViewModel,
@@ -239,12 +246,24 @@ fun CalendarScreen(
         onPreviousMonth = { viewModel.onPreviousMonth() },
         onNextMonth = { viewModel.onNextMonth() },
         onDateClick = onDateClick,
-        modifier = modifier
+        modifier = modifier,
+        // The pinned header already names this screen "Food logging calendar"
+        showTitle = false
     )
 }
 
+/** The weekday row over the grid, Sunday first like the grid. */
+private val WeekDayLabels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+/** The gap between calendar cells, across and down. */
+private val CalendarCellGap = 6.dp
+
 /**
- * Main Food Logging Calendar Screen Component matching UI_UX_SPECIFICATION.md
+ * The food logging calendar, shown by Statistics' Calendar view and by the Calendar screen: the
+ * month with its arrows, the days coloured by how each went against its goal, the legend, the
+ * month's summary and the hint. A sideways swipe on the days changes the month, and tapping a day
+ * of the month opens it. The content scrolls under the pinned header and ends clear of the dock.
+ * [showTitle] shows the "Food logging calendar" heading, for a screen whose header names it otherwise.
  */
 @Composable
 fun FoodLoggingCalendar(
@@ -252,122 +271,117 @@ fun FoodLoggingCalendar(
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onDateClick: (LocalDate) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showTitle: Boolean = true
 ) {
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.isScrolled)
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin)
     ) {
-        Text(text = "Food Logging Calendar", style = AppTypography.Header1)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        Spacer(modifier = Modifier.height(AppSpacing.sm))
+        if (showTitle) {
+            Text(
+                text = "Food logging calendar",
+                style = AppTypography.Header2,
+                color = AppColors.TextPrimary,
+                modifier = Modifier.semantics { heading() }
+            )
+            Spacer(modifier = Modifier.height(AppSpacing.md))
+        }
 
-        // Main Calendar Container Card (Surface #1E1E1E, Radius 8dp, Padding 16dp)
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                // 1. Month Navigation Header (Buttons & Month/Year Title - NOT swipable)
-                CalendarMonthHeader(
-                    yearMonth = uiState.displayedYearMonth,
-                    onPreviousMonth = onPreviousMonth,
-                    onNextMonth = onNextMonth
-                )
+        // 1. The month and its arrows (not part of the swipe area)
+        CalendarMonthHeader(
+            yearMonth = uiState.displayedYearMonth,
+            onPreviousMonth = onPreviousMonth,
+            onNextMonth = onNextMonth
+        )
 
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
+        Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-                // ======================================================================
-                // 2 & 3. Isolated Calendar Grid Area (STRICTLY handles horizontal swipes)
-                // ======================================================================
-                var dragOffsetX by remember { mutableFloatStateOf(0f) }
-                val density = LocalDensity.current
-                val swipeThresholdPx = remember(density) { with(density) { 48.dp.toPx() } }
+        // 2. The weekday row and the days: only this area handles sideways swipes
+        var dragOffsetX by remember { mutableFloatStateOf(0f) }
+        val density = LocalDensity.current
+        val swipeThresholdPx = remember(density) { with(density) { 48.dp.toPx() } }
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(uiState.displayedYearMonth) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { dragOffsetX = 0f },
-                                onDragCancel = { dragOffsetX = 0f },
-                                onDragEnd = {
-                                    if (dragOffsetX < -swipeThresholdPx) {
-                                        // Swiped left -> advance to Next Month
-                                        onNextMonth()
-                                    } else if (dragOffsetX > swipeThresholdPx) {
-                                        // Swiped right -> go back to Previous Month
-                                        onPreviousMonth()
-                                    }
-                                    dragOffsetX = 0f
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    dragOffsetX += dragAmount
-                                    // Consume pointer change once horizontal intent is confirmed
-                                    if (kotlin.math.abs(dragOffsetX) > 10f) {
-                                        change.consume()
-                                    }
-                                }
-                            )
-                        }
-                ) {
-                    // Sunday–Saturday Weekday Headers
-                    CalendarWeekHeader()
-
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    // 7-Column Calendar Grid (Day cells)
-                    val rows = uiState.dayCells.chunked(7)
-                    rows.forEach { rowCells ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = Dimensions.CalendarCellSpacing / 2),
-                            horizontalArrangement = Arrangement.SpaceAround
-                        ) {
-                            rowCells.forEach { cell ->
-                                CalendarDayCell(
-                                    cell = cell,
-                                    onClick = { onDateClick(cell.date) }
-                                )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(uiState.displayedYearMonth) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragOffsetX = 0f },
+                        onDragCancel = { dragOffsetX = 0f },
+                        onDragEnd = {
+                            if (dragOffsetX < -swipeThresholdPx) {
+                                // Swiped left -> advance to Next Month
+                                onNextMonth()
+                            } else if (dragOffsetX > swipeThresholdPx) {
+                                // Swiped right -> go back to Previous Month
+                                onPreviousMonth()
+                            }
+                            dragOffsetX = 0f
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            dragOffsetX += dragAmount
+                            // Consume pointer change once horizontal intent is confirmed
+                            if (kotlin.math.abs(dragOffsetX) > 10f) {
+                                change.consume()
                             }
                         }
+                    )
+                },
+            verticalArrangement = Arrangement.spacedBy(CalendarCellGap)
+        ) {
+            CalendarWeekHeader()
+
+            // 7-column grid of day cells
+            uiState.dayCells.chunked(7).forEach { rowCells ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(CalendarCellGap)
+                ) {
+                    rowCells.forEach { cell ->
+                        CalendarDayCell(
+                            cell = cell,
+                            onClick = { onDateClick(cell.date) },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // 4. Centered 5-Step Performance Legend (NOT swipable)
-                CalendarLegend(modifier = Modifier.align(Alignment.CenterHorizontally))
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-                HorizontalDivider(color = AppColors.Divider)
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // 5. Performance Summary Metrics Strip
-                CalendarPerformanceSummary(
-                    daysMissed = uiState.daysMissed,
-                    greenPercentage = uiState.greenPercentage
-                )
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // 6. Helper Note Text
-                Text(
-                    text = "Tap on any date on the calendar to review or add foods.",
-                    style = AppTypography.Caption,
-                    color = AppColors.TextMuted,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
             }
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 3. What each colour means (not part of the swipe area)
+        CalendarLegend()
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 4. The month's summary
+        CalendarPerformanceSummary(
+            daysMissed = uiState.daysMissed,
+            greenPercentage = uiState.greenPercentage
+        )
+
+        // 5. The hint
+        Text(
+            text = "Tap on any date on the calendar to review or add foods.",
+            style = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 18.sp),
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+
+        Spacer(modifier = Modifier.height(LocalDockInset.current + 16.dp))
     }
 }
 
 /**
- * Month Navigation Bar with Sky Blue chevrons and Month/Year title.
+ * The month and year between the previous and next month arrows.
  */
 @Composable
 fun CalendarMonthHeader(
@@ -376,58 +390,71 @@ fun CalendarMonthHeader(
     onNextMonth: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val monthFormatter = DateTimeFormatter.ofPattern("MMMM, yyyy")
+    val monthFormatter = remember { DateTimeFormatter.ofPattern("MMMM, yyyy") }
 
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onPreviousMonth) {
-            Icon(
-                imageVector = Icons.Default.ChevronLeft,
-                contentDescription = "Previous Month",
-                tint = AppColors.WaterCyan
-            )
-        }
+        MbIconButton(
+            icon = Ph.CaretLeft.light,
+            contentDescription = "Previous month",
+            onClick = onPreviousMonth,
+            iconSize = 20.dp
+        )
         Text(
             text = yearMonth.format(monthFormatter),
-            style = AppTypography.Header2
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary
         )
-        IconButton(onClick = onNextMonth) {
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = "Next Month",
-                tint = AppColors.WaterCyan
-            )
-        }
+        MbIconButton(
+            icon = Ph.CaretRight.light,
+            contentDescription = "Next month",
+            onClick = onNextMonth,
+            iconSize = 20.dp
+        )
     }
 }
 
 /**
- * Sunday–Saturday Weekday Headers.
+ * The weekday names over the grid's seven columns, Sunday first.
  */
 @Composable
 fun CalendarWeekHeader(modifier: Modifier = Modifier) {
-    val weekDays = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceAround
+        horizontalArrangement = Arrangement.spacedBy(CalendarCellGap)
     ) {
-        weekDays.forEach { wd ->
+        WeekDayLabels.forEach { wd ->
             Text(
                 text = wd,
-                style = AppTypography.Caption,
-                color = AppColors.TextSecondary,
-                modifier = Modifier.width(Dimensions.CalendarCellSize),
-                textAlign = TextAlign.Center
+                style = AppTypography.Caption.copy(fontSize = 11.sp),
+                color = AppColors.TextMuted,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
             )
         }
     }
 }
 
 /**
- * Responsive 40dp Calendar Day Cell with 4dp corner radius.
+ * A day's fill and number colour (design.txt section 2, calendar cells). Days of the next or
+ * previous month are padding and show their number faintly with no fill; an upcoming day with
+ * nothing logged has no fill yet; every other day takes its performance colour.
+ */
+internal fun calendarCellColors(cell: CalendarDayCellModel): Pair<Color, Color> = when {
+    !cell.isCurrentMonth -> Color.Transparent to AppColors.TextMuted.copy(alpha = 0.35f)
+    cell.isFuture && cell.performanceCategory == CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED ->
+        Color.Transparent to AppColors.TextMuted
+    else -> CalendarPerformanceConfig.getColorForCategory(cell.performanceCategory) to
+        CalendarPerformanceConfig.getTextColorForCategory(cell.performanceCategory)
+}
+
+/**
+ * One square day of the grid, radius 10, in its performance colour. Today has a light ring. Only
+ * days of the displayed month can be tapped.
  */
 @Composable
 fun CalendarDayCell(
@@ -435,66 +462,66 @@ fun CalendarDayCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cellColor = if (!cell.isCurrentMonth) {
-        AppColors.Background.copy(alpha = 0.3f)
-    } else {
-        CalendarPerformanceConfig.getColorForCategory(cell.performanceCategory)
-    }
-
-    val textColor = if (!cell.isCurrentMonth) {
-        AppColors.TextMuted.copy(alpha = 0.3f)
-    } else {
-        CalendarPerformanceConfig.getTextColorForCategory(cell.performanceCategory)
-    }
+    val (fill, ink) = calendarCellColors(cell)
+    val shape = AppShapes.CalendarCell
 
     Box(
         modifier = modifier
-            .size(Dimensions.CalendarCellSize)
-            .clip(RoundedCornerShape(4.dp))
-            .background(cellColor)
-            .clickable(enabled = cell.isCurrentMonth, onClick = onClick),
+            .aspectRatio(1f)
+            .mbClickable(enabled = cell.isCurrentMonth, pressedScale = 0.92f, onClick = onClick)
+            .clip(shape)
+            .background(fill)
+            .then(
+                if (cell.isToday && cell.isCurrentMonth) Modifier.border(2.dp, AppColors.TextPrimary, shape) else Modifier
+            ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = "${cell.dayNumber}",
-            style = AppTypography.Header3,
-            color = textColor,
-            fontSize = 14.sp
+            style = AppTypography.Body1.copy(fontSize = 14.sp, lineHeight = 18.sp),
+            color = ink
         )
     }
 }
 
 /**
- * 5-Step Performance Legend centered with 8dp mini-squares.
+ * What each of the five cell colours means, from a missed day to a day well over the goal.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CalendarLegend(modifier: Modifier = Modifier) {
-    val colors = listOf(
-        AppColors.CalendarEmpty,
-        AppColors.CalendarGreenSubtle,
-        AppColors.CalendarGreenOptimal,
-        AppColors.CalendarRedWarning,
-        AppColors.CalendarRedAlert
+    val items = listOf(
+        "Missed" to AppColors.CalendarEmpty,
+        "Under" to AppColors.CalendarGreenSubtle,
+        "On target" to AppColors.CalendarGreenOptimal,
+        "Over" to AppColors.CalendarRedWarning,
+        "Well over" to AppColors.CalendarRedAlert
     )
 
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        colors.forEach { color ->
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(color)
-            )
+        items.forEach { (label, color) ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color)
+                )
+                Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary)
+            }
         }
     }
 }
 
 /**
- * Two-Column Performance Summary Metrics Strip.
+ * The month's summary: days missed and the share of logged days on target, as two tiles.
  */
 @Composable
 fun CalendarPerformanceSummary(
@@ -503,41 +530,39 @@ fun CalendarPerformanceSummary(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+        modifier = modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
     ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = "Days Missed", style = AppTypography.Caption, color = AppColors.TextSecondary)
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
-            Text(
-                text = "$daysMissed Days",
-                style = AppTypography.Header1,
-                color = if (daysMissed > 0) AppColors.TextPrimary else AppColors.CalorieText
-            )
-        }
-
-        Box(
+        CalendarSummaryTile(
+            label = "Days missed",
+            value = "$daysMissed days",
+            valueColor = if (daysMissed > 0) AppColors.TextPrimary else AppColors.AccentStrong,
             modifier = Modifier
-                .width(1.dp)
-                .height(40.dp)
-                .background(AppColors.Divider)
+                .weight(1f)
+                .fillMaxHeight()
         )
+        CalendarSummaryTile(
+            label = "% days of green",
+            value = "$greenPercentage%",
+            valueColor = AppColors.AccentStrong,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+        )
+    }
+}
 
-        Column(
-            modifier = Modifier.weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = "% Days of Green", style = AppTypography.Caption, color = AppColors.TextSecondary)
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
-            Text(
-                text = "$greenPercentage%",
-                style = AppTypography.Header1,
-                color = AppColors.CalorieText
-            )
-        }
+@Composable
+private fun CalendarSummaryTile(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
+    MbPanel(
+        modifier = modifier,
+        shape = AppShapes.CardSmall,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary)
+        Text(text = value, style = AppTypography.Header1, color = valueColor)
     }
 }

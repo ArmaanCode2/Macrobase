@@ -104,9 +104,10 @@ fun MacroBaseScaffold(
             Scaffold(
                 topBar = {
                     when {
-                        // Home, Search (its field sits in the header), the immersive scanner and Food Detail draw their own top
+                        // Home, Search (its field sits in the header), Rank (its info button), the scanner and Food Detail draw their own top
                         isScanner || isFoodDetail || routeBase == Screen.Home.route.routeBase() ||
-                            routeBase == Screen.Search.route.routeBase() -> Unit
+                            routeBase == Screen.Search.route.routeBase() ||
+                            routeBase == Screen.Rank.route.routeBase() -> Unit
                         isTabRoot -> MbHeader(
                             title = tabTitle(Screen.bottomNavScreens[tabIndex]),
                             scrolled = chrome.contentScrolled
