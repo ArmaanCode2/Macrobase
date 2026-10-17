@@ -1,11 +1,13 @@
 package com.macrobase.app.data.repository
 
 import com.macrobase.app.data.database.dao.CustomFoodDao
+import com.macrobase.app.data.database.dao.DiaryDao
 import com.macrobase.app.data.database.entity.CustomFoodEntity
 import com.macrobase.app.data.provider.FoodDataProvider
 import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.Food
 import com.macrobase.app.domain.model.Nutrition
+import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.repository.FoodRepository
@@ -18,7 +20,9 @@ import kotlinx.coroutines.flow.map
  */
 class FoodRepositoryImpl(
     private val localDatabaseProvider: FoodDataProvider,
-    private val customFoodDao: CustomFoodDao
+    private val customFoodDao: CustomFoodDao,
+    /** The diary, for "Recently logged"; without it there are no recents. */
+    private val diaryDao: DiaryDao? = null
 ) : FoodRepository {
 
     companion object {
@@ -29,6 +33,9 @@ class FoodRepositoryImpl(
          * It resolves to no food, so the entry is always shown from its own snapshot.
          */
         const val UNLINKED_CUSTOM_FOOD_ID = CUSTOM_FOOD_ID_OFFSET
+
+        /** Extra recent foods read, so ones the catalog no longer has can be skipped without a short list. */
+        private const val RECENT_IDS_TO_SKIP = 20
 
         /** Room row id for a food id in the custom range, or null for any other food id. */
         fun customRowIdOrNull(foodId: Long): Long? =
@@ -73,8 +80,29 @@ class FoodRepositoryImpl(
         return customFoodDao.getCustomFoodById(customId)?.toDomainFood()?.servings ?: emptyList()
     }
 
+    /**
+     * The catalog foods logged most recently, newest first (BUG-055). Custom foods are left out
+     * because the Search screen lists every one of them above the recents, and recipes because
+     * Food Detail cannot open a recipe id (they are logged from the Recipes screen).
+     *
+     * An id from an older catalog can be missing now, or name another food; only a food that still
+     * carries the logged name is offered, and the next one takes the place of any that is not.
+     */
     override suspend fun getRecentFoods(limit: Int): List<Food> {
-        return emptyList()
+        val dao = diaryDao ?: return emptyList()
+        if (limit <= 0) return emptyList()
+        val recents = mutableListOf<Food>()
+        val catalogRefs = dao.getRecentCatalogFoods(
+            userIdsStart = CUSTOM_FOOD_ID_OFFSET,
+            userIdsEnd = Recipe.FOOD_ID_RANGE_END,
+            limit = limit + RECENT_IDS_TO_SKIP
+        )
+        for (ref in catalogRefs) {
+            if (recents.size == limit) break
+            val food = localDatabaseProvider.getFoodById(ref.foodId) ?: continue
+            if (food.name.trim().equals(ref.foodName.trim(), ignoreCase = true)) recents.add(food)
+        }
+        return recents
     }
 
     override suspend fun getFavoriteFoods(): List<Food> {
@@ -105,6 +133,7 @@ class FoodRepositoryImpl(
             proteinGrams = food.nutritionPerServing.proteinGrams,
             carbsGrams = food.nutritionPerServing.carbsGrams,
             fatGrams = food.nutritionPerServing.fatGrams,
+            saturatedFatGrams = food.nutritionPerServing.saturatedFatGrams,
             fiberGrams = food.nutritionPerServing.fiberGrams,
             sugarGrams = food.nutritionPerServing.sugarGrams,
             sodiumMg = food.nutritionPerServing.sodiumMg,
@@ -154,6 +183,7 @@ class FoodRepositoryImpl(
                 fatGrams = fatGrams,
                 fiberGrams = fiberGrams,
                 sugarGrams = sugarGrams,
+                saturatedFatGrams = saturatedFatGrams,
                 sodiumMg = sodiumMg,
                 potassiumMg = potassiumMg,
                 calciumMg = calciumMg,

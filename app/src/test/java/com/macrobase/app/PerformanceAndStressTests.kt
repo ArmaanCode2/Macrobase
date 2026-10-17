@@ -172,7 +172,7 @@ class PerformanceAndStressTests {
 
         conn.prepareStatement(searchSql).use { ps ->
             for (query in benchmarkQueries) {
-                val ftsFormatted = sanitizeFtsQuery(query)
+                val ftsFormatted = com.macrobase.app.data.provider.LocalFoodDatabaseProvider.sanitizeFtsQuery(query)
                 if (ftsFormatted.isBlank()) continue
                 ps.setString(1, ftsFormatted)
 
@@ -423,14 +423,6 @@ class PerformanceAndStressTests {
         // Historical diary entry remains unchanged at 250.0 kcal
         assertEquals(250.0, snapshottedEntry.loggedCalories, 0.001)
         assertEquals(280.0, modifiedBaseFood.nutrition.calories, 0.001)
-    }
-
-    private fun sanitizeFtsQuery(raw: String): String {
-        val tokens = raw.replace(Regex("[^a-zA-Z0-9 ]"), " ")
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
-        if (tokens.isEmpty()) return ""
-        return tokens.joinToString(" ") { "$it*" }
     }
 }
 

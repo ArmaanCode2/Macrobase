@@ -71,7 +71,7 @@ fun AppDrawer(
                         color = AppColors.TextPrimary
                     )
                     Text(
-                        text = "Offline Nutrition Tracker v1.0",
+                        text = "Offline Nutrition Tracker v${com.macrobase.app.BuildConfig.VERSION_NAME}",
                         style = AppTypography.Caption,
                         color = AppColors.TextPrimary
                     )
@@ -128,7 +128,7 @@ fun AppDrawer(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "MacroBase • 100% Offline",
+                text = "MacroBase \u2022 100% Offline",
                 style = AppTypography.Caption,
                 color = AppColors.TextMuted
             )

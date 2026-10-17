@@ -9,4 +9,10 @@ interface RankRepository {
     fun observeRankProfile(): Flow<RankProfile>
     suspend fun getRankProfile(): RankProfile
     suspend fun calculateLifestyleScoreForPeriod(startDate: LocalDate, endDate: LocalDate): LifestyleScore
+
+    /** Remembers that the user has seen the current rank rules, so the notice does not return. */
+    suspend fun dismissRulesNotice() {}
+
+    /** Remembers that the user has seen the reset that started on [seasonStart], so the notice does not return. */
+    suspend fun dismissSeasonNotice(seasonStart: LocalDate) {}
 }

@@ -31,7 +31,7 @@ Most nutrition tracking apps rely on cloud services, subscriptions, and telemetr
 - **Fast Offline Search**: Instant food search using SQLite FTS5 full-text indexing over tens of thousands of built-in USDA entries, custom foods, and recipes with categorized search results.
 - **Centralized Food Basket**: A bulk editing staging repository (`InMemoryBasketRepository`) for pending logs. Edit quantities and serving units inline, apply common dates or meal types across all items, and review total calories and macros before saving.
 - **Diary Entry Editing**: Direct inline editing of previously logged diary entries with pre-populated quantities and instant historical recalculation.
-- **On-Device Nutrition Label Scanner**: Scan physical food labels using the device camera. The app parses serving sizes, calories, and nutrient breakdown directly on-device using ML Kit Text Recognition and PaddleOCR with 100% offline privacy.
+- **On-Device Nutrition Label Scanner**: Scan physical food labels using the device camera. The app parses serving sizes, calories, and nutrient breakdown directly on-device using ML Kit Text Recognition with 100% offline privacy.
 - **Custom Foods and Recipes**: Create custom foods with custom portion names (`customUnitName`), or combine ingredients into multi-serving recipes with automatic per-portion nutrient calculations.
 - **Lifestyle Food Rankings**: Built-in food scoring algorithm that ranks foods across 7 lifestyle profiles: High Protein, Low Carb, Keto, Mediterranean, Low Sodium, Vegan, and Vegetarian.
 - **Water and Weight Tracking**: Log daily water intake in customizable increments and monitor weight progress over time.
@@ -51,7 +51,7 @@ The app is built following Clean Architecture principles with clear separation o
   - `macrobase_user.db`: Room database (v3) storing user diary entries (with historical snapshot macros and secondary nutrients: fiber, sugar, sodium), custom foods, recipes, weight, and water logs.
 - **Dependency Injection**: Koin (modularized into `databaseModule`, `repositoryModule`, `useCaseModule`, `viewModelModule`).
 - **Navigation**: Jetpack Navigation Compose with type-safe routing arguments.
-- **Machine Learning and OCR**: On-device Google ML Kit Text Recognition and PaddleOCR (ONNX Runtime, OpenCV). Zero network calls.
+- **Machine Learning and OCR**: On-device Google ML Kit Text Recognition. Zero network calls.
 - **Architecture**: MVVM with unidirectional data flow (UDF) and Immutable Historical Snapshot pattern.
 - **Testing**: JUnit 4, Kotlinx Coroutines Test, Room in-memory testing.
 
@@ -76,7 +76,6 @@ macrobase/
 │       ├── main/
 │       │   ├── assets/
 │       │   │   ├── databases/built_in_foods.db  # Read-only USDA catalog (FTS5)
-│       │   │   └── models/                      # OCR models
 │       │   ├── java/com/macrobase/app/
 │       │   │   ├── core/           # Design system, navigation, DI, utilities
 │       │   │   ├── data/           # Room entities, DAOs, repositories, database
@@ -84,7 +83,6 @@ macrobase/
 │       │   │   └── feature/        # Compose screens and ViewModels
 │       │   └── res/                # Vector drawables, strings, theme XMLs
 │       └── test/                   # Comprehensive unit test suite (260+ tests)
-├── ppocr-sdk/                      # PaddleOCR Android SDK integration
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── gradle.properties
@@ -99,7 +97,6 @@ macrobase/
 - Android Studio Iguana (2023.2.1) or newer
 - JDK 17
 - Android SDK 26 (Android 8.0) or higher
-- Android NDK (for native OpenCV / ONNX Runtime components in PaddleOCR)
 
 ### Building from Source
 

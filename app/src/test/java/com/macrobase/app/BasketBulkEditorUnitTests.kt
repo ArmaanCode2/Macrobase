@@ -17,7 +17,6 @@ import com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase
 import com.macrobase.app.domain.usecase.basket.UpdateAllBasketItemsUseCase
 import com.macrobase.app.domain.usecase.basket.UpdateBasketItemUseCase
 import com.macrobase.app.feature.basket.BasketViewModel
-import com.macrobase.app.feature.basket.LoggingMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
@@ -150,6 +149,9 @@ class BasketBulkEditorUnitTests {
         assertEquals(3, items.size)
         val totalCalories = items.sumOf { it.calculatedNutrition.calories }
         assertEquals(264.0 + 75.0 + 79.5, totalCalories, 0.5)
+        // One day and meal for all three, so the header shows it and rows show none (BUG-039)
+        assertFalse(viewModel.isMixedDateOrMeal.value)
+        assertEquals(MealType.BREAKFAST, viewModel.commonMealType.value)
     }
 
     @Test
@@ -349,14 +351,7 @@ class BasketBulkEditorUnitTests {
     }
 
     @Test
-    fun test13_loggingMode_canBeToggled() {
-        assertEquals(LoggingMode.MULTIPLE_FOODS, viewModel.loggingMode.value)
-        viewModel.setLoggingMode(LoggingMode.SINGLE_FOOD_RECIPE)
-        assertEquals(LoggingMode.SINGLE_FOOD_RECIPE, viewModel.loggingMode.value)
-    }
-
-    @Test
-    fun test14_basketStateFlow_emptyBasketResetsDateMealOverrideFlag() = runTest(testDispatcher) {
+    fun test14_emptiedBasket_headerFollowsTheNextItem() = runTest(testDispatcher) {
         val f1 = createSampleFood(1L, "F1", 100.0, 1.0, 1.0, 1.0)
         val f2 = createSampleFood(2L, "F2", 200.0, 2.0, 2.0, 2.0)
         val date1 = LocalDate.of(2026, 8, 20)

@@ -10,22 +10,18 @@ import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.data.repository.GoalsRepositoryImpl
 import com.macrobase.app.data.repository.rank.RankRepositoryImpl
 import com.macrobase.app.domain.model.CalendarDaySummary
-import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.FitnessGoal
 import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.GoalBackupDto
 import com.macrobase.app.domain.model.GoalTransitionBackupDto
-import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.model.WeightEntry
-import com.macrobase.app.domain.model.WeightStatistics
 import com.macrobase.app.domain.repository.DailyMacroAggregation
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.repository.PreferencesRepository
-import com.macrobase.app.domain.repository.StatisticsRepository
 import com.macrobase.app.domain.repository.WeightRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,13 +74,9 @@ class P2PhaseFourRankReplayTests {
 
     private fun rank(
         aggregations: List<DailyMacroAggregation>,
-        goals: GoalsRepository = DatedGoals(mapOf(LocalDate.MIN to maintaining)),
-        weights: List<WeightEntry> = emptyList()
+        goals: GoalsRepository = DatedGoals(mapOf(LocalDate.MIN to maintaining))
     ) = RankRepositoryImpl(
-        statisticsRepository = WindowStats(),
         goalsRepository = goals,
-        weightRepository = Weights(weights),
-        preferencesRepository = Prefs(),
         diaryRepository = Diary(aggregations)
     )
 
@@ -96,10 +88,12 @@ class P2PhaseFourRankReplayTests {
         assertTrue("rating ${profile.currentRating}", profile.currentRating > 600)
         assertTrue(profile.rankTier.rank.order >= 3)
         assertFalse(profile.isProvisional)
-        assertEquals(120, profile.loggedDaysCount)
-        // The screen still lists the last 30 days
-        assertEquals(30, profile.recentHistory.size)
+        // Today counts once it ends (BUG-032)
+        assertEquals(119, profile.loggedDaysCount)
+        // Every counted day is listed (the screen pages them 30 at a time), today first and still in progress
+        assertEquals(120, profile.recentHistory.size)
         assertEquals(today, profile.recentHistory.first().date)
+        assertTrue(profile.recentHistory.first().isInProgress)
     }
 
     @Test
@@ -117,8 +111,10 @@ class P2PhaseFourRankReplayTests {
         val history = profile.recentHistory.reversed() // oldest first
         for (i in 1 until history.size) {
             assertEquals(history[i - 1].overallRating, history[i].ratingBefore)
+            // Today's delta is a preview, not yet in the rating (BUG-032)
+            val applied = if (history[i].isInProgress) 0 else history[i].rrDelta
             assertEquals(
-                (history[i].ratingBefore + history[i].rrDelta).coerceIn(RankScoringConfig.MIN_RATING, RankScoringConfig.MAX_RATING),
+                (history[i].ratingBefore + applied).coerceIn(RankScoringConfig.MIN_RATING, RankScoringConfig.MAX_RATING),
                 history[i].overallRating
             )
         }
@@ -132,14 +128,15 @@ class P2PhaseFourRankReplayTests {
         val profile = rank(logged).getRankProfile()
 
         assertFalse("the rating was established; a break does not make it provisional again", profile.isProvisional)
-        assertEquals(41, profile.loggedDaysCount)
+        // Today is logged but still in progress, so it is not counted yet (BUG-032)
+        assertEquals(40, profile.loggedDaysCount)
         val gapDay = profile.recentHistory.first { it.date == today.minusDays(5) }
         assertTrue(gapDay.rrDelta < 0)
     }
 
     @Test
     fun fewerThanSevenLoggedDaysAreProvisional() = runBlocking {
-        val profile = rank(lastDays(5).map { perfectDay(it) }).getRankProfile()
+        val profile = rank(lastDays(5, endingDaysAgo = 1).map { perfectDay(it) }).getRankProfile()
 
         assertTrue(profile.isProvisional)
         assertEquals(5, profile.loggedDaysCount)
@@ -156,40 +153,9 @@ class P2PhaseFourRankReplayTests {
 
         val profile = rank(diary, goals).getRankProfile()
 
-        assertTrue(profile.recentHistory.all { it.macroScore == 100.0 })
+        assertTrue(profile.recentHistory.all { it.proteinScore == 100.0 && it.balanceScore == 100.0 })
         assertTrue(profile.recentHistory.all { it.rrDelta > 0 })
         assertEquals(40, goals.requestedDates.size)
-    }
-
-    @Test
-    fun weightTrendUsesThe30DaysBeforeEachDay() = runBlocking {
-        val cutting = maintaining.copy(fitnessGoal = FitnessGoal.CUTTING, dailyCalorieGoal = 1800.0, maintenanceCalories = 2100.0)
-        val weights = listOf(
-            WeightEntry(id = 1, date = today.minusDays(100), weightKg = 80.0),
-            WeightEntry(id = 2, date = today.minusDays(5), weightKg = 85.0),
-            WeightEntry(id = 3, date = today, weightKg = 87.0)
-        )
-        val profile = rank(lastDays(40).map { perfectDay(it, cutting) }, DatedGoals(mapOf(LocalDate.MIN to cutting)), weights).getRankProfile()
-
-        // Today: +2 kg over its 30 days while cutting
-        assertEquals(20.0, profile.recentHistory.first { it.date == today }.weightTrendScore, 0.0)
-        // Ten days ago: no weigh-in in its 30 days, so the neutral score
-        assertEquals(50.0, profile.recentHistory.first { it.date == today.minusDays(10) }.weightTrendScore, 0.0)
-    }
-
-    @Test
-    fun weightWindowCoversExactlyThe30DaysUpToTheDay() = runBlocking {
-        val cutting = maintaining.copy(fitnessGoal = FitnessGoal.CUTTING, dailyCalorieGoal = 1800.0, maintenanceCalories = 2100.0)
-        val weights = listOf(
-            WeightEntry(id = 1, date = today.minusDays(30), weightKg = 95.0), // one day too old
-            WeightEntry(id = 2, date = today.minusDays(29), weightKg = 90.0), // first day of the window
-            WeightEntry(id = 3, date = today.minusDays(5), weightKg = 85.0),
-            WeightEntry(id = 4, date = today, weightKg = 87.0)
-        )
-        val profile = rank(lastDays(40).map { perfectDay(it, cutting) }, DatedGoals(mapOf(LocalDate.MIN to cutting)), weights).getRankProfile()
-
-        // 87 - 90 = -3 kg while cutting scores 70; counting the 95 kg weigh-in would give 40, missing the 90 kg one 20
-        assertEquals(70.0, profile.recentHistory.first { it.date == today }.weightTrendScore, 0.0)
     }
 
     // --- fakes ---
@@ -207,24 +173,7 @@ class P2PhaseFourRankReplayTests {
         }
     }
 
-    // Shared with the goal-history tests below
-    class WindowStats : StatisticsRepository {
-        private fun consistency(s: LocalDate, e: LocalDate) = ConsistencyStatistics(s, e, 30, 30, 100)
-        private fun macros(s: LocalDate, e: LocalDate) = MacroAveragesStatistics(
-            startDate = s, endDate = e, loggedDaysCount = 30, averageCalories = 2000.0, averageProteinGrams = 125.0,
-            averageCarbsGrams = 250.0, averageFatGrams = 55.0, actualCarbsPercent = 50.0, actualProteinPercent = 25.0,
-            actualFatPercent = 25.0, targetCarbsPercent = 50.0, targetProteinPercent = 25.0, targetFatPercent = 25.0,
-            targetCalories = 2000.0
-        )
-        private fun weight(s: LocalDate, e: LocalDate) = WeightStatistics(startDate = s, endDate = e)
-        override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate) = flowOf(consistency(startDate, endDate))
-        override suspend fun getNutritionConsistency(startDate: LocalDate, endDate: LocalDate) = consistency(startDate, endDate)
-        override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate) = flowOf(macros(startDate, endDate))
-        override suspend fun getMacroAverages(startDate: LocalDate, endDate: LocalDate) = macros(startDate, endDate)
-        override fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate) = flowOf(weight(startDate, endDate))
-        override suspend fun getWeightStatistics(startDate: LocalDate, endDate: LocalDate) = weight(startDate, endDate)
-    }
-
+    // Shared with the statistics tests
     class Weights(private val entries: List<WeightEntry>) : WeightRepository {
         override suspend fun addWeightEntry(entry: WeightEntry): Long = 1L
         override suspend fun updateWeightEntry(entry: WeightEntry) {}
@@ -420,6 +369,52 @@ class P2PhaseFourGoalHistoryTests {
         assertEquals(FitnessGoal.MAINTAINING, repo.getGoalForDate(today.minusDays(20)).fitnessGoal)
     }
 
+    // An older version saved no goal history, so no past day's goal is known
+    @Test
+    fun withNoSavedGoalTheRankCountsFromTodayAndSaysSo() = runBlocking {
+        val (repo, store) = goals("i")
+        store.edit {
+            it[doublePreferencesKey("daily_calorie_goal")] = 2000.0
+            it[stringPreferencesKey("fitness_goal")] = "MAINTAINING"
+            it[doublePreferencesKey("maintenance_calories")] = 2000.0
+        }
+        val maintaining = goal(2000.0, 50.0, 25.0, 25.0, FitnessGoal.MAINTAINING, 2000.0)
+        val diary = (40 downTo 1).map { daysAgo ->
+            DailyMacroAggregation(
+                date = today.minusDays(daysAgo.toLong()),
+                calories = 2000.0,
+                proteinGrams = maintaining.proteinGrams,
+                carbsGrams = maintaining.carbGrams,
+                fatGrams = maintaining.fatGrams
+            )
+        }
+        val sawOldRules = object : PreferencesRepository by P2PhaseFourRankReplayTests.Prefs() {
+            override fun observeSeenRankRulesVersion() = flowOf(RankScoringConfig.RULES_VERSION - 1)
+        }
+        val rank = RankRepositoryImpl(
+            goalsRepository = repo,
+            diaryRepository = P2PhaseFourRankReplayTests.Diary(diary),
+            preferencesRepository = sawOldRules
+        )
+
+        val profile = rank.getRankProfile()
+
+        assertEquals(today, profile.rankCountsFrom)
+        assertTrue(profile.recentHistory.isEmpty())
+        assertEquals(0, profile.currentRating)
+        // The rank just went back to the start, so the notice says why
+        assertTrue(profile.showRulesNotice)
+        // From today on the rank counts again
+        clockDay = today.plusDays(1)
+        val tomorrow = RankRepositoryImpl(
+            goalsRepository = repo,
+            diaryRepository = P2PhaseFourRankReplayTests.Diary(diary + diary.last().copy(date = today)),
+            clock = java.time.Clock.fixed(today.plusDays(1).atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant(), java.time.ZoneId.systemDefault())
+        ).getRankProfile()
+        assertEquals(1, tomorrow.loggedDaysCount)
+        assertEquals(today, tomorrow.recentHistory.last().date)
+    }
+
     @Test
     fun rankScoresEachDayAgainstTheTargetsSavedThatDay() = runBlocking {
         // The bug report's example, through the real goal storage: Cutting at 2,000 kcal 50/25/25
@@ -445,10 +440,7 @@ class P2PhaseFourGoalHistoryTests {
             )
         }
         val rank = RankRepositoryImpl(
-            statisticsRepository = P2PhaseFourRankReplayTests.WindowStats(),
             goalsRepository = repo,
-            weightRepository = P2PhaseFourRankReplayTests.Weights(emptyList()),
-            preferencesRepository = P2PhaseFourRankReplayTests.Prefs(),
             diaryRepository = P2PhaseFourRankReplayTests.Diary(diary)
         )
 
@@ -456,6 +448,9 @@ class P2PhaseFourGoalHistoryTests {
 
         // Following the targets shown on screen scores full marks every day, before and after the change
         assertEquals(11, history.size)
-        assertTrue(history.joinToString { "${it.date}=${it.macroScore}" }, history.all { it.macroScore == 100.0 })
+        assertTrue(
+            history.joinToString { "${it.date}=${it.proteinScore}/${it.balanceScore}" },
+            history.all { it.proteinScore == 100.0 && it.balanceScore == 100.0 }
+        )
     }
 }

@@ -3,15 +3,11 @@ package com.macrobase.app
 import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.data.repository.rank.RankRepositoryImpl
 import com.macrobase.app.domain.model.CalendarDaySummary
-import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.FitnessGoal
 import com.macrobase.app.domain.model.Goal
-import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.UserPreferences
-import com.macrobase.app.domain.model.WeightEntry
-import com.macrobase.app.domain.model.WeightStatistics
 import com.macrobase.app.domain.model.rank.Rank
 import com.macrobase.app.domain.model.rank.RankTier
 import com.macrobase.app.domain.model.rank.Tier
@@ -22,8 +18,6 @@ import com.macrobase.app.domain.repository.DailyMacroAggregation
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.repository.PreferencesRepository
-import com.macrobase.app.domain.repository.StatisticsRepository
-import com.macrobase.app.domain.repository.WeightRepository
 import com.macrobase.app.domain.usecase.rank.CalculateLifestyleScoreUseCase
 import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +39,9 @@ import org.junit.Before
 import org.junit.Test
 import com.macrobase.app.domain.usecase.GetGoalsUseCase
 import com.macrobase.app.domain.usecase.UpdateGoalsUseCase
-import com.macrobase.app.feature.goals.DailyGoalsViewModel
+import com.macrobase.app.domain.usecase.CancelScheduledGoalUseCase
+import com.macrobase.app.feature.preferences.PreferenceField
+import com.macrobase.app.feature.preferences.PreferencesViewModel
 import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -177,246 +173,16 @@ class LifestyleRankingUnitTests {
     }
 
     // ==========================================
-    // 2. Component Scoring & Calibration Tests
-    // ==========================================
-
-    @Test
-    fun test1_2000goal_1950intake_isExcellent() {
-        val score = RankScoringConfig.evaluateCalorieScore(1950.0, 2000.0)
-        assertEquals(100.0, score, 0.001)
-    }
-
-    @Test
-    fun test2_2000goal_2000intake_isExcellent() {
-        val score = RankScoringConfig.evaluateCalorieScore(2000.0, 2000.0)
-        assertEquals(100.0, score, 0.001)
-    }
-
-    @Test
-    fun test3_2000goal_2200intake_isGoodModerate_meaningfullyBelow2000() {
-        val score2000 = RankScoringConfig.evaluateCalorieScore(2000.0, 2000.0)
-        val score2200 = RankScoringConfig.evaluateCalorieScore(2200.0, 2000.0)
-        assertEquals(86.667, score2200, 0.001)
-        assertTrue(score2200 < score2000)
-    }
-
-    @Test
-    fun test4_2000goal_2400intake_isModeratePoor() {
-        val score = RankScoringConfig.evaluateCalorieScore(2400.0, 2000.0)
-        assertEquals(55.0, score, 0.001)
-    }
-
-    @Test
-    fun test5_2000goal_3000intake_isPoor() {
-        val score = RankScoringConfig.evaluateCalorieScore(3000.0, 2000.0)
-        assertEquals(0.0, score, 0.001)
-    }
-
-    @Test
-    fun test6_2000goal_4000intake_isVeryPoor() {
-        val score = RankScoringConfig.evaluateCalorieScore(4000.0, 2000.0)
-        assertEquals(0.0, score, 0.001)
-    }
-
-    @Test
-    fun test7_2000goal_6000intake_isZeroScore() {
-        val score = RankScoringConfig.evaluateCalorieScore(6000.0, 2000.0)
-        assertEquals(0.0, score, 0.001)
-    }
-
-    @Test
-    fun test8_extremeUndereating_isPenalized() {
-        val score1000 = RankScoringConfig.evaluateCalorieScore(1000.0, 2000.0)
-        val score500 = RankScoringConfig.evaluateCalorieScore(500.0, 2000.0)
-        val score1950 = RankScoringConfig.evaluateCalorieScore(1950.0, 2000.0)
-
-        assertEquals(0.0, score1000, 0.001)
-        assertEquals(0.0, score500, 0.001)
-        assertEquals(100.0, score1950, 0.001)
-        assertTrue(score1000 < score1950)
-    }
-
-    @Test
-    fun test9_macroBalance_goodDay() {
-        val targetP = 150.0
-        val targetC = 200.0
-        val targetF = 65.0
-
-        val perfectScore = RankScoringConfig.evaluateMacroBalanceScore(
-            actualP = 150.0, targetP = targetP,
-            actualC = 200.0, targetC = targetC,
-            actualF = 65.0, targetF = targetF
-        )
-        assertEquals(100.0, perfectScore, 0.001)
-    }
-
-    @Test
-    fun test10_macroBalance_poorDay_and_excessScaleDown() {
-        val targetP = 150.0
-        val targetC = 200.0
-        val targetF = 65.0
-
-        // 3x over-target macros (e.g. 6000 kcal binge day)
-        val extremeExcessScore = RankScoringConfig.evaluateMacroBalanceScore(
-            actualP = 400.0, targetP = targetP,
-            actualC = 600.0, targetC = targetC,
-            actualF = 200.0, targetF = targetF
-        )
-        assertEquals(0.0, extremeExcessScore, 0.001)
-    }
-
-    @Test
-    fun test11_consistency_strongVsPoor() {
-        val strongLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 100.0,
-            calorieScore = 100.0,
-            macroScore = 100.0,
-            weightTrendScore = 50.0
-        )
-        val poorLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 20.0,
-            calorieScore = 100.0,
-            macroScore = 100.0,
-            weightTrendScore = 50.0
-        )
-        assertTrue(strongLifestyle > poorLifestyle)
-        assertEquals(28.0, strongLifestyle - poorLifestyle, 0.001) // 80% * 0.35 = 28.0
-    }
-
-    @Test
-    fun test12_weightTrend_positiveNegativeAndMissing() {
-        // Cutting target, healthy progressive loss -> 100.0
-        assertEquals(100.0, RankScoringConfig.evaluateWeightTrendScore(-1.0, 5, FitnessGoal.CUTTING), 0.001)
-        // Cutting target, active weight gain -> 20.0
-        assertEquals(20.0, RankScoringConfig.evaluateWeightTrendScore(1.0, 5, FitnessGoal.CUTTING), 0.001)
-        // Missing data or insufficient weigh-ins -> 50.0
-        assertEquals(50.0, RankScoringConfig.evaluateWeightTrendScore(null, 0, FitnessGoal.CUTTING), 0.001)
-        assertEquals(50.0, RankScoringConfig.evaluateWeightTrendScore(-1.0, 1, FitnessGoal.CUTTING), 0.001)
-    }
-
-    @Test
-    fun test13_rrDelta_positiveNegativeZero() {
-        // 90 score -> +18
-        assertEquals(18, RankScoringConfig.calculateRRDelta(90.0, 30))
-        // 75 score -> +9
-        assertEquals(9, RankScoringConfig.calculateRRDelta(75.0, 30))
-        // 60 score (neutral baseline) -> 0
-        assertEquals(0, RankScoringConfig.calculateRRDelta(60.0, 30))
-        // 50 score -> -6
-        assertEquals(-6, RankScoringConfig.calculateRRDelta(50.0, 30))
-        // 40 score -> -12
-        assertEquals(-12, RankScoringConfig.calculateRRDelta(40.0, 30))
-        // 20 score -> clamped to -20 (MAX_RR_LOSS_PER_EVAL = 20)
-        assertEquals(-20, RankScoringConfig.calculateRRDelta(20.0, 30))
-    }
-
-    @Test
-    fun test14_rrCaps_cannotExceedMaxGainOrLoss() {
-        // 100 score -> max gain strictly capped at +20
-        assertEquals(20, RankScoringConfig.calculateRRDelta(100.0, 30))
-        // 0 score -> max loss strictly capped at -20
-        assertEquals(-20, RankScoringConfig.calculateRRDelta(0.0, 30))
-    }
-
-    @Test
-    fun test15_provisionalPeriod_and_day8Progression() {
-        // Day 1 to 6 (<7) -> strictly 0 RR
-        assertEquals(0, RankScoringConfig.calculateRRDelta(100.0, 1))
-        assertEquals(0, RankScoringConfig.calculateRRDelta(100.0, 6))
-
-        // Day 8 (7..13) -> 50% dampening: clamped 20 * 0.5 = +10 RR
-        assertEquals(10, RankScoringConfig.calculateRRDelta(100.0, 8))
-
-        // Day 14+ -> Full (+20 RR)
-        assertEquals(20, RankScoringConfig.calculateRRDelta(100.0, 14))
-    }
-
-    // ==========================================
-    // 3. Mandatory Real-World Scenarios
-    // ==========================================
-
-    @Test
-    fun scenarioA_2000goal_1800intake_producesPositiveRR() {
-        val calScore = RankScoringConfig.evaluateCalorieScore(1800.0, 2000.0)
-        val macroScore = RankScoringConfig.evaluateMacroBalanceScore(150.0, 150.0, 180.0, 200.0, 60.0, 65.0)
-        val consistency = 100.0
-        val weight = 50.0
-
-        val lifestyleScore = RankScoringConfig.calculateLifestyleScore(consistency, calScore, macroScore, weight)
-        val delta = RankScoringConfig.calculateRRDelta(lifestyleScore, 30)
-
-        // Calorie = 86.667, Macro = 100, Consistency = 100, Weight = 50 -> LifestyleScore = 92.0
-        // Delta = (92.0 - 60) * 0.6 = +19.2 -> +19 RR
-        assertTrue("Lifestyle score must be high", lifestyleScore >= 85.0)
-        assertTrue("RR delta must be positive", delta > 0)
-        assertEquals(19, delta)
-    }
-
-    @Test
-    fun scenarioB_2000goal_2200intake_isModeratelyPositive_belowScenarioA() {
-        val calScore = RankScoringConfig.evaluateCalorieScore(2200.0, 2000.0)
-        val macroScore = RankScoringConfig.evaluateMacroBalanceScore(140.0, 150.0, 230.0, 200.0, 75.0, 65.0)
-        val consistency = 100.0
-        val weight = 50.0
-
-        val lifestyleScore = RankScoringConfig.calculateLifestyleScore(consistency, calScore, macroScore, weight)
-        val delta = RankScoringConfig.calculateRRDelta(lifestyleScore, 30)
-
-        // Calorie = 86.667, Macro = 92.5, Consistency = 100, Weight = 50 -> LifestyleScore = 89.975
-        // Delta = (89.975 - 60) * 0.6 = 17.985 -> +18 RR
-        assertEquals(86.667, calScore, 0.001)
-        assertTrue("Lifestyle score should be lower than scenario A", lifestyleScore < 92.0)
-        assertEquals(18, delta)
-        assertTrue("Delta should be less than Scenario A (19)", delta < 19)
-    }
-
-    @Test
-    fun scenarioC_2000goal_6000intake_strictlyProducesNegativeRR() {
-        val calScore = RankScoringConfig.evaluateCalorieScore(6000.0, 2000.0)
-        val macroScore = RankScoringConfig.evaluateMacroBalanceScore(350.0, 150.0, 700.0, 200.0, 220.0, 65.0)
-        val consistency = 100.0
-        val weight = 50.0
-
-        val lifestyleScore = RankScoringConfig.calculateLifestyleScore(consistency, calScore, macroScore, weight)
-        val delta = RankScoringConfig.calculateRRDelta(lifestyleScore, 30)
-
-        // Calorie = 0.0, Macro = 0.0, Consistency = 100.0 (35.0), Weight = 50.0 (4.0) -> LifestyleScore = 39.0
-        // Delta = (39.0 - 60.0) * 0.6 = -12.6 -> -13 RR
-        assertEquals(0.0, calScore, 0.001)
-        assertEquals(0.0, macroScore, 0.001)
-        assertEquals(39.0, lifestyleScore, 0.001)
-        assertTrue("Lifestyle score must be well below 60.0 neutral point", lifestyleScore < 50.0)
-        assertTrue("RR delta MUST be negative on a 6000 kcal day", delta < 0)
-        assertEquals(-13, delta)
-    }
-
-    @Test
-    fun scenarioD_2000goal_1000intake_penalizedAndCannotOutperformScenarioA() {
-        val calScore1000 = RankScoringConfig.evaluateCalorieScore(1000.0, 2000.0)
-        val calScore1800 = RankScoringConfig.evaluateCalorieScore(1800.0, 2000.0)
-
-        assertEquals(0.0, calScore1000, 0.001)
-        assertEquals(86.667, calScore1800, 0.001)
-        assertTrue(calScore1000 < calScore1800)
-    }
-
-    // ==========================================
     // 4. Hard Requirements & Date Correctness Tests
     // ==========================================
 
     @Test
     fun testWaterExclusionGuarantee_strictlyNoEffectOnRating() = runTest(testDispatcher) {
-        val fakeStats = FakeStatisticsRepository()
         val fakeGoals = FakeGoalsRepository()
-        val fakeWeight = FakeWeightRepository()
-        val fakePrefs = FakePreferencesRepository()
         val fakeDiary = FakeDiaryRepository()
 
         val rankRepo = RankRepositoryImpl(
-            statisticsRepository = fakeStats,
             goalsRepository = fakeGoals,
-            weightRepository = fakeWeight,
-            preferencesRepository = fakePrefs,
             diaryRepository = fakeDiary
         )
 
@@ -446,20 +212,14 @@ class LifestyleRankingUnitTests {
         val aggregations = earlierDays + listOf(
             DailyMacroAggregation(date = dayA, calories = 2000.0, proteinGrams = 150.0, carbsGrams = 200.0, fatGrams = 65.0),
             DailyMacroAggregation(date = dayB, calories = 6000.0, proteinGrams = 350.0, carbsGrams = 700.0, fatGrams = 220.0),
-            DailyMacroAggregation(date = dayC, calories = 2200.0, proteinGrams = 140.0, carbsGrams = 230.0, fatGrams = 75.0)
+            DailyMacroAggregation(date = dayC, calories = 2080.0, proteinGrams = 140.0, carbsGrams = 250.0, fatGrams = 58.0)
         )
 
         val fakeDiary = FakeDiaryRepository(aggregations = aggregations)
-        val fakeStats = FakeStatisticsRepository(loggedDaysCount = 15)
         val fakeGoals = FakeGoalsRepository()
-        val fakeWeight = FakeWeightRepository()
-        val fakePrefs = FakePreferencesRepository()
 
         val rankRepo = RankRepositoryImpl(
-            statisticsRepository = fakeStats,
             goalsRepository = fakeGoals,
-            weightRepository = fakeWeight,
-            preferencesRepository = fakePrefs,
             diaryRepository = fakeDiary
         )
 
@@ -474,7 +234,7 @@ class LifestyleRankingUnitTests {
         assertTrue("Day A must have positive delta", entryA.rrDelta > 0)
         // Day B (6000 kcal) -> Negative RR
         assertTrue("Day B must have negative delta", entryB.rrDelta < 0)
-        // Day C (2200 kcal) -> Positive RR
+        // Day C (2080 kcal, 4% over maintenance) -> Positive RR
         assertTrue("Day C must have positive delta", entryC.rrDelta > 0)
     }
 
@@ -559,275 +319,6 @@ class LifestyleRankingUnitTests {
     }
 
     // ==========================================
-    // 7. Pure Mathematical Scoring Engine Tests
-    // ==========================================
-
-    @Test
-    fun testBulkingCalorieCurve_exactMathematicalContracts() {
-        val maintenance = 2500.0
-
-        // At maintenance (2500 kcal, delta = 0): calorie score = 60.0
-        val scoreMaintenance = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2500.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(60.0, scoreMaintenance, 0.001)
-
-        // At +100 kcal surplus (2600 kcal): calorie score = 70.0.
-        // When macro score is 80+, RR delta is +6 RR (in the +5 to +7 range).
-        val scoreSurplus100 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2600.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(70.0, scoreSurplus100, 0.001)
-
-        val lifestyleScoreSurplus100 = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 70.0,
-            calorieScore = scoreSurplus100,
-            macroScore = 80.0,
-            weightTrendScore = 50.0
-        )
-        val deltaSurplus100 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = lifestyleScoreSurplus100,
-            loggedDaysCount = 30,
-            macroScore = 80.0
-        )
-        assertTrue("RR delta for +100 kcal surplus with macro >= 80 must be in [+5, +7]", deltaSurplus100 in 5..7)
-
-        // Direct mapping check: score 70.0 -> (70 - 60) * 0.6 = +6 RR
-        val directRRDelta = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = 70.0,
-            loggedDaysCount = 30,
-            macroScore = 80.0
-        )
-        assertEquals(6, directRRDelta)
-
-        // At +350 kcal surplus (2850 kcal): calorie score = 100.0. High RR delta (+18 to +20).
-        val scoreSurplus350 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2850.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(100.0, scoreSurplus350, 0.001)
-
-        val highLifestyleScore = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 100.0,
-            calorieScore = scoreSurplus350,
-            macroScore = 95.0,
-            weightTrendScore = 100.0
-        )
-        val deltaSurplus350 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = highLifestyleScore,
-            loggedDaysCount = 30,
-            macroScore = 95.0
-        )
-        assertTrue("High RR delta must be in [+18, +20]", deltaSurplus350 in 18..20)
-
-        // At -200 kcal deficit (2300 kcal): calorie score = 35.0. Negative RR delta.
-        val scoreDeficit200 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2300.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(35.0, scoreDeficit200, 0.001)
-
-        val deficitLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 50.0,
-            calorieScore = scoreDeficit200,
-            macroScore = 50.0,
-            weightTrendScore = 50.0
-        )
-        val deltaDeficit200 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = deficitLifestyle,
-            loggedDaysCount = 30,
-            macroScore = 50.0
-        )
-        assertTrue("Deficit while bulking must produce negative RR delta", deltaDeficit200 < 0)
-
-        // At +800 kcal surplus (3300 kcal): calorie score = 0.0. Negative RR delta.
-        val scoreSurplus800 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 3300.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(0.0, scoreSurplus800, 0.001)
-
-        val overageLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 50.0,
-            calorieScore = scoreSurplus800,
-            macroScore = 50.0,
-            weightTrendScore = 50.0
-        )
-        val deltaSurplus800 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = overageLifestyle,
-            loggedDaysCount = 30,
-            macroScore = 50.0
-        )
-        assertTrue("Massive surplus must produce negative RR delta", deltaSurplus800 < 0)
-    }
-
-    @Test
-    fun testCuttingCalorieCurve_exactMathematicalContracts() {
-        val maintenance = 2500.0
-
-        // At -100 kcal deficit (2400 kcal): calorie score = 70.0. RR delta is +6 RR.
-        val scoreDeficit100 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2400.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(70.0, scoreDeficit100, 0.001)
-
-        val deltaDeficit100 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = 70.0,
-            loggedDaysCount = 30,
-            macroScore = 80.0
-        )
-        assertEquals(6, deltaDeficit100)
-
-        // At -350 kcal deficit (2150 kcal): calorie score = 100.0. High RR delta (+18 to +20).
-        val scoreDeficit350 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2150.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(100.0, scoreDeficit350, 0.001)
-
-        val highCuttingLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 100.0,
-            calorieScore = scoreDeficit350,
-            macroScore = 95.0,
-            weightTrendScore = 100.0
-        )
-        val deltaDeficit350 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = highCuttingLifestyle,
-            loggedDaysCount = 30,
-            macroScore = 95.0
-        )
-        assertTrue("High cutting RR delta must be in [+18, +20]", deltaDeficit350 in 18..20)
-
-        // At +200 kcal surplus (2700 kcal): calorie score = 35.0. Negative RR delta.
-        val scoreSurplus200 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 2700.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(35.0, scoreSurplus200, 0.001)
-
-        val surplusLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 50.0,
-            calorieScore = scoreSurplus200,
-            macroScore = 50.0,
-            weightTrendScore = 50.0
-        )
-        val deltaSurplus200 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = surplusLifestyle,
-            loggedDaysCount = 30,
-            macroScore = 50.0
-        )
-        assertTrue("Surplus while cutting must produce negative RR delta", deltaSurplus200 < 0)
-
-        // At -800 kcal crash deficit (1700 kcal): calorie score = 0.0. Negative RR delta.
-        val scoreCrash800 = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = 1700.0,
-            maintenanceCalories = maintenance,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(0.0, scoreCrash800, 0.001)
-
-        val crashLifestyle = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = 50.0,
-            calorieScore = scoreCrash800,
-            macroScore = 50.0,
-            weightTrendScore = 50.0
-        )
-        val deltaCrash800 = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = crashLifestyle,
-            loggedDaysCount = 30,
-            macroScore = 50.0
-        )
-        assertTrue("Starvation crash deficit must produce negative RR delta", deltaCrash800 < 0)
-    }
-
-    @Test
-    fun testMacroQualityGate_blocksPositiveRRWhenMacroScoreBelow60() {
-        // When calories are in optimal sweet spot, but macroScore = 45.0 (< 60.0):
-        // calculateRRDelta(lifestyleScore = 85.0, loggedDaysCount = 30, macroScore = 45.0) must return 0
-        val blockedDelta = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = 85.0,
-            loggedDaysCount = 30,
-            macroScore = 45.0
-        )
-        assertEquals(0, blockedDelta)
-
-        // When macro score is >= 60.0 (e.g. 60.0), positive RR is unlocked:
-        // (85.0 - 60.0) * 0.6 = 15.0 -> +15 RR
-        val unlockedDelta = RankScoringConfig.calculateRRDelta(
-            lifestyleScore = 85.0,
-            loggedDaysCount = 30,
-            macroScore = 60.0
-        )
-        assertEquals(15, unlockedDelta)
-    }
-
-    @Test
-    fun testRRDeltaClamping_strictlyClampedToMinus20AndPlus20() {
-        // Worst possible score (0.0): clamped to -20
-        assertEquals(-20, RankScoringConfig.calculateRRDelta(0.0, 30))
-
-        // Perfect score (100.0): clamped to +20
-        assertEquals(20, RankScoringConfig.calculateRRDelta(100.0, 30))
-
-        // Extreme out-of-bounds scores
-        assertEquals(-20, RankScoringConfig.calculateRRDelta(-100.0, 30))
-        assertEquals(20, RankScoringConfig.calculateRRDelta(200.0, 30))
-    }
-
-    @Test
-    fun testEightPercentWeightTrendWeightage_andGoalSpecificWeightCurves() {
-        // Verify component weights sum exactly to 1.0
-        val totalWeight = RankScoringConfig.CONSISTENCY_WEIGHT +
-            RankScoringConfig.CALORIE_WEIGHT +
-            RankScoringConfig.MACRO_WEIGHT +
-            RankScoringConfig.WEIGHT_TREND_WEIGHT +
-            RankScoringConfig.WATER_WEIGHT
-        assertEquals(1.0, totalWeight, 0.000001)
-        assertEquals(0.08, RankScoringConfig.WEIGHT_TREND_WEIGHT, 0.000001)
-
-        // Bulking: +0.8 kg delta gives score 100.0, while loss (-1.0 kg) gives score 20.0
-        val bulkingGood = RankScoringConfig.evaluateWeightTrendScore(
-            deltaWeightKg = 0.8,
-            entryCount = 5,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(100.0, bulkingGood, 0.001)
-
-        val bulkingLoss = RankScoringConfig.evaluateWeightTrendScore(
-            deltaWeightKg = -1.0,
-            entryCount = 5,
-            goal = FitnessGoal.BULKING
-        )
-        assertEquals(20.0, bulkingLoss, 0.001)
-
-        // Cutting: -1.2 kg delta gives score 100.0, while gain (+1.0 kg) gives score 20.0
-        val cuttingGood = RankScoringConfig.evaluateWeightTrendScore(
-            deltaWeightKg = -1.2,
-            entryCount = 5,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(100.0, cuttingGood, 0.001)
-
-        val cuttingGain = RankScoringConfig.evaluateWeightTrendScore(
-            deltaWeightKg = 1.0,
-            entryCount = 5,
-            goal = FitnessGoal.CUTTING
-        )
-        assertEquals(20.0, cuttingGain, 0.001)
-    }
-
-    // ==========================================
     // 8. Next-Day Goal Scheduling & Immutability Tests
     // ==========================================
 
@@ -866,15 +357,9 @@ class LifestyleRankingUnitTests {
         }
 
         val fakeDiary = FakeDiaryRepository(aggregations = aggregations)
-        val fakeStats = FakeStatisticsRepository(loggedDaysCount = 15, avgCalories = 1800.0)
-        val fakeWeight = FakeWeightRepository()
-        val fakePrefs = FakePreferencesRepository()
 
         val rankRepo = RankRepositoryImpl(
-            statisticsRepository = fakeStats,
             goalsRepository = fakeGoals,
-            weightRepository = fakeWeight,
-            preferencesRepository = fakePrefs,
             diaryRepository = fakeDiary
         )
 
@@ -908,9 +393,9 @@ class LifestyleRankingUnitTests {
             if (entryBefore.date.isBefore(today)) {
                 assertEquals(entryBefore.overallRating, entryAfter.overallRating)
                 assertEquals(entryBefore.rrDelta, entryAfter.rrDelta)
-                assertEquals(entryBefore.macroScore, entryAfter.macroScore, 0.001)
+                assertEquals(entryBefore.proteinScore, entryAfter.proteinScore, 0.001)
             } else {
-                assertTrue("today is scored against the new targets", entryAfter.macroScore < entryBefore.macroScore)
+                assertTrue("today is scored against the new targets", entryAfter.proteinScore < entryBefore.proteinScore)
             }
         }
     }
@@ -940,33 +425,24 @@ class LifestyleRankingUnitTests {
                 fatGrams = bulkingGoal.fatGrams
             )
         }
-
-        val fakeStats = FakeStatisticsRepository(
-            consistencyScore = 100,
-            loggedDaysCount = 30,
-            avgCalories = 2850.0,
-            avgProtein = bulkingGoal.proteinGrams,
-            avgCarbs = bulkingGoal.carbGrams,
-            avgFat = bulkingGoal.fatGrams
-        )
-
-        val fakeWeight = FakeWeightRepository()
-        val fakePrefs = FakePreferencesRepository()
         val fakeDiary = FakeDiaryRepository(aggregations = aggregations)
 
         val rankRepo = RankRepositoryImpl(
-            statisticsRepository = fakeStats,
             goalsRepository = fakeGoals,
-            weightRepository = fakeWeight,
-            preferencesRepository = fakePrefs,
-            diaryRepository = fakeDiary
+            diaryRepository = fakeDiary,
+            // The same "today" as the aggregations above, even if the test runs across midnight
+            clock = com.macrobase.app.testutil.MutableTestClock(today)
         )
 
         val profile = rankRepo.getRankProfile()
 
         assertFalse("30 days logged must not be provisional", profile.isProvisional)
-        assertEquals(30, profile.loggedDaysCount)
-        assertTrue("Lifestyle score must be excellent", profile.lifestyleScore.overallScore >= 85.0)
+        // Today is logged but counts once it ends (BUG-032)
+        assertEquals(29, profile.loggedDaysCount)
+        assertEquals(100.0, profile.lifestyleScore.calorieScore, 0.001)
+        assertEquals(100.0, profile.lifestyleScore.proteinScore, 0.001)
+        // These days state no fiber, sodium and the rest, so food quality counts as unknown (50)
+        assertEquals(50.0, profile.lifestyleScore.qualityScore, 0.001)
 
         // Assert RankProfile generates positive daily RR deltas capped at <= 20
         for (historyEntry in profile.recentHistory) {
@@ -982,7 +458,7 @@ class LifestyleRankingUnitTests {
     // ==========================================
 
     @Test
-    fun testDailyGoalsViewModel_updatesFitnessGoalAndMaintenanceCalories() = runTest {
+    fun testPreferencesViewModel_updatesFitnessGoalAndMaintenanceCalories() = runTest {
         val fakeGoals = FakeGoalsRepository(
             initialGoal = Goal(
                 dailyCalorieGoal = 2000.0,
@@ -995,21 +471,21 @@ class LifestyleRankingUnitTests {
         )
         val getGoalsUseCase = GetGoalsUseCase(fakeGoals)
         val updateGoalsUseCase = UpdateGoalsUseCase(fakeGoals)
-        val viewModel = DailyGoalsViewModel(getGoalsUseCase, updateGoalsUseCase)
-
-        var successCalled = false
-        viewModel.updateGoals(
-            calories = 2400.0,
-            carbsPct = 40.0,
-            proteinPct = 30.0,
-            fatPct = 30.0,
-            fitnessGoal = FitnessGoal.BULKING,
-            maintenanceCalories = 2100.0,
-            onSuccess = { successCalled = true }
+        val viewModel = PreferencesViewModel(
+            FakePreferencesRepository(), getGoalsUseCase, updateGoalsUseCase, CancelScheduledGoalUseCase(fakeGoals)
         )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.onFieldChanged(PreferenceField.CALORIES, "2400")
+        viewModel.onFieldChanged(PreferenceField.CARBS, "40")
+        viewModel.onFieldChanged(PreferenceField.PROTEIN, "30")
+        viewModel.onFieldChanged(PreferenceField.FAT, "30")
+        viewModel.onFieldChanged(PreferenceField.MAINTENANCE, "2100")
+        viewModel.onStrategySelected(FitnessGoal.BULKING)
+        viewModel.save()
 
         testScheduler.advanceUntilIdle()
-        assertTrue("onSuccess callback must be executed", successCalled)
+        assertTrue("the save must succeed", viewModel.form.value.showSavedMessage)
 
         val scheduledGoal = fakeGoals.getGoalForDate(fakeGoals.simulatedToday.plusDays(1))
         assertEquals(FitnessGoal.BULKING, scheduledGoal.fitnessGoal)
@@ -1019,35 +495,12 @@ class LifestyleRankingUnitTests {
 
     @Test
     fun testCalorieTargetSubtitleFormatting_forAllStrategies() {
-        fun computeCalorieSubtitle(goal: FitnessGoal, maintenanceCalories: Double): String {
-            val maint = maintenanceCalories.roundToInt()
-            return when (goal) {
-                FitnessGoal.BULKING -> {
-                    val minStr = String.format(Locale.US, "%,d", maint)
-                    val maxStr = String.format(Locale.US, "%,d", maint + 500)
-                    "Target: $minStr \u2013 $maxStr kcal (Surplus)"
-                }
-                FitnessGoal.CUTTING -> {
-                    val minStr = String.format(Locale.US, "%,d", (maint - 500).coerceAtLeast(0))
-                    val maxStr = String.format(Locale.US, "%,d", maint)
-                    "Target: $minStr \u2013 $maxStr kcal (Deficit)"
-                }
-                FitnessGoal.MAINTAINING -> {
-                    val minStr = String.format(Locale.US, "%,d", (maint - 100).coerceAtLeast(0))
-                    val maxStr = String.format(Locale.US, "%,d", maint + 100)
-                    "Target: $minStr \u2013 $maxStr kcal (\u00b1100)"
-                }
-            }
-        }
+        fun subtitle(goal: FitnessGoal, maintenance: Double) =
+            com.macrobase.app.feature.rank.calorieZoneSubtitle(goal, RankScoringConfig.calorieZone(goal, maintenance))
 
-        val bulkingSubtitle = computeCalorieSubtitle(FitnessGoal.BULKING, 2400.0)
-        assertEquals("Target: 2,400 \u2013 2,900 kcal (Surplus)", bulkingSubtitle)
-
-        val cuttingSubtitle = computeCalorieSubtitle(FitnessGoal.CUTTING, 2400.0)
-        assertEquals("Target: 1,900 \u2013 2,400 kcal (Deficit)", cuttingSubtitle)
-
-        val maintainingSubtitle = computeCalorieSubtitle(FitnessGoal.MAINTAINING, 2000.0)
-        assertEquals("Target: 1,900 \u2013 2,100 kcal (\u00b1100)", maintainingSubtitle)
+        assertEquals("Zone: 2,640 \u2013 2,880 kcal \u2022 near or below maintenance earns nothing", subtitle(FitnessGoal.BULKING, 2400.0))
+        assertEquals("Zone: 1,800 \u2013 2,160 kcal \u2022 near or above maintenance earns nothing", subtitle(FitnessGoal.CUTTING, 2400.0))
+        assertEquals("Zone: 1,900 \u2013 2,100 kcal \u2022 10% off maintenance earns nothing", subtitle(FitnessGoal.MAINTAINING, 2000.0))
     }
 
     @Test
@@ -1075,10 +528,7 @@ class LifestyleRankingUnitTests {
         )
         val fakeGoals = FakeGoalsRepository(initialGoal = cuttingGoal, simulatedToday = today)
         val rankRepo = RankRepositoryImpl(
-            statisticsRepository = FakeStatisticsRepository(loggedDaysCount = 14),
             goalsRepository = fakeGoals,
-            weightRepository = FakeWeightRepository(),
-            preferencesRepository = FakePreferencesRepository(),
             diaryRepository = FakeDiaryRepository()
         )
 
@@ -1108,107 +558,6 @@ class LifestyleRankingUnitTests {
     // Test Fakes
     // ==========================================
 
-    private class FakeStatisticsRepository(
-        var consistencyScore: Int = 90,
-        var loggedDaysCount: Int = 25,
-        var avgCalories: Double = 2000.0,
-        var avgProtein: Double = 125.0,
-        var avgCarbs: Double = 250.0,
-        var avgFat: Double = 55.0
-    ) : StatisticsRepository {
-        override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
-            return flowOf(
-                ConsistencyStatistics(
-                    startDate = startDate,
-                    endDate = endDate,
-                    totalEligibleDays = 30,
-                    loggedDaysCount = loggedDaysCount,
-                    consistencyScorePercentage = consistencyScore
-                )
-            )
-        }
-
-        override suspend fun getNutritionConsistency(startDate: LocalDate, endDate: LocalDate): ConsistencyStatistics {
-            return ConsistencyStatistics(
-                startDate = startDate,
-                endDate = endDate,
-                totalEligibleDays = 30,
-                loggedDaysCount = loggedDaysCount,
-                consistencyScorePercentage = consistencyScore
-            )
-        }
-
-        override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<MacroAveragesStatistics> {
-            return flowOf(
-                MacroAveragesStatistics(
-                    startDate = startDate,
-                    endDate = endDate,
-                    loggedDaysCount = loggedDaysCount,
-                    averageCalories = avgCalories,
-                    averageProteinGrams = avgProtein,
-                    averageCarbsGrams = avgCarbs,
-                    averageFatGrams = avgFat,
-                    actualCarbsPercent = 50.0,
-                    actualProteinPercent = 25.0,
-                    actualFatPercent = 25.0,
-                    targetCarbsPercent = 50.0,
-                    targetProteinPercent = 25.0,
-                    targetFatPercent = 25.0,
-                    targetCalories = 2000.0
-                )
-            )
-        }
-
-        override suspend fun getMacroAverages(startDate: LocalDate, endDate: LocalDate): MacroAveragesStatistics {
-            return MacroAveragesStatistics(
-                startDate = startDate,
-                endDate = endDate,
-                loggedDaysCount = loggedDaysCount,
-                averageCalories = avgCalories,
-                averageProteinGrams = avgProtein,
-                averageCarbsGrams = avgCarbs,
-                averageFatGrams = avgFat,
-                actualCarbsPercent = 50.0,
-                actualProteinPercent = 25.0,
-                actualFatPercent = 25.0,
-                targetCarbsPercent = 50.0,
-                targetProteinPercent = 25.0,
-                targetFatPercent = 25.0,
-                targetCalories = 2000.0
-            )
-        }
-
-        override fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
-            return flowOf(
-                WeightStatistics(
-                    startDate = startDate,
-                    endDate = endDate,
-                    initialWeightKg = 80.0,
-                    latestWeightKg = 79.5,
-                    deltaWeightKg = -0.5,
-                    entries = listOf(
-                        WeightEntry(id = 1, date = startDate, weightKg = 80.0),
-                        WeightEntry(id = 2, date = endDate, weightKg = 79.5)
-                    )
-                )
-            )
-        }
-
-        override suspend fun getWeightStatistics(startDate: LocalDate, endDate: LocalDate): WeightStatistics {
-            return WeightStatistics(
-                startDate = startDate,
-                endDate = endDate,
-                initialWeightKg = 80.0,
-                latestWeightKg = 79.5,
-                deltaWeightKg = -0.5,
-                entries = listOf(
-                    WeightEntry(id = 1, date = startDate, weightKg = 80.0),
-                    WeightEntry(id = 2, date = endDate, weightKg = 79.5)
-                )
-            )
-        }
-    }
-
     private class FakeGoalsRepository(
         initialGoal: Goal = Goal(
             dailyCalorieGoal = 2000.0,
@@ -1232,7 +581,13 @@ class LifestyleRankingUnitTests {
         override fun observeGoals(): Flow<Goal> = goalsFlow
         override suspend fun updateGoals(goals: Goal) {
             val current = goalsFlow.value
-            val strategyChanged = (goals.fitnessGoal != current.fitnessGoal) || (goals.maintenanceCalories != current.maintenanceCalories)
+            // As GoalsRepositoryImpl (BUG-031): asking for the active or the pending strategy again
+            // changes nothing; anything else is scheduled for tomorrow
+            val asksForActive = goals.fitnessGoal == current.fitnessGoal && goals.maintenanceCalories == current.maintenanceCalories
+            val pending = scheduledGoal?.second
+            val asksForPending = pending != null &&
+                goals.fitnessGoal == pending.fitnessGoal && goals.maintenanceCalories == pending.maintenanceCalories
+            val strategyChanged = !asksForActive && !asksForPending
             if (strategyChanged) {
                 val effectiveDate = simulatedToday.plusDays(1)
                 scheduledGoal = effectiveDate to goals
@@ -1248,8 +603,25 @@ class LifestyleRankingUnitTests {
                     scheduledEffectiveDate = effectiveDate
                 )
             } else {
-                goalsFlow.value = goals
+                goalsFlow.value = goalsFlow.value.copy(
+                    dailyCalorieGoal = goals.dailyCalorieGoal,
+                    carbPercentage = goals.carbPercentage,
+                    proteinPercentage = goals.proteinPercentage,
+                    fatPercentage = goals.fatPercentage
+                )
             }
+        }
+
+        override suspend fun cancelScheduledGoal(): Boolean {
+            val scheduled = scheduledGoal ?: return false
+            history.removeAll { it.first == scheduled.first }
+            scheduledGoal = null
+            goalsFlow.value = goalsFlow.value.copy(
+                scheduledFitnessGoal = null,
+                scheduledMaintenanceCalories = null,
+                scheduledEffectiveDate = null
+            )
+            return true
         }
 
         override suspend fun getGoalForDate(date: LocalDate): Goal {
@@ -1276,19 +648,6 @@ class LifestyleRankingUnitTests {
         override suspend fun updatePreferences(preferences: UserPreferences) {
             prefsFlow.value = preferences
         }
-    }
-
-    private class FakeWeightRepository : WeightRepository {
-        override suspend fun addWeightEntry(entry: WeightEntry): Long = 1L
-        override suspend fun updateWeightEntry(entry: WeightEntry) {}
-        override suspend fun deleteWeightEntry(entryId: Long) {}
-        override suspend fun deleteWeightEntryForDate(date: LocalDate) {}
-        override fun observeWeightForDate(date: LocalDate): Flow<WeightEntry?> = flowOf(null)
-        override suspend fun getWeightForDate(date: LocalDate): WeightEntry? = null
-        override fun observeWeightHistory(): Flow<List<WeightEntry>> = flowOf(emptyList())
-        override suspend fun getWeightHistory(): List<WeightEntry> = emptyList()
-        override fun observeWeightRange(startDate: LocalDate, endDate: LocalDate): Flow<List<WeightEntry>> = flowOf(emptyList())
-        override suspend fun getWeightRange(startDate: LocalDate, endDate: LocalDate): List<WeightEntry> = emptyList()
     }
 
     private class FakeDiaryRepository(

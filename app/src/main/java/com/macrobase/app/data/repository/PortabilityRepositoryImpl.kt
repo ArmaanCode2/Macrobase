@@ -9,6 +9,7 @@ import com.macrobase.app.data.database.entity.RecipeEntity
 import com.macrobase.app.data.database.entity.WaterLogEntity
 import com.macrobase.app.data.database.entity.WeightEntryEntity
 import com.macrobase.app.data.portability.BackupArchiveManager
+import com.macrobase.app.core.util.briefErrorText
 import com.macrobase.app.domain.model.BackupCompatibilityDto
 import com.macrobase.app.domain.model.BackupManifestDto
 import com.macrobase.app.domain.model.BackupRecordCountsDto
@@ -39,7 +40,9 @@ import java.util.TimeZone
 class PortabilityRepositoryImpl(
     private val userDatabase: UserDatabase,
     private val goalsRepository: GoalsRepository,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    /** Called once after a successful import; the app refreshes its home-screen widget (BUG-048). */
+    private val onUserDataChanged: () -> Unit = {}
 ) : PortabilityRepository {
 
     override suspend fun exportAllUserData(): MacroBaseBackupData = withContext(Dispatchers.IO) {
@@ -48,7 +51,7 @@ class PortabilityRepositoryImpl(
         val recipeEntities = userDatabase.recipeDao().getAllRecipes()
         val weightEntities = userDatabase.weightDao().getAllWeightEntriesList()
         val waterEntities = userDatabase.waterDao().getAllWaterLogsList()
-        val currentPrefs = preferencesRepository.getPreferences()
+        val currentPrefs = preferencesRepository.getPreferencesForBackup()
 
         val customFoodsByRowId = customFoodEntities.associateBy { it.id }
         // Write the uuid only when the row is still the logged food: entries mis-linked by
@@ -110,7 +113,8 @@ class PortabilityRepositoryImpl(
                 potassiumMg = f.potassiumMg,
                 calciumMg = f.calciumMg,
                 ironMg = f.ironMg,
-                createdAt = f.createdAt
+                createdAt = f.createdAt,
+                saturatedFatGrams = f.saturatedFatGrams
             )
         }
 
@@ -202,7 +206,7 @@ class PortabilityRepositoryImpl(
     }
 
     override suspend fun importUserData(backupData: MacroBaseBackupData, mode: ImportMode): ImportResult = withContext(Dispatchers.IO) {
-        try {
+        val result = try {
             var imported = 0
             var skipped = 0
             var updated = 0
@@ -420,13 +424,21 @@ class PortabilityRepositoryImpl(
                     message = "Merge complete: $imported imported, $updated updated, $skipped skipped.$keptNote$settingsNote"
                 )
             }
+        } catch (e: OutOfMemoryError) {
+            // Settings are written last and report their own failure, so this is the database step,
+            // which a transaction rolls back
+            ImportResult(isSuccess = false, mode = mode, errorMessage = PortabilityConfig.BACKUP_TOO_LARGE_FOR_DEVICE_MESSAGE)
         } catch (e: Exception) {
             ImportResult(
                 isSuccess = false,
                 mode = mode,
-                errorMessage = "Import failed transactionally: ${e.message ?: "Database error"}"
+                errorMessage = "Import failed transactionally: ${briefErrorText(e, "Database error")}"
             )
         }
+        // After the transaction and the settings: a Merge that adds today's food changes the
+        // widget's totals even when it leaves the goals alone (BUG-048)
+        if (result.isSuccess) onUserDataChanged()
+        result
     }
 
     /**
@@ -440,7 +452,10 @@ class PortabilityRepositoryImpl(
     } catch (e: kotlinx.coroutines.CancellationException) {
         throw e
     } catch (e: Exception) {
-        " Your records were restored, but your goals and profile could not be saved (${e.message ?: "storage error"})."
+        " Your records were restored, but your goals and profile could not be saved (${briefErrorText(e, "storage error")})."
+    } catch (e: OutOfMemoryError) {
+        // The records are already committed, so this must not be reported as a failed restore
+        " Your records were restored, but your goals and profile could not be saved (out of memory)."
     }
 
     // Helper Entity Converters
@@ -451,9 +466,10 @@ class PortabilityRepositoryImpl(
         lastName = lastName,
         timeZone = timeZone,
         unitSystem = try { UnitSystem.valueOf(unitSystem) } catch (e: Exception) { UnitSystem.METRIC },
-        heightCm = heightCm,
-        currentWeightKg = currentWeightKg,
-        targetWeightKg = targetWeightKg,
+        // Saving null clears a stored value (BUG-028); a backup that lacks one keeps this device's
+        heightCm = heightCm ?: current.heightCm,
+        currentWeightKg = currentWeightKg ?: current.currentWeightKg,
+        targetWeightKg = targetWeightKg ?: current.targetWeightKg,
         dailyWaterGoalMl = dailyWaterGoalMl
     )
 
@@ -469,6 +485,7 @@ class PortabilityRepositoryImpl(
         proteinGrams = proteinGrams,
         carbsGrams = carbsGrams,
         fatGrams = fatGrams,
+        saturatedFatGrams = saturatedFatGrams,
         fiberGrams = fiberGrams,
         sugarGrams = sugarGrams,
         sodiumMg = sodiumMg,
@@ -566,28 +583,12 @@ class PortabilityRepositoryImpl(
         timestamp = timestamp
     )
 
-    private fun CustomFoodEntity.isIdenticalTo(dto: CustomFoodBackupDto): Boolean {
-        return name == dto.name &&
-                brand == dto.brand &&
-                servingSize == dto.servingSize &&
-                servingUnit == dto.servingUnit &&
-                customUnitName == dto.customUnitName &&
-                calories == dto.calories &&
-                proteinGrams == dto.proteinGrams &&
-                carbsGrams == dto.carbsGrams &&
-                fatGrams == dto.fatGrams &&
-                fiberGrams == dto.fiberGrams &&
-                sugarGrams == dto.sugarGrams &&
-                sodiumMg == dto.sodiumMg
-    }
+    // Whole rows are compared, so every column that toEntity maps is compared: a field list
+    // missed potassium, calcium and iron (BUG-051). A test checks that every column has a backup
+    // field. createdAt is not content; it decides which side wins a conflict.
+    private fun CustomFoodEntity.isIdenticalTo(dto: CustomFoodBackupDto): Boolean =
+        this == dto.toEntity(existingId = id).copy(createdAt = createdAt)
 
-    private fun RecipeEntity.isIdenticalTo(dto: RecipeBackupDto): Boolean {
-        return name == dto.name &&
-                servingsProduced == dto.servingsProduced &&
-                ingredientsJson == dto.ingredientsJson &&
-                caloriesPerServing == dto.caloriesPerServing &&
-                proteinPerServing == dto.proteinPerServing &&
-                carbsPerServing == dto.carbsPerServing &&
-                fatPerServing == dto.fatPerServing
-    }
+    private fun RecipeEntity.isIdenticalTo(dto: RecipeBackupDto): Boolean =
+        this == dto.toEntity(existingId = id).copy(createdAt = createdAt)
 }

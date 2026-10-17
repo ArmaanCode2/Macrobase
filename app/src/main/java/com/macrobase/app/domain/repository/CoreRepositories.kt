@@ -10,6 +10,8 @@ import com.macrobase.app.domain.model.WaterEntry
 import com.macrobase.app.domain.model.WeightEntry
 import com.macrobase.app.domain.model.WeightStatistics
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 
 /**
@@ -67,8 +69,27 @@ interface GoalsRepository {
     suspend fun updateGoals(goals: Goal)
     suspend fun getGoalForDate(date: LocalDate): Goal = getGoals()
 
+    /**
+     * Drops a strategy change scheduled for tomorrow, so the current strategy stays (BUG-031).
+     * Returns false when there was nothing to drop, for example because the change has started.
+     * Repositories that schedule changes override this; one that never schedules has nothing to drop.
+     */
+    suspend fun cancelScheduledGoal(): Boolean = false
+
     /** [getGoalForDate] for many days at once, in the same order. */
     suspend fun getGoalsForDates(dates: List<LocalDate>): List<Goal> = dates.map { getGoalForDate(it) }
+
+    /**
+     * The first day with a saved goal. An earlier day's goal is only a guess, so the rank leaves
+     * those days out. Null when every day's goal is known, as for a repository without history.
+     */
+    suspend fun getGoalHistoryStart(): LocalDate? = null
+
+    /**
+     * [getGoalsForDates] as a flow. It follows every change to the stored goals, including one to
+     * past days' history that leaves today's goal as it is (BUG-049).
+     */
+    fun observeGoalsForDates(dates: List<LocalDate>): Flow<List<Goal>> = observeGoals().map { getGoalsForDates(dates) }
 
     /** Everything a backup needs to restore goals exactly, including the strategy history. */
     suspend fun exportGoalBackup(): GoalBackupDto = GoalBackupDto.from(getGoals())
@@ -105,6 +126,26 @@ interface PreferencesRepository {
 
     /** False on a device where the profile was never saved, such as right after installing. */
     suspend fun hasSavedPreferences(): Boolean = true
+
+    /** The stored profile for a backup: fails when it cannot be read, never returns defaults. */
+    suspend fun getPreferencesForBackup(): UserPreferences = getPreferences()
+
+    /**
+     * The version of the rank rules whose "rank recalculated" notice the user has dismissed, or 0.
+     * Kept outside the profile, so backups do not carry it. Repositories that never show the
+     * notice report every version as seen.
+     */
+    fun observeSeenRankRulesVersion(): Flow<Int> = flowOf(Int.MAX_VALUE)
+    suspend fun setSeenRankRulesVersion(version: Int) {}
+
+    /**
+     * The start, as an epoch day, of the last rank season whose "new season" notice the user
+     * dismissed, or [Long.MIN_VALUE]. Kept outside the profile like the rules notice, so a
+     * restore on another phone shows it once more. Repositories that never show the notice
+     * report every season as seen.
+     */
+    fun observeSeenRankSeason(): Flow<Long> = flowOf(Long.MAX_VALUE)
+    suspend fun setSeenRankSeason(seasonStartEpochDay: Long) {}
 }
 
 /**

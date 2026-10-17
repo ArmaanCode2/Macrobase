@@ -69,7 +69,7 @@ sealed class Screen(
         fun createRoute(dateEpochDay: Long? = null) = if (dateEpochDay != null) "water?dateEpochDay=$dateEpochDay" else "water"
     }
     data object Statistics : Screen("statistics", "Statistics", Icons.Default.Assessment, isBottomNavTab = true)
-    data object CustomFoods : Screen("custom_foods", "Custom Foods", Icons.Default.Fastfood, isDrawerItem = true)
+    data object CustomFoods : Screen("custom_foods", "Custom Foods", Icons.Default.Fastfood, isBottomNavTab = true, isDrawerItem = true)
     data object EditCustomFood : Screen("edit_custom_food?foodId={foodId}", "Edit Custom Food") {
         fun createRoute(foodId: Long? = null) = if (foodId != null) "edit_custom_food?foodId=$foodId" else "edit_custom_food"
     }
@@ -86,8 +86,9 @@ sealed class Screen(
     data object Basket : Screen("basket", "Basket")
 
     companion object {
+        /** In bar order. Statistics is the raised button in the middle. */
         val bottomNavScreens: List<Screen>
-            get() = listOf(Home, Statistics, Rank, Preferences)
+            get() = listOf(Home, CustomFoods, Statistics, Rank, Preferences)
 
         val drawerScreens: List<Screen>
             get() = listOf(Home, CustomFoods, Recipes, Weight, Water, ImportExport, Preferences)

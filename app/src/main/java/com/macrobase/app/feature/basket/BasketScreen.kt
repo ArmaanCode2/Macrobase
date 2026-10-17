@@ -36,21 +36,14 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.macrobase.app.feature.detail.formatQuantityForInput
@@ -79,14 +72,13 @@ import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.components.MealAndDayPicker
 import com.macrobase.app.core.designsystem.components.PrimaryButton
 import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.basket.BasketItem
 import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
@@ -103,13 +95,11 @@ fun BasketScreen(
     val items by viewModel.items.collectAsState()
     val commonDate by viewModel.commonDate.collectAsState()
     val commonMealType by viewModel.commonMealType.collectAsState()
-    val loggingMode by viewModel.loggingMode.collectAsState()
+    val isMixedDateOrMeal by viewModel.isMixedDateOrMeal.collectAsState()
     val revealedItemId by viewModel.revealedItemId.collectAsState()
     val invalidQuantityIds by viewModel.invalidQuantityIds.collectAsState()
     val isSubmitting by viewModel.isSubmitting.collectAsState()
     val submitError by viewModel.submitError.collectAsState()
-
-    var showDatePicker by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -173,7 +163,8 @@ fun BasketScreen(
                                 viewModel.removeItem(item.id)
                             },
                             isQuantityInvalid = item.id in invalidQuantityIds,
-                            onQuantityTextReset = { viewModel.onQuantityTextReset(item.id) }
+                            onQuantityTextReset = { viewModel.onQuantityTextReset(item.id) },
+                            whenLabel = if (isMixedDateOrMeal) basketWhenLabel(item.date, item.mealType, LocalDate.now()) else null
                         )
                         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                     }
@@ -255,65 +246,10 @@ fun BasketScreen(
 
                 HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
 
-                // 4. "Appear on food log as:" Mode Selector
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(AppColors.Background)
-                        .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm)
-                ) {
-                    Text(
-                        text = "Appear on food log as:",
-                        style = AppTypography.Body1.copy(fontWeight = FontWeight.Medium),
-                        color = AppColors.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { viewModel.setLoggingMode(LoggingMode.MULTIPLE_FOODS) }
-                        ) {
-                            RadioButton(
-                                selected = loggingMode == LoggingMode.MULTIPLE_FOODS,
-                                onClick = { viewModel.setLoggingMode(LoggingMode.MULTIPLE_FOODS) },
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = Color(0xFF00B0FF),
-                                    unselectedColor = AppColors.TextSecondary
-                                )
-                            )
-                            Text("Multiple Foods", style = AppTypography.Body2, color = AppColors.TextPrimary)
-                        }
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { viewModel.setLoggingMode(LoggingMode.SINGLE_FOOD_RECIPE) }
-                        ) {
-                            RadioButton(
-                                selected = loggingMode == LoggingMode.SINGLE_FOOD_RECIPE,
-                                onClick = { viewModel.setLoggingMode(LoggingMode.SINGLE_FOOD_RECIPE) },
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = Color(0xFF00B0FF),
-                                    unselectedColor = AppColors.TextSecondary
-                                )
-                            )
-                            Text("Single Food (Recipe)", style = AppTypography.Body2, color = AppColors.TextPrimary)
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-                // 5. "When:" Header & Common Meal / Date Controls
+                // 4. "When:" Header & Common Meal / Date Controls
                 val today = LocalDate.now()
-                val dateLabel = when (commonDate) {
-                    today -> "Today"
-                    today.minusDays(1) -> "Yesterday"
-                    else -> commonDate.format(DateTimeFormatter.ofPattern("EEEE, MM/dd"))
-                }
-                val whenLabel = "$dateLabel, ${commonMealType.displayName}"
+                // Each item is logged under its own day and meal, so "mixed" when they differ (BUG-039)
+                val whenLabel = basketWhenLabel(commonDate, commonMealType, today)
 
                 Column(
                     modifier = Modifier
@@ -341,162 +277,19 @@ fun BasketScreen(
 
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-                    // 6-Meal Grid (2 rows x 3 columns)
-                    val mealGrid = listOf(
-                        listOf(MealType.BREAKFAST, MealType.LUNCH, MealType.DINNER),
-                        listOf(MealType.AM_SNACK, MealType.PM_SNACK, MealType.SNACK)
+                    // 6 meal buttons and the Yesterday / Today / Choose a day row
+                    MealAndDayPicker(
+                        selectedMeal = commonMealType,
+                        selectedDate = commonDate,
+                        today = today,
+                        onMealSelected = { viewModel.setCommonMealType(it) },
+                        onDateSelected = { viewModel.setCommonDate(it) }
                     )
-
-                    mealGrid.forEach { rowMeals ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            rowMeals.forEach { meal ->
-                                val isSelected = meal == commonMealType
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(38.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(if (isSelected) AppColors.SurfaceAlt else AppColors.Surface)
-                                        .border(1.dp, if (isSelected) AppColors.TextSecondary else AppColors.Divider, RoundedCornerShape(2.dp))
-                                        .clickable { viewModel.setCommonMealType(meal) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = meal.displayName,
-                                        style = AppTypography.Body2.copy(
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-                    // Date Selection Row (3 buttons: Yesterday, Today, Choose a day)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val isYesterday = commonDate == today.minusDays(1)
-                        val isToday = commonDate == today
-                        val isOther = !isYesterday && !isToday
-
-                        // Yesterday
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(if (isYesterday) AppColors.SurfaceAlt else AppColors.Surface)
-                                .border(1.dp, if (isYesterday) AppColors.TextSecondary else AppColors.Divider, RoundedCornerShape(2.dp))
-                                .clickable { viewModel.setCommonDate(today.minusDays(1)) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Yesterday",
-                                style = AppTypography.Body2.copy(
-                                    fontWeight = if (isYesterday) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isYesterday) AppColors.TextPrimary else AppColors.TextSecondary
-                                )
-                            )
-                        }
-
-                        // Today
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(if (isToday) AppColors.SurfaceAlt else AppColors.Surface)
-                                .border(1.dp, if (isToday) AppColors.TextSecondary else AppColors.Divider, RoundedCornerShape(2.dp))
-                                .clickable { viewModel.setCommonDate(today) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Today",
-                                style = AppTypography.Body2.copy(
-                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isToday) AppColors.TextPrimary else AppColors.TextSecondary
-                                )
-                            )
-                        }
-
-                        // Choose a day
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(if (isOther) AppColors.SurfaceAlt else AppColors.Surface)
-                                .border(1.dp, if (isOther) AppColors.TextSecondary else AppColors.Divider, RoundedCornerShape(2.dp))
-                                .clickable { showDatePicker = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isOther) commonDate.format(DateTimeFormatter.ofPattern("MM/dd")) else "Choose a day",
-                                style = AppTypography.Body2.copy(
-                                    fontWeight = if (isOther) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isOther) AppColors.TextPrimary else AppColors.TextSecondary
-                                )
-                            )
-                        }
-                    }
-                }
-
-                if (showDatePicker) {
-                    val initialMillis = commonDate.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
-                    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-                    DatePickerDialog(
-                        onDismissRequest = { showDatePicker = false },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                datePickerState.selectedDateMillis?.let { millis ->
-                                    val selectedLocalDate = Instant.ofEpochMilli(millis).atZone(ZoneId.of("UTC")).toLocalDate()
-                                    viewModel.setCommonDate(selectedLocalDate)
-                                }
-                                showDatePicker = false
-                            }) { Text("OK", color = AppColors.Primary) }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showDatePicker = false }) { Text("Cancel", color = AppColors.Primary) }
-                        },
-                        colors = DatePickerDefaults.colors(containerColor = AppColors.Surface)
-                    ) {
-                        DatePicker(
-                            state = datePickerState,
-                            colors = DatePickerDefaults.colors(
-                                containerColor = AppColors.Surface,
-                                titleContentColor = AppColors.TextPrimary,
-                                headlineContentColor = AppColors.TextPrimary,
-                                weekdayContentColor = AppColors.TextSecondary,
-                                subheadContentColor = AppColors.TextPrimary,
-                                yearContentColor = AppColors.TextPrimary,
-                                currentYearContentColor = AppColors.Primary,
-                                selectedYearContentColor = AppColors.TextPrimary,
-                                selectedYearContainerColor = AppColors.Primary,
-                                dayContentColor = AppColors.TextPrimary,
-                                selectedDayContentColor = AppColors.TextPrimary,
-                                selectedDayContainerColor = AppColors.Primary,
-                                todayDateBorderColor = AppColors.Primary,
-                                todayContentColor = AppColors.Primary
-                            )
-                        )
-                    }
                 }
 
                 HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
 
-                // 6. Photo Row
+                // 5. Photo Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -521,7 +314,7 @@ fun BasketScreen(
                 HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                 Spacer(modifier = Modifier.height(AppSpacing.md))
 
-                // 7. Primary Action Button: "Log X Foods"
+                // 6. Primary Action Button: "Log X Foods"
                 val logButtonLabel = "Log ${items.size} Food${if (items.size > 1) "s" else ""}"
                 val logBlockedMessage = if (invalidQuantityIds.isNotEmpty()) {
                     "Enter an amount above 0 for the highlighted items."
@@ -538,11 +331,8 @@ fun BasketScreen(
                 }
                 Button(
                     onClick = {
-                        viewModel.submitBasket(
-                            onSuccess = onNavigateToDashboard,
-                            // Shown above the button from viewModel.submitError
-                            onError = {}
-                        )
+                        // A failure shows above the button through submitError
+                        viewModel.submitBasket(onSuccess = onNavigateToDashboard)
                     },
                     enabled = !isSubmitting && invalidQuantityIds.isEmpty(),
                     modifier = Modifier
@@ -557,7 +347,7 @@ fun BasketScreen(
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))
 
-                // 8. Lower Links & Clear Basket
+                // 7. Lower Links & Clear Basket
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -597,7 +387,9 @@ fun BasketItemRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     isQuantityInvalid: Boolean = false,
-    onQuantityTextReset: () -> Unit = {}
+    onQuantityTextReset: () -> Unit = {},
+    /** The item's own day and meal, shown when the basket is mixed (BUG-039). */
+    whenLabel: String? = null
 ) {
     val density = LocalDensity.current
     val deleteActionWidth = 80.dp
@@ -836,8 +628,30 @@ fun BasketItemRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            // Line 3, mixed basket only: where this item will be logged
+            if (whenLabel != null) {
+                Text(text = whenLabel, style = AppTypography.Caption, color = AppColors.TextSecondary)
+            }
         }
     }
+}
+
+/** "Today" or "Yesterday", otherwise the weekday and date. */
+internal fun basketDateLabel(date: LocalDate, today: LocalDate): String = when (date) {
+    today -> "Today"
+    today.minusDays(1) -> "Yesterday"
+    else -> date.format(DateTimeFormatter.ofPattern("EEEE, MM/dd", java.util.Locale.US))
+}
+
+/**
+ * The day and meal for the basket header, or for one item. A null day or meal means the items
+ * differ, so that part reads "mixed" (BUG-039).
+ */
+internal fun basketWhenLabel(date: LocalDate?, mealType: MealType?, today: LocalDate): String {
+    val day = date?.let { basketDateLabel(it, today) }
+    val meal = mealType?.displayName
+    return if (day == null && meal == null) "Mixed (see each item)" else "${day ?: "Mixed days"}, ${meal ?: "mixed meals"}"
 }
 
 /**

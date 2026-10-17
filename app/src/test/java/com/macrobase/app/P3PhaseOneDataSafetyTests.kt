@@ -8,8 +8,11 @@ import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.database.entity.DiaryEntryEntity
 import com.macrobase.app.data.portability.BackupArchiveManager
 import com.macrobase.app.data.portability.BackupJsonSerializer
+import com.macrobase.app.data.provider.FoodDataProvider
 import com.macrobase.app.data.repository.DiaryRepositoryImpl
+import com.macrobase.app.data.repository.FoodRepositoryImpl
 import com.macrobase.app.data.repository.PortabilityRepositoryImpl
+import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.DiaryEntryBackupDto
 import com.macrobase.app.domain.model.Food
@@ -22,6 +25,7 @@ import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.repository.PreferencesRepository
+import com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase
 import com.macrobase.app.feature.dashboard.formatOptionalTotal
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -108,7 +112,10 @@ class P3PhaseOneDataSafetyTests {
     fun releasedSchemasNeverChangeInPlace() {
         val pinned = mapOf(
             2 to "f59f038e75597eb71b810e924420cf79", // v1.0.3
-            3 to "a9d13f890352564c1adaf487ceb42e6e"
+            // The 7 Oct 2026 build had another layout under 3 (hash not recorded); MIGRATION_3_4 repairs it
+            3 to "a9d13f890352564c1adaf487ceb42e6e",
+            4 to "a9d13f890352564c1adaf487ceb42e6e", // 1.2.3: the same tables as 3, reached by MIGRATION_3_4
+            5 to "4c61bb5c6fdddcc32c9eacc14da0ec97" // custom_foods.saturatedFatGrams (MIGRATION_4_5)
         )
         assertTrue(
             "Pin the identity hash of schema ${DatabaseConfig.USER_DATABASE_VERSION} here",
@@ -167,6 +174,284 @@ class P3PhaseOneDataSafetyTests {
                 assertEquals(1, c.getInt(0))
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Version 4: the two version 3 layouts
+    // ---------------------------------------------------------------------------------------
+
+    // The owner's phone: 1.2.2 crashed on open with "Room cannot verify the data integrity"
+    @Test
+    fun aDatabaseIn7OctoberLayout_upgradesInPlace_andKeepsEveryEntry() = runBlocking {
+        val name = "p3-v3-7-october.db"
+        createDatabaseIn7OctoberLayout(name) { db ->
+            // An entry logged and then deleted: its id must not be handed out again
+            db.execSQL(
+                "INSERT INTO diary_entries (uuid, dateEpochDay, mealType, foodId, foodName, userQuantity, " +
+                    "servingDescription, gramWeight, loggedCalories, loggedProtein, loggedCarbs, loggedFat, createdAt) " +
+                    "VALUES ('gone', 20002, 'SNACK', 9, 'Tea', 1.0, '1 cup', 200.0, 30.0, 1.0, 5.0, 1.0, 3)"
+            )
+            db.execSQL("DELETE FROM diary_entries WHERE uuid = 'gone'")
+        }
+
+        val room = UserDatabase.create(context, name).also { openDatabases += it }
+        val db = room.openHelper.writableDatabase
+        assertEquals(DatabaseConfig.USER_DATABASE_VERSION, db.version)
+
+        val rows = room.diaryDao().getAllEntries().associateBy { it.uuid }
+        assertEquals(setOf("d1", "d2"), rows.keys)
+        // Written before the nutrients existed: the old columns only held their default 0.0
+        val old = rows.getValue("d1")
+        assertEquals(1L, old.id)
+        assertEquals(1L, old.createdAt)
+        assertEquals(310.0, old.loggedCalories, 0.0)
+        assertNull(old.loggedFiber)
+        assertNull(old.loggedSugar)
+        assertNull(old.loggedSodium)
+        assertNull(old.loggedCholesterol)
+        // Logged by the 7 Oct build: real values are kept; its 0.0 meant "not recorded" (BUG-037),
+        // as for a backup from before format 1.3.0; the nutrients it lacked are unknown
+        val logged = rows.getValue("d2")
+        assertEquals(
+            listOf<Any?>(2L, 20001L, "DINNER", 8L, "Rice", 1.0, "1 cup", 150.0, 200.0, 4.0, 44.0, 0.5, 2L),
+            with(logged) {
+                listOf<Any?>(id, dateEpochDay, mealType, foodId, foodName, userQuantity, servingDescription,
+                    gramWeight, loggedCalories, loggedProtein, loggedCarbs, loggedFat, createdAt)
+            }
+        )
+        assertEquals(2.5, logged.loggedFiber!!, 0.0)
+        assertNull(logged.loggedSugar)
+        assertEquals(410.0, logged.loggedSodium!!, 0.0)
+        assertNull(logged.loggedSaturatedFat)
+        assertNull(logged.loggedTransFat)
+        assertNull(logged.loggedCholesterol)
+        for (table in listOf("custom_foods", "recipes", "weight_entries", "water_logs")) {
+            db.query("SELECT COUNT(*) FROM $table").use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals("rows in $table", 1, c.getInt(0))
+            }
+        }
+
+        // The deleted entry's id 3 is not reused, and new entries keep all six nutrients
+        val newId = room.diaryDao().insertEntry(diaryRow("d3", cholesterol = 12.0))
+        assertEquals(4L, newId)
+        assertEquals(12.0, room.diaryDao().getAllEntries().single { it.uuid == "d3" }.loggedCholesterol!!, 0.0)
+
+        // The untouched version 3 file was copied aside before the upgrade
+        val backup = File(context.filesDir, "database-backups/$name.v3")
+        SQLiteDatabase.openDatabase(backup.path, null, SQLiteDatabase.OPEN_READONLY).use { copy ->
+            assertEquals(3, copy.version)
+            copy.rawQuery("SELECT COUNT(*) FROM diary_entries WHERE loggedFiber = 0.0", null).use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals(1, c.getInt(0))
+            }
+        }
+    }
+
+    // A new install of the 7 Oct build created the columns itself: before createdAt, with no default
+    @Test
+    fun aFreshlyCreated7OctoberDatabase_upgradesToo() = runBlocking {
+        val name = "p3-v3-7-october-fresh.db"
+        createDatabaseIn7OctoberLayout(name, createdFresh = true)
+
+        val room = UserDatabase.create(context, name).also { openDatabases += it }
+        val rows = room.diaryDao().getAllEntries().associateBy { it.uuid }
+        assertEquals(setOf("d1", "d2"), rows.keys)
+        assertNull(rows.getValue("d1").loggedFiber)
+        assertEquals(2.5, rows.getValue("d2").loggedFiber!!, 0.0)
+        assertEquals(410.0, rows.getValue("d2").loggedSodium!!, 0.0)
+        assertEquals(2L, rows.getValue("d2").createdAt)
+    }
+
+    // A diary column this code has never seen is kept, with its rows, instead of being dropped
+    @Test
+    fun anUnknownDiaryColumnIsKeptInABackupTable() = runBlocking {
+        val name = "p3-v3-extra-column.db"
+        createDatabaseIn7OctoberLayout(name) { db ->
+            db.execSQL("ALTER TABLE diary_entries ADD COLUMN loggedPotassium REAL")
+            db.execSQL("UPDATE diary_entries SET loggedPotassium = 120.0 WHERE uuid = 'd2'")
+        }
+
+        val room = UserDatabase.create(context, name).also { openDatabases += it }
+        assertEquals(2, room.diaryDao().getAllEntries().size)
+        room.openHelper.writableDatabase.query(
+            "SELECT loggedPotassium FROM diary_entries_v3_backup WHERE uuid = 'd2'"
+        ).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(120.0, c.getDouble(0), 0.0)
+        }
+    }
+
+    @Test
+    fun aDatabaseInTheCurrentVersion3Layout_upgradesWithItsValuesUnchanged() = runBlocking {
+        val name = "p3-v3-current.db"
+        createDatabaseFromSchema(name, version = 3) { db ->
+            seedVersion2(db)
+            db.execSQL(
+                "UPDATE diary_entries SET loggedFiber = 2.5, loggedSugar = 0.0, loggedSodium = NULL, " +
+                    "loggedSaturatedFat = 1.2, loggedTransFat = 0.0, loggedCholesterol = NULL WHERE uuid = 'd1'"
+            )
+        }
+
+        val room = UserDatabase.create(context, name).also { openDatabases += it }
+        val row = room.diaryDao().getAllEntries().single()
+        assertEquals(2.5, row.loggedFiber!!, 0.0)
+        assertEquals(0.0, row.loggedSugar!!, 0.0)
+        assertNull(row.loggedSodium)
+        assertEquals(1.2, row.loggedSaturatedFat!!, 0.0)
+        assertEquals(0.0, row.loggedTransFat!!, 0.0)
+        assertNull(row.loggedCholesterol)
+    }
+
+    // Android runs the upgrade in one transaction: if it fails, the phone's database is untouched
+    @Test
+    fun aFailedUpgradeLeavesTheDatabaseAsItWas() {
+        val name = "p3-v3-unexpected.db"
+        createDatabaseIn7OctoberLayout(name) { db -> db.execSQL("ALTER TABLE custom_foods ADD COLUMN surprise TEXT") }
+
+        val room = UserDatabase.create(context, name).also { openDatabases += it }
+        val error = assertThrows(IllegalStateException::class.java) { room.openHelper.writableDatabase }
+        // The migration ran and Room's check after it failed, so the rebuild was rolled back
+        assertTrue(error.message, error.message!!.startsWith("Migration didn't properly handle: custom_foods"))
+
+        val path = context.getDatabasePath(name)
+        SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            assertEquals(3, db.version)
+            db.rawQuery("SELECT COUNT(*) FROM diary_entries", null).use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals(2, c.getInt(0))
+            }
+            val columns = mutableMapOf<String, Boolean>()
+            db.rawQuery("PRAGMA table_info(diary_entries)", null).use { c ->
+                while (c.moveToNext()) columns[c.getString(c.getColumnIndexOrThrow("name"))] = c.getInt(c.getColumnIndexOrThrow("notnull")) == 1
+            }
+            assertEquals(true, columns["loggedFiber"])
+            assertFalse("loggedCholesterol" in columns)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Version 5: custom foods state saturated fat
+    // ---------------------------------------------------------------------------------------
+
+    // The owner's phone is on version 4 (1.2.3): every row stays, and old custom foods read as "not known"
+    @Test
+    fun upgradingFromVersion4_keepsEveryRow_andCustomFoodsSaturatedFatIsUnknown() {
+        val name = "p5-migrate-v4.db"
+        createDatabaseFromSchema(name, version = 4) { db ->
+            seedVersion2(db)
+            db.execSQL(
+                "INSERT INTO custom_foods (uuid, name, servingSize, servingUnit, calories, proteinGrams, " +
+                    "carbsGrams, fatGrams, fiberGrams, sugarGrams, sodiumMg, createdAt) " +
+                    "VALUES ('c2', 'Granola', 50.0, 'GRAMS', 220.0, 5.0, 30.0, 9.0, 3.0, 0.0, 120.0, 2)"
+            )
+            db.execSQL("UPDATE diary_entries SET loggedSaturatedFat = 1.2 WHERE uuid = 'd1'")
+        }
+
+        val db = UserDatabase.create(context, name).also { openDatabases += it }.openHelper.writableDatabase
+        assertEquals(DatabaseConfig.USER_DATABASE_VERSION, db.version)
+
+        db.query("SELECT uuid, saturatedFatGrams, fiberGrams, sugarGrams, sodiumMg FROM custom_foods ORDER BY uuid").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("c1", c.getString(0))
+            assertTrue(c.isNull(1))
+            assertTrue(c.moveToNext())
+            assertEquals("c2", c.getString(0))
+            assertTrue("saturated fat was never stated", c.isNull(1))
+            assertEquals(3.0, c.getDouble(2), 0.0)
+            assertEquals(0.0, c.getDouble(3), 0.0)
+            assertEquals(120.0, c.getDouble(4), 0.0)
+            assertFalse(c.moveToNext())
+        }
+        db.query("SELECT loggedSaturatedFat FROM diary_entries WHERE uuid = 'd1'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(1.2, c.getDouble(0), 0.0)
+        }
+        for (table in listOf("diary_entries", "recipes", "weight_entries", "water_logs")) {
+            db.query("SELECT COUNT(*) FROM $table").use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals("rows in $table", 1, c.getInt(0))
+            }
+        }
+        // The file was copied before the upgrade
+        assertTrue(File(File(context.filesDir, "database-backups"), "$name.v4").isFile)
+    }
+
+    @Test
+    fun aCustomFoodKeepsItsSaturatedFat_andTwoServingsDoubleIt() = runBlocking {
+        val repo = FoodRepositoryImpl(NoCatalog, newDatabase().customFoodDao())
+        val stated = CustomFood(
+            uuid = "c-sat", name = "Cheese", servingSize = 30.0, servingUnit = ServingUnit.GRAMS,
+            nutritionPerServing = Nutrition(110.0, 7.0, 0.5, 9.0, saturatedFatGrams = 5.5, sodiumMg = 180.0)
+        )
+        val unstated = stated.copy(uuid = "c-none", name = "Crackers", nutritionPerServing = Nutrition(120.0, 2.0, 20.0, 3.0))
+
+        val saved = repo.getCustomFood(repo.saveCustomFood(stated))!!
+        assertEquals(5.5, saved.nutritionPerServing.saturatedFatGrams!!, 0.0)
+        assertNull(repo.getCustomFood(repo.saveCustomFood(unstated))!!.nutritionPerServing.saturatedFatGrams)
+
+        // Two servings, as the basket and diary snapshot compute them
+        val food = saved.toFood()
+        val logged = CalculateNutritionForServingUseCase()(food, food.servings.first(), 2.0)
+        assertEquals(11.0, logged.saturatedFatGrams!!, 1e-9)
+    }
+
+    @Test
+    fun backups_keepCustomFoodsSaturatedFat_andOlderFormatsRestoreItAsUnknown() = runBlocking {
+        val db = newDatabase()
+        val repo = FoodRepositoryImpl(NoCatalog, db.customFoodDao())
+        repo.saveCustomFood(
+            CustomFood(
+                uuid = "c-sat", name = "Cheese", servingSize = 30.0, servingUnit = ServingUnit.GRAMS,
+                nutritionPerServing = Nutrition(110.0, 7.0, 0.5, 9.0, saturatedFatGrams = 5.5)
+            )
+        )
+        repo.saveCustomFood(CustomFood(uuid = "c-none", name = "Crackers", servingSize = 1.0, nutritionPerServing = Nutrition(120.0, 2.0, 20.0, 3.0)))
+
+        val restored = validate(backupBytes(db)).customFoods.associateBy { it.uuid }
+        assertEquals(5.5, restored.getValue("c-sat").saturatedFatGrams!!, 0.0)
+        assertNull(restored.getValue("c-none").saturatedFatGrams)
+
+        // A custom food as format 1.3.0 wrote it, with no saturatedFatGrams key
+        val older = BackupJsonSerializer.parseCustomFoods(
+            """[{"uuid": "c-old", "name": "Bread", "servingSize": 1.0, "servingUnit": "SERVING", "calories": 80.0, """ +
+                """"proteinGrams": 3.0, "carbsGrams": 15.0, "fatGrams": 1.0, "sodiumMg": 150.0, "createdAt": 1}]"""
+        ).single()
+        assertNull(older.saturatedFatGrams)
+        assertEquals(150.0, older.sodiumMg!!, 0.0)
+    }
+
+    @Test
+    fun restoringABackup_storesCustomFoodsSaturatedFat_inBothModes() = runBlocking {
+        val source = newDatabase()
+        val cheese = CustomFood(
+            uuid = "c-sat", name = "Cheese", servingSize = 30.0, servingUnit = ServingUnit.GRAMS,
+            nutritionPerServing = Nutrition(110.0, 7.0, 0.5, 9.0, saturatedFatGrams = 5.5),
+            createdAt = java.time.Instant.ofEpochMilli(2_000)
+        )
+        FoodRepositoryImpl(NoCatalog, source.customFoodDao()).saveCustomFood(cheese)
+        val backup = validate(backupBytes(source))
+
+        // Overwrite into an empty phone
+        val fresh = newDatabase()
+        assertTrue(PortabilityRepositoryImpl(fresh, goals, preferences).importUserData(backup, ImportMode.OVERWRITE).isSuccess)
+        assertEquals(5.5, fresh.customFoodDao().getCustomFoodByUuid("c-sat")!!.saturatedFatGrams!!, 0.0)
+
+        // Merge over an older copy of the same food that never stated it: the newer backup wins
+        val phone = newDatabase()
+        FoodRepositoryImpl(NoCatalog, phone.customFoodDao()).saveCustomFood(
+            cheese.copy(
+                nutritionPerServing = cheese.nutritionPerServing.copy(saturatedFatGrams = null),
+                createdAt = java.time.Instant.ofEpochMilli(1_000)
+            )
+        )
+        assertTrue(PortabilityRepositoryImpl(phone, goals, preferences).importUserData(backup, ImportMode.MERGE).isSuccess)
+        assertEquals(5.5, phone.customFoodDao().getAllCustomFoods().single().saturatedFatGrams!!, 0.0)
+
+        // Merging the same backup again finds nothing changed
+        val again = PortabilityRepositoryImpl(phone, goals, preferences).importUserData(backup, ImportMode.MERGE)
+        assertEquals(0, again.recordsUpdated)
+        assertEquals(5.5, phone.customFoodDao().getAllCustomFoods().single().saturatedFatGrams!!, 0.0)
     }
 
     // ---------------------------------------------------------------------------------------
@@ -304,6 +589,17 @@ class P3PhaseOneDataSafetyTests {
     // Helpers
     // ---------------------------------------------------------------------------------------
 
+    /** No built-in catalog: these tests only use custom foods. */
+    private object NoCatalog : FoodDataProvider {
+        override val providerId = "none"
+        override val displayName = "None"
+        override val isLocal = true
+        override suspend fun searchFoods(query: String, limit: Int) = emptyList<Food>()
+        override suspend fun getFoodById(id: Long): Food? = null
+        override suspend fun getFoodByBarcode(barcode: String): Food? = null
+        override suspend fun getFoodServings(foodId: Long) = emptyList<Serving>()
+    }
+
     /** Room runs queries inline so the suspend DAO calls finish on the test thread. */
     private fun newDatabase(): UserDatabase =
         Room.inMemoryDatabaseBuilder(context, UserDatabase::class.java)
@@ -333,6 +629,56 @@ class P3PhaseOneDataSafetyTests {
             for (i in 0 until setup.length()) db.execSQL(setup.getString(i))
             db.version = version
             seed(db)
+        }
+    }
+
+    /**
+     * A database as the 7 Oct 2026 build (1.2.2 at the time) left it, with that build's identity
+     * hash. After an upgrade from version 2, its own 2 -> 3 step had added three
+     * `NOT NULL DEFAULT 0.0` columns at the end; on a new install ([createdFresh]) it created them
+     * before `createdAt` with no default and wrote 0.0 itself. Row d1 predates those columns; d2
+     * was logged by that build.
+     */
+    private fun createDatabaseIn7OctoberLayout(
+        name: String,
+        createdFresh: Boolean = false,
+        extra: (SQLiteDatabase) -> Unit = {}
+    ) {
+        createDatabaseFromSchema(name, version = 2) { db ->
+            seedVersion2(db)
+            if (createdFresh) {
+                db.execSQL("ALTER TABLE diary_entries RENAME TO diary_entries_v2")
+                db.execSQL(
+                    "CREATE TABLE diary_entries (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, uuid TEXT NOT NULL, " +
+                        "dateEpochDay INTEGER NOT NULL, mealType TEXT NOT NULL, foodId INTEGER NOT NULL, " +
+                        "foodName TEXT NOT NULL, userQuantity REAL NOT NULL, servingDescription TEXT NOT NULL, " +
+                        "gramWeight REAL NOT NULL, loggedCalories REAL NOT NULL, loggedProtein REAL NOT NULL, " +
+                        "loggedCarbs REAL NOT NULL, loggedFat REAL NOT NULL, loggedFiber REAL NOT NULL, " +
+                        "loggedSugar REAL NOT NULL, loggedSodium REAL NOT NULL, createdAt INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT INTO diary_entries SELECT id, uuid, dateEpochDay, mealType, foodId, foodName, " +
+                        "userQuantity, servingDescription, gramWeight, loggedCalories, loggedProtein, loggedCarbs, " +
+                        "loggedFat, 0.0, 0.0, 0.0, createdAt FROM diary_entries_v2"
+                )
+                db.execSQL("DROP TABLE diary_entries_v2")
+                db.execSQL("CREATE INDEX index_diary_entries_dateEpochDay ON diary_entries (dateEpochDay)")
+                db.execSQL("CREATE INDEX index_diary_entries_mealType ON diary_entries (mealType)")
+                db.execSQL("CREATE UNIQUE INDEX index_diary_entries_uuid ON diary_entries (uuid)")
+            } else {
+                for (column in listOf("loggedFiber", "loggedSugar", "loggedSodium")) {
+                    db.execSQL("ALTER TABLE diary_entries ADD COLUMN $column REAL NOT NULL DEFAULT 0.0")
+                }
+            }
+            db.execSQL(
+                "INSERT INTO diary_entries (uuid, dateEpochDay, mealType, foodId, foodName, userQuantity, " +
+                    "servingDescription, gramWeight, loggedCalories, loggedProtein, loggedCarbs, loggedFat, createdAt, " +
+                    "loggedFiber, loggedSugar, loggedSodium) " +
+                    "VALUES ('d2', 20001, 'DINNER', 8, 'Rice', 1.0, '1 cup', 150.0, 200.0, 4.0, 44.0, 0.5, 2, 2.5, 0.0, 410.0)"
+            )
+            db.execSQL("UPDATE room_master_table SET identity_hash = 'layout-of-the-7-october-build' WHERE id = 42")
+            extra(db)
+            db.version = 3
         }
     }
 

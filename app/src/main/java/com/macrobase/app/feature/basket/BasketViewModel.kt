@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -28,10 +29,12 @@ private fun invalidIds(items: List<BasketItem>, typedInvalid: Set<String>): Set<
         item.id.takeIf { it in typedInvalid || !(item.quantity.isFinite() && item.quantity > 0.0) }
     }
 
-enum class LoggingMode {
-    MULTIPLE_FOODS,
-    SINGLE_FOOD_RECIPE
-}
+/** The value every item shares, or null when they differ or the basket is empty. */
+private fun <T> sharedBy(items: List<BasketItem>, value: (BasketItem) -> T): T? =
+    items.map(value).distinct().singleOrNull()
+
+private fun isMixed(items: List<BasketItem>): Boolean =
+    items.isNotEmpty() && (sharedBy(items) { it.date } == null || sharedBy(items) { it.mealType } == null)
 
 class BasketViewModel(
     private val getBasketItemsUseCase: GetBasketItemsUseCase,
@@ -49,19 +52,26 @@ class BasketViewModel(
         initialValue = emptyList()
     )
 
-    private val _commonDate = MutableStateFlow(LocalDate.now())
-    val commonDate: StateFlow<LocalDate> = _commonDate.asStateFlow()
+    /**
+     * The day every item will be logged under, or null when they differ (BUG-039). Each item is
+     * logged under its own day and meal, so the header shows one only when they all share it.
+     */
+    val commonDate: StateFlow<LocalDate?> = getBasketItemsUseCase()
+        .map { items -> sharedBy(items) { it.date } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, sharedBy(getBasketItemsUseCase().value) { it.date })
 
-    private val _commonMealType = MutableStateFlow(MealType.BREAKFAST)
-    val commonMealType: StateFlow<MealType> = _commonMealType.asStateFlow()
+    /** The meal every item will be logged under, or null when they differ (BUG-039). */
+    val commonMealType: StateFlow<MealType?> = getBasketItemsUseCase()
+        .map { items -> sharedBy(items) { it.mealType } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, sharedBy(getBasketItemsUseCase().value) { it.mealType })
 
-    private val _loggingMode = MutableStateFlow(LoggingMode.MULTIPLE_FOODS)
-    val loggingMode: StateFlow<LoggingMode> = _loggingMode.asStateFlow()
+    /** True when the items differ in day or meal, so each row shows its own (BUG-039). */
+    val isMixedDateOrMeal: StateFlow<Boolean> = getBasketItemsUseCase()
+        .map(::isMixed)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, isMixed(getBasketItemsUseCase().value))
 
     private val _revealedItemId = MutableStateFlow<String?>(null)
     val revealedItemId: StateFlow<String?> = _revealedItemId.asStateFlow()
-
-    private var hasUserOverriddenDateMeal = false
 
     /** Rows whose typed quantity text is not a loggable amount (BUG-012). */
     private val _typedInvalidIds = MutableStateFlow<Set<String>>(emptySet())
@@ -87,13 +97,6 @@ class BasketViewModel(
                 // Forget invalid-quantity marks for items that left the basket (logged elsewhere, removed)
                 val ids = currentItems.mapTo(HashSet()) { it.id }
                 _typedInvalidIds.update { invalid -> invalid.filterTo(HashSet()) { it in ids } }
-                if (currentItems.isEmpty()) {
-                    hasUserOverriddenDateMeal = false
-                } else if (!hasUserOverriddenDateMeal) {
-                    val first = currentItems.first()
-                    _commonDate.value = first.date
-                    _commonMealType.value = first.mealType
-                }
             }
         }
     }
@@ -138,20 +141,14 @@ class BasketViewModel(
         updateBasketItemUseCase(updatedItem)
     }
 
+    /** Logs every item under [mealType]; the header follows from the items. */
     fun setCommonMealType(mealType: MealType) {
-        hasUserOverriddenDateMeal = true
-        _commonMealType.value = mealType
         updateAllBasketItemsUseCase(mealType)
     }
 
+    /** Logs every item on [date]; the header follows from the items. */
     fun setCommonDate(date: LocalDate) {
-        hasUserOverriddenDateMeal = true
-        _commonDate.value = date
         updateAllBasketItemsUseCase(date)
-    }
-
-    fun setLoggingMode(mode: LoggingMode) {
-        _loggingMode.value = mode
     }
 
     fun setRevealedItem(itemId: String?) {
@@ -167,13 +164,13 @@ class BasketViewModel(
     }
 
     fun clearBasket() {
-        hasUserOverriddenDateMeal = false
         clearBasketUseCase()
         _typedInvalidIds.value = emptySet()
         _revealedItemId.value = null
     }
 
-    fun submitBasket(onSuccess: () -> Unit, onError: (String) -> Unit) {
+    /** Errors also show through [submitError]; [onError] is for callers that want them directly. */
+    fun submitBasket(onSuccess: () -> Unit, onError: (String) -> Unit = {}) {
         // Taps arrive on the main thread, so a second tap always sees the first one's flag
         if (_isSubmitting.value) return
         if (invalidIds(getBasketItemsUseCase().value, _typedInvalidIds.value).isNotEmpty()) {

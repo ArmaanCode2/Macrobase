@@ -35,14 +35,15 @@ object BasketItemsJson {
         val raw = try {
             SimpleJsonParser.parseObject(json).getArray("items") ?: emptyList()
         } catch (e: Exception) {
-            Log.w(TAG, "Unreadable basket file: ${e.message}")
+            // Only the error type: the file holds food names (BUG-047)
+            Log.w(TAG, "Unreadable basket file (${e.javaClass.simpleName})")
             return emptyList()
         }
         return raw.mapNotNull { item ->
             try {
                 decodeItem(item as? JsonObject ?: throw IllegalArgumentException("Expected item object"))
             } catch (e: Exception) {
-                Log.w(TAG, "Skipping unreadable basket item: ${e.message}")
+                Log.w(TAG, "Skipping unreadable basket item (${e.javaClass.simpleName})")
                 null
             }
         }

@@ -1,6 +1,7 @@
 package com.macrobase.app.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
@@ -15,11 +16,18 @@ import com.macrobase.app.domain.model.GoalTransitionBackupDto
 import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.feature.widget.MacroBaseWidgetProvider
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import java.io.IOException
 import java.time.LocalDate
 
-private val Context.goalsDataStore by preferencesDataStore(name = "user_goals")
+private val Context.goalsDataStore by preferencesDataStore(
+    name = "user_goals",
+    corruptionHandler = preferencesCorruptionHandler
+)
 
 /**
  * Concrete implementation of GoalsRepository managing user nutritional targets in DataStore.
@@ -30,6 +38,9 @@ class GoalsRepositoryImpl(
     /** Today's date; tests move it to check how past days resolve. */
     private val clock: () -> LocalDate = { LocalDate.now() }
 ) : GoalsRepository {
+
+    /** Every read goes through here, so an unreadable file means default goals, not a crash (BUG-053). */
+    private val data = store.data.emptyOnIoError("goals")
 
     private object Keys {
         val DAILY_CALORIE_GOAL = doublePreferencesKey("daily_calorie_goal")
@@ -44,6 +55,11 @@ class GoalsRepositoryImpl(
         val SCHEDULED_MAINTENANCE_CALORIES = doublePreferencesKey("scheduled_maintenance_calories")
         val SCHEDULED_EFFECTIVE_DATE = stringPreferencesKey("scheduled_effective_date")
         val TRANSITIONS_HISTORY = stringPreferencesKey("transitions_history")
+    }
+
+    private companion object {
+        /** The record for every day before the first saved change; not a saved day itself. */
+        const val HISTORY_PLACEHOLDER_DATE = "2000-01-01"
     }
 
     private data class GoalTransitionRecord(
@@ -88,9 +104,15 @@ class GoalsRepositoryImpl(
 
     private suspend fun checkAndPromoteScheduledGoal() {
         val today = clock()
-        store.edit { prefs ->
-            promoteScheduledGoal(prefs, today)
-            recordLiveGoalIfMissing(prefs, today)
+        // Reads call this first; a write that fails here must not stop the read (BUG-053).
+        // The next read tries again.
+        try {
+            store.edit { prefs ->
+                promoteScheduledGoal(prefs, today)
+                recordLiveGoalIfMissing(prefs, today)
+            }
+        } catch (e: IOException) {
+            Log.w("MacroBaseGoals", "Could not update the scheduled goal; reading as stored", e)
         }
     }
 
@@ -117,17 +139,11 @@ class GoalsRepositoryImpl(
      * Older versions changed calorie and macro targets without a history record, so the record
      * in force today can hold old targets. Recording the live goal for today keeps today and
      * every later day scored against it once those days are past (BUG-024). Writes only when
-     * the history and the live goal disagree.
+     * the history and the live goal disagree, or when no saved day up to today tells from when
+     * the goal is known ([getGoalHistoryStart]).
      */
     private fun recordLiveGoalIfMissing(prefs: MutablePreferences, today: LocalDate) {
         val history = parseTransitions(prefs[Keys.TRANSITIONS_HISTORY])
-        if (history.isEmpty()) return
-        val inForce = history
-            .mapNotNull { record -> runCatching { LocalDate.parse(record.effectiveDate) }.getOrNull()?.let { it to record } }
-            .filter { !it.first.isAfter(today) }
-            .maxByOrNull { it.first }
-            ?.second
-            ?: return
         val live = GoalTransitionRecord(
             effectiveDate = today.toString(),
             fitnessGoal = FitnessGoal.fromString(prefs[Keys.FITNESS_GOAL]).name,
@@ -137,9 +153,31 @@ class GoalsRepositoryImpl(
             proteinPercentage = prefs[Keys.PROTEIN_PERCENTAGE] ?: 25.0,
             fatPercentage = prefs[Keys.FAT_PERCENTAGE] ?: 25.0
         )
-        if (inForce.copy(effectiveDate = live.effectiveDate, fitnessGoal = FitnessGoal.fromString(inForce.fitnessGoal).name) == live) return
+        if (history.isEmpty()) {
+            // The placeholder keeps earlier days on the goal they had, as a first change would
+            // leave them; today's record is the first saved day
+            prefs[Keys.TRANSITIONS_HISTORY] = serializeTransitions(listOf(live.copy(effectiveDate = HISTORY_PLACEHOLDER_DATE), live))
+            return
+        }
+        val dated = history.mapNotNull { record -> runCatching { LocalDate.parse(record.effectiveDate) }.getOrNull()?.let { it to record } }
+        val inForce = dated.filter { !it.first.isAfter(today) }.maxByOrNull { it.first }?.second
+        val hasSavedDay = dated.any { (date, _) -> date.toString() != HISTORY_PLACEHOLDER_DATE && !date.isAfter(today) }
+        if (inForce != null && hasSavedDay &&
+            inForce.copy(effectiveDate = live.effectiveDate, fitnessGoal = FitnessGoal.fromString(inForce.fitnessGoal).name) == live
+        ) return
         val updated = history.filterNot { it.effectiveDate == live.effectiveDate } + live
         prefs[Keys.TRANSITIONS_HISTORY] = serializeTransitions(updated.sortedBy { it.effectiveDate })
+    }
+
+    override suspend fun getGoalHistoryStart(): LocalDate? {
+        // Saves today's goal first when no saved day tells from when the goal is known
+        checkAndPromoteScheduledGoal()
+        val today = clock()
+        return parseTransitions(data.first()[Keys.TRANSITIONS_HISTORY])
+            .filter { it.effectiveDate != HISTORY_PLACEHOLDER_DATE }
+            .mapNotNull { runCatching { LocalDate.parse(it.effectiveDate) }.getOrNull() }
+            .filter { !it.isAfter(today) }
+            .minOrNull()
     }
 
     override suspend fun getGoals(): Goal {
@@ -147,45 +185,49 @@ class GoalsRepositoryImpl(
         return observeGoals().first()
     }
 
-    override fun observeGoals(): Flow<Goal> {
-        return store.data.map { prefs ->
-            val today = clock()
-            val scheduledDateStr = prefs[Keys.SCHEDULED_EFFECTIVE_DATE]
-            val scheduledGoalStr = prefs[Keys.SCHEDULED_FITNESS_GOAL]
+    override fun observeGoals(): Flow<Goal> = goalsFrom(data)
 
-            var activeFitnessGoal = FitnessGoal.fromString(prefs[Keys.FITNESS_GOAL])
-            var activeMaintenance = prefs[Keys.MAINTENANCE_CALORIES] ?: (prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0)
+    /** The goals as [source]'s preferences hold them. */
+    private fun goalsFrom(source: Flow<Preferences>): Flow<Goal> = source.map { goalFrom(it) }
 
-            var pendingFitnessGoal: FitnessGoal? = null
-            var pendingMaintenance: Double? = null
-            var pendingEffectiveDate: LocalDate? = null
+    /** The goal in force today, with any pending change, as [prefs] hold it. */
+    private fun goalFrom(prefs: Preferences): Goal {
+        val today = clock()
+        val scheduledDateStr = prefs[Keys.SCHEDULED_EFFECTIVE_DATE]
+        val scheduledGoalStr = prefs[Keys.SCHEDULED_FITNESS_GOAL]
 
-            if (!scheduledDateStr.isNullOrBlank() && !scheduledGoalStr.isNullOrBlank()) {
-                val scheduledDate = try { LocalDate.parse(scheduledDateStr) } catch (_: Exception) { null }
-                if (scheduledDate != null) {
-                    if (!today.isBefore(scheduledDate)) {
-                        activeFitnessGoal = FitnessGoal.fromString(scheduledGoalStr)
-                        activeMaintenance = prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] ?: activeMaintenance
-                    } else {
-                        pendingFitnessGoal = FitnessGoal.fromString(scheduledGoalStr)
-                        pendingMaintenance = prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] ?: activeMaintenance
-                        pendingEffectiveDate = scheduledDate
-                    }
+        var activeFitnessGoal = FitnessGoal.fromString(prefs[Keys.FITNESS_GOAL])
+        var activeMaintenance = prefs[Keys.MAINTENANCE_CALORIES] ?: (prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0)
+
+        var pendingFitnessGoal: FitnessGoal? = null
+        var pendingMaintenance: Double? = null
+        var pendingEffectiveDate: LocalDate? = null
+
+        if (!scheduledDateStr.isNullOrBlank() && !scheduledGoalStr.isNullOrBlank()) {
+            val scheduledDate = try { LocalDate.parse(scheduledDateStr) } catch (_: Exception) { null }
+            if (scheduledDate != null) {
+                if (!today.isBefore(scheduledDate)) {
+                    activeFitnessGoal = FitnessGoal.fromString(scheduledGoalStr)
+                    activeMaintenance = prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] ?: activeMaintenance
+                } else {
+                    pendingFitnessGoal = FitnessGoal.fromString(scheduledGoalStr)
+                    pendingMaintenance = prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] ?: activeMaintenance
+                    pendingEffectiveDate = scheduledDate
                 }
             }
-
-            Goal(
-                dailyCalorieGoal = prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0,
-                carbPercentage = prefs[Keys.CARB_PERCENTAGE] ?: 50.0,
-                proteinPercentage = prefs[Keys.PROTEIN_PERCENTAGE] ?: 25.0,
-                fatPercentage = prefs[Keys.FAT_PERCENTAGE] ?: 25.0,
-                fitnessGoal = activeFitnessGoal,
-                maintenanceCalories = activeMaintenance,
-                scheduledFitnessGoal = pendingFitnessGoal,
-                scheduledMaintenanceCalories = pendingMaintenance,
-                scheduledEffectiveDate = pendingEffectiveDate
-            )
         }
+
+        return Goal(
+            dailyCalorieGoal = prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0,
+            carbPercentage = prefs[Keys.CARB_PERCENTAGE] ?: 50.0,
+            proteinPercentage = prefs[Keys.PROTEIN_PERCENTAGE] ?: 25.0,
+            fatPercentage = prefs[Keys.FAT_PERCENTAGE] ?: 25.0,
+            fitnessGoal = activeFitnessGoal,
+            maintenanceCalories = activeMaintenance,
+            scheduledFitnessGoal = pendingFitnessGoal,
+            scheduledMaintenanceCalories = pendingMaintenance,
+            scheduledEffectiveDate = pendingEffectiveDate
+        )
     }
 
     override suspend fun updateGoals(goals: Goal) {
@@ -211,7 +253,16 @@ class GoalsRepositoryImpl(
             prefs[Keys.PROTEIN_PERCENTAGE] = goals.proteinPercentage
             prefs[Keys.FAT_PERCENTAGE] = goals.fatPercentage
 
-            val strategyChanged = (goals.fitnessGoal != currentFitnessGoal) || (goals.maintenanceCalories != currentMaintenance)
+            // A change still waiting (one already due was promoted above). Asking for it again changes
+            // nothing, so its date does not move. Asking for the active strategy keeps it too: only
+            // cancelScheduledGoal() drops it (BUG-031)
+            val pendingFitnessGoal = knownFitnessGoal(prefs[Keys.SCHEDULED_FITNESS_GOAL])
+                ?.takeIf { prefs[Keys.SCHEDULED_EFFECTIVE_DATE]?.let { runCatching { LocalDate.parse(it) }.getOrNull() } != null }
+            val pendingMaintenance = prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] ?: currentMaintenance
+            val asksForActive = goals.fitnessGoal == currentFitnessGoal && goals.maintenanceCalories == currentMaintenance
+            val asksForPending = pendingFitnessGoal != null &&
+                goals.fitnessGoal == pendingFitnessGoal && goals.maintenanceCalories == pendingMaintenance
+            val strategyChanged = !asksForActive && !asksForPending
             val targetsChanged = goals.dailyCalorieGoal != oldCalories || goals.carbPercentage != oldCarbs ||
                 goals.proteinPercentage != oldProtein || goals.fatPercentage != oldFat
 
@@ -237,7 +288,7 @@ class GoalsRepositoryImpl(
                 if (history.isEmpty()) {
                     history.add(
                         GoalTransitionRecord(
-                            effectiveDate = "2000-01-01",
+                            effectiveDate = HISTORY_PLACEHOLDER_DATE,
                             fitnessGoal = currentFitnessGoal.name,
                             maintenanceCalories = currentMaintenance,
                             dailyCalorieGoal = oldCalories,
@@ -303,14 +354,48 @@ class GoalsRepositoryImpl(
         MacroBaseWidgetProvider.updateAllWidgets(context)
     }
 
+    override suspend fun cancelScheduledGoal(): Boolean {
+        var dropped = false
+        store.edit { prefs ->
+            // A change whose day has come is no longer pending, so it stays
+            promoteScheduledGoal(prefs, clock())
+            dropped = prefs[Keys.SCHEDULED_FITNESS_GOAL] != null
+            clearScheduledGoal(prefs)
+        }
+        MacroBaseWidgetProvider.updateAllWidgets(context)
+        return dropped
+    }
+
+    /** Removes the pending change and the history record that would have started it. */
+    private fun clearScheduledGoal(prefs: MutablePreferences) {
+        val scheduledDate = prefs[Keys.SCHEDULED_EFFECTIVE_DATE]
+        prefs.remove(Keys.SCHEDULED_FITNESS_GOAL)
+        prefs.remove(Keys.SCHEDULED_MAINTENANCE_CALORIES)
+        prefs.remove(Keys.SCHEDULED_EFFECTIVE_DATE)
+        if (scheduledDate.isNullOrBlank()) return
+        val history = parseTransitions(prefs[Keys.TRANSITIONS_HISTORY])
+        val kept = history.filterNot { it.effectiveDate == scheduledDate }
+        if (kept.size == history.size) return
+        if (kept.isEmpty()) prefs.remove(Keys.TRANSITIONS_HISTORY) else prefs[Keys.TRANSITIONS_HISTORY] = serializeTransitions(kept)
+    }
+
     override suspend fun getGoalForDate(date: LocalDate): Goal = getGoalsForDates(listOf(date)).first()
 
     /** One read of the stored goals for any number of days (the rank replays every logged day). */
     override suspend fun getGoalsForDates(dates: List<LocalDate>): List<Goal> {
+        // getGoals first promotes a change whose day has come and records the live goal in the
+        // history where an older version left it out (BUG-024)
         val active = getGoals()
-        val today = clock()
-        val prefs = store.data.first()
+        return goalsForDates(data.first(), active, clock(), dates)
+    }
 
+    override fun observeGoalsForDates(dates: List<LocalDate>): Flow<List<Goal>> =
+        data.onStart { checkAndPromoteScheduledGoal() }
+            .map { prefs -> goalsForDates(prefs, goalFrom(prefs), clock(), dates) }
+            .distinctUntilChanged()
+
+    /** The goal in force on each of [dates], as [prefs] hold them; [active] is today's goal. */
+    private fun goalsForDates(prefs: Preferences, active: Goal, today: LocalDate, dates: List<LocalDate>): List<Goal> {
         val scheduledGoalName = prefs[Keys.SCHEDULED_FITNESS_GOAL]
         val scheduledDate = prefs[Keys.SCHEDULED_EFFECTIVE_DATE]?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val history = parseTransitions(prefs[Keys.TRANSITIONS_HISTORY])
@@ -349,8 +434,12 @@ class GoalsRepositoryImpl(
     }
 
     override suspend fun exportGoalBackup(): GoalBackupDto {
-        val goal = getGoals()
-        val transitions = parseTransitions(store.data.first()[Keys.TRANSITIONS_HISTORY])
+        checkAndPromoteScheduledGoal()
+        // A backup holds the stored goals or fails. Defaults standing in for an unreadable file
+        // would replace the goal history of whichever phone restores it (BUG-053).
+        val prefs = store.data.first()
+        val goal = goalsFrom(flowOf(prefs)).first()
+        val transitions = parseTransitions(prefs[Keys.TRANSITIONS_HISTORY])
         return GoalBackupDto.from(goal).copy(
             transitions = transitions.map {
                 GoalTransitionBackupDto(
@@ -448,7 +537,7 @@ class GoalsRepositoryImpl(
         FitnessGoal.entries.firstOrNull { it.name.equals(name?.trim(), ignoreCase = true) }
 
     override suspend fun hasSavedGoals(): Boolean {
-        val prefs = store.data.first()
+        val prefs = data.first()
         return prefs[Keys.DAILY_CALORIE_GOAL] != null || prefs[Keys.FITNESS_GOAL] != null
     }
 }

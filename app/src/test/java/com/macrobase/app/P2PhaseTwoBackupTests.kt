@@ -572,6 +572,22 @@ class P2PhaseTwoImportExportViewModelTests {
         assertEquals("PK", destination.toString(Charsets.UTF_8.name()))
     }
 
+    // BUG-047: running out of memory on a huge backup is a message, not a crash
+    @Test
+    fun runningOutOfMemoryWhileReadingABackupShowsAMessage() {
+        val repo = object : PortabilityRepository by FakePortability() {
+            override suspend fun validateBackupArchive(inputStream: InputStream): BackupValidationResult =
+                throw OutOfMemoryError("Failed to allocate a 268435456 byte allocation")
+        }
+        val vm = viewModel(repo)
+
+        vm.validateAndPreviewBackup { ByteArrayInputStream(ByteArray(0)) }
+
+        val state = vm.uiState.value
+        assertFalse(state.isValidating)
+        assertEquals(PortabilityConfig.BACKUP_TOO_LARGE_FOR_DEVICE_MESSAGE, state.validationError)
+    }
+
     @Test
     fun previewShowsTheRecordsThatWillBeRestored() {
         val data = BackupFixtures.data()

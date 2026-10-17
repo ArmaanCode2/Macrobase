@@ -24,13 +24,13 @@
 +───────────────────────────────────────────────────────────────────────────────+
 |                             UI LAYER (Jetpack Compose)                        |
 |   HomeScreen • SearchScreen • FoodDetailScreen • CustomFoods • Recipes        |
-|   CalendarScreen • DailyGoalsScreen • PreferencesScreen • ...                 |
+|   CalendarScreen • PreferencesScreen • WeightScreen • ...                     |
 +───────────────────────────────────────┬───────────────────────────────────────+
                                         │ Observes StateFlow<UiState>
                                         ▼
 +───────────────────────────────────────────────────────────────────────────────+
 |                               VIEWMODEL LAYER                                 |
-|   HomeViewModel • CalendarViewModel • DailyGoalsViewModel • ...               |
+|   HomeViewModel • CalendarViewModel • PreferencesViewModel • ...              |
 +───────────────────────────────────────┬───────────────────────────────────────+
                                         │ Dispatches Use Cases
                                         ▼
@@ -332,8 +332,12 @@ userQuantity REAL NOT NULL
 
 ### 8.1. Threat Model & Defensive Input Boundaries
 - **ZIP Path Traversal Prevention**: Archive entries are scanned for relative or absolute paths (`..`, `/`, `\`, `:`). Any entry violating sandbox boundaries is rejected before decompression.
-- **Decompression Bomb Protection**: Hard limits enforce a maximum archive size of 50 MB, maximum entry size of 50 MB, maximum total extraction of 100 MB, and maximum 50 files.
-- **Defensive JSON Sanitization**: `SimpleJsonParser` and `JsonObject` defensively sanitize `NaN`, `Infinity`, negative anomalies, and enforce string length caps (50,000 chars) to prevent OutOfMemory and injection attacks.
+- **Decompression Bomb Protection**: Hard limits enforce a maximum archive size of 50 MB compressed, 96 MB per data file, 128 MB extracted in total, and 50 files (BUG-047).
+  - Data files are parsed record by record while they stream.
+  - Each record must be a small flat object.
+  - Records per file are capped by type, and the text kept from one backup is capped at 24 million characters.
+  - So memory follows those caps rather than the file size.
+- **Defensive JSON Sanitization**: `SimpleJsonParser` rejects strings over 200,000 characters, nesting deeper than 32 levels and cut-off JSON. `JsonObject` drops `NaN` and `Infinity` and trims ordinary text fields to 50,000 characters (`getString`). Error messages give a position, never a string value from the file.
 
 ### 8.2. Storage & Component Isolation
 - **Built-in Database Immutability**: `built_in_foods.db` is opened strictly with `SQLiteDatabase.OPEN_READONLY`. User operations cannot mutate or overwrite catalog tables.

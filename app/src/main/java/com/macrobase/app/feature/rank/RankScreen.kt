@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Remove
@@ -29,32 +31,44 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.domain.model.FitnessGoal
+import com.macrobase.app.domain.model.rank.BestRank
 import com.macrobase.app.domain.model.rank.RankHistoryEntry
 import com.macrobase.app.domain.model.rank.RankProfile
+import com.macrobase.app.domain.model.rank.RankSeason
 import com.macrobase.app.domain.model.rank.RankTier
+import com.macrobase.app.domain.model.rank.ratingToRankTier
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 
@@ -64,14 +78,20 @@ fun RankScreen(
     viewModel: RankViewModel,
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    // Collected only while visible, so coming back after midnight reads the new day (BUG-032)
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val profile = uiState.rankProfile
     var showLadderSheet by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    // Where the history card starts in the scrolled column, so a new page opens at its top
+    var historyTop by remember { mutableIntStateOf(0) }
 
     if (showLadderSheet) {
         RankLadderSheet(
             currentRankTier = profile.rankTier,
             currentTierRR = profile.tierRR,
+            nextRankReset = profile.season?.nextReset,
             onDismissRequest = { showLadderSheet = false }
         )
     }
@@ -80,7 +100,7 @@ fun RankScreen(
         modifier = modifier
             .fillMaxSize()
             .background(AppColors.Background)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
     ) {
         // 0. Header Row with Info Button
@@ -119,6 +139,21 @@ fun RankScreen(
         // 3. RR Progress (e.g. 4 / 100 RR) + Progress Bar
         // 4. Compact Lifestyle Score Breakdown
         // =========================================================================
+
+        val season = profile.season
+        if (profile.showNewSeasonNotice && season != null) {
+            RankNotice(
+                title = "New season",
+                text = newSeasonNoticeText(season, profile.lastSeasonBest),
+                onDismiss = viewModel::dismissSeasonNotice
+            )
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
+        }
+
+        if (profile.showRulesNotice) {
+            RulesChangedNotice(onDismiss = viewModel::dismissRulesNotice)
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
+        }
 
         // 1. Rank Image (Substantially larger focal point, responsive fitting)
         RankImageHeader(
@@ -200,8 +235,34 @@ fun RankScreen(
 
             if (profile.isProvisional) {
                 Spacer(modifier = Modifier.height(2.dp))
+                val needed = RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD
+                // Days count once they end (BUG-032), so a day logged today is already on its way
+                val todayLogged = profile.recentHistory.firstOrNull()?.let { it.isInProgress && it.isLogged } == true
+                val remaining = (needed - profile.loggedDaysCount - (if (todayLogged) 1 else 0)).coerceAtLeast(0)
                 Text(
-                    text = "Log ${7 - profile.loggedDaysCount} more days to establish initial rating (${profile.loggedDaysCount}/7)",
+                    text = if (remaining == 0) {
+                        "Your rating starts when today ends (${profile.loggedDaysCount}/$needed days)"
+                    } else {
+                        "Log $remaining more ${if (remaining == 1) "day" else "days"} to establish initial rating (${profile.loggedDaysCount}/$needed)"
+                    },
+                    style = AppTypography.Caption.copy(fontSize = 10.sp, color = AppColors.TextSecondary)
+                )
+            }
+
+            val gate = profile.cleanWeekGate
+            if (gate != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = cleanWeekHint(gate),
+                    style = AppTypography.Caption.copy(fontSize = 10.sp, color = AppColors.TextSecondary)
+                )
+            }
+
+            val best = profile.bestThisSeason
+            if (best != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = bestRankLine(best),
                     style = AppTypography.Caption.copy(fontSize = 10.sp, color = AppColors.TextSecondary)
                 )
             }
@@ -217,10 +278,85 @@ fun RankScreen(
         // =========================================================================
         Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        RecentHistoryCard(history = profile.recentHistory)
+        RecentHistoryCard(
+            history = profile.recentHistory,
+            calorieZone = profile.calorieZone,
+            rankCountsFrom = profile.rankCountsFrom,
+            onPageChanged = {
+                // Only back up: a card top already on screen stays where it is
+                if (scrollState.value > historyTop) scope.launch { scrollState.animateScrollTo(historyTop) }
+            },
+            modifier = Modifier.onGloballyPositioned { historyTop = it.positionInParent().y.roundToInt() }
+        )
 
         Spacer(modifier = Modifier.height(AppSpacing.lg))
     }
+}
+
+/** Why the rating stops below [gate], the first rating of a rank that needs a clean week. */
+internal fun cleanWeekHint(gate: Int): String =
+    "To reach ${ratingToRankTier(gate).rank.displayName}: a clean week, 7 days in a row in your calorie zone " +
+        "(one day off or missed is allowed)"
+
+/** "Best this season: Gym Cat II \u2022 Sep 3". */
+internal fun bestRankLine(best: BestRank): String =
+    "Best this season: ${best.rankTier.displayName} \u2022 ${best.date.format(DateTimeFormatter.ofPattern("MMM d", Locale.US))}"
+
+/** What the "New season" notice says about the reset that started [season]. */
+internal fun newSeasonNoticeText(season: RankSeason, lastSeasonBest: BestRank?): String {
+    val resetOn = season.start.format(DateTimeFormatter.ofPattern("MMM d", Locale.US))
+    val best = lastSeasonBest?.let { " Last season's best: ${it.rankTier.displayName}." } ?: ""
+    return "A new season started on $resetOn, so your rank starts again from Fat Bear.$best"
+}
+
+/** A notice at the top of the screen that stays until the user taps "Got it". */
+@Composable
+private fun RankNotice(title: String, text: String, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(AppColors.Primary.copy(alpha = 0.12f))
+            .border(1.dp, AppColors.Primary.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+            .padding(horizontal = AppSpacing.sm, vertical = 6.dp)
+    ) {
+        Column {
+            Text(
+                text = title,
+                style = AppTypography.Body2.copy(fontWeight = FontWeight.Bold),
+                color = AppColors.TextPrimary
+            )
+            Text(
+                text = text,
+                style = AppTypography.Caption,
+                color = AppColors.TextSecondary
+            )
+            TextButton(onClick = onDismiss, contentPadding = PaddingValues(0.dp)) {
+                Text(
+                    text = "Got it",
+                    style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold),
+                    color = AppColors.Primary
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Shown once after the rank rules change. Every rank is worked out from the diary with the
+ * current rules, so the text is true both for a new user and for one whose rank changed.
+ */
+@Composable
+private fun RulesChangedNotice(onDismiss: () -> Unit) {
+    RankNotice(
+        title = "New rank rules",
+        text = "Your rank is worked out with these rules. It counts only days with a saved goal, and starts again " +
+            "from Fat Bear every year on the date you first logged food. Days earn RR " +
+            "for eating in your calorie zone and for good food: protein, fiber, and less saturated fat, " +
+            "sodium and sugar. Eating near maintenance while cutting or bulking loses RR. Your logged " +
+            "food is never changed.",
+        onDismiss = onDismiss
+    )
 }
 
 @Composable
@@ -341,25 +477,7 @@ private fun StrategyBadge(
 @Composable
 private fun CompactScoreBreakdownCard(profile: RankProfile) {
     val ls = profile.lifestyleScore
-
-    val maint = profile.maintenanceCalories.roundToInt()
-    val calorieSubtitle = when (profile.fitnessGoal) {
-        FitnessGoal.BULKING -> {
-            val minStr = String.format(Locale.US, "%,d", maint)
-            val maxStr = String.format(Locale.US, "%,d", maint + 500)
-            "Target: $minStr \u2013 $maxStr kcal (Surplus)"
-        }
-        FitnessGoal.CUTTING -> {
-            val minStr = String.format(Locale.US, "%,d", (maint - 500).coerceAtLeast(0))
-            val maxStr = String.format(Locale.US, "%,d", maint)
-            "Target: $minStr \u2013 $maxStr kcal (Deficit)"
-        }
-        FitnessGoal.MAINTAINING -> {
-            val minStr = String.format(Locale.US, "%,d", (maint - 100).coerceAtLeast(0))
-            val maxStr = String.format(Locale.US, "%,d", maint + 100)
-            "Target: $minStr \u2013 $maxStr kcal (\u00b1100)"
-        }
-    }
+    val calorieSubtitle = calorieZoneSubtitle(profile.fitnessGoal, profile.calorieZone)
 
     Box(
         modifier = Modifier
@@ -376,7 +494,8 @@ private fun CompactScoreBreakdownCard(profile: RankProfile) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "LIFESTYLE SCORE BREAKDOWN",
+                    // The 30 days that have ended; today shows in the history below (BUG-032)
+                    text = "LIFESTYLE SCORE (LAST 30 DAYS)",
                     style = AppTypography.Caption.copy(
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
@@ -392,18 +511,17 @@ private fun CompactScoreBreakdownCard(profile: RankProfile) {
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 1. Consistency (35%)
-            CompactComponentScoreRow(
-                label = "Consistency (35%)",
-                score = ls.consistencyScore.roundToInt(),
-                color = Color(0xFF4CAF50)
+            Text(
+                text = "Day score = calories in zone \u00d7 food score",
+                style = AppTypography.Caption.copy(fontSize = 9.sp),
+                color = AppColors.TextSecondary
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // 2. Calories (30%)
+            // 1. Calorie zone: how much of the food score the days kept
             CompactComponentScoreRow(
-                label = "Calories (30%)",
+                label = "Calories in zone",
                 score = ls.calorieScore.roundToInt(),
                 color = Color(0xFFFFA726),
                 subtitle = calorieSubtitle
@@ -411,23 +529,56 @@ private fun CompactScoreBreakdownCard(profile: RankProfile) {
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 3. Macros (27%)
+            // 2-4. The food score: protein 40%, food quality 45%, carb & fat balance 15%
             CompactComponentScoreRow(
-                label = "Macros (27%)",
-                score = ls.macroScore.roundToInt(),
+                label = "Protein (40% of food score)",
+                score = ls.proteinScore.roundToInt(),
                 color = Color(0xFF4DD0E1)
             )
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // 4. Weight Trend (8%)
             CompactComponentScoreRow(
-                label = "Weight Trend (8%)",
-                score = ls.weightTrendScore.roundToInt(),
+                label = "Food quality (45% of food score)",
+                score = ls.qualityScore.roundToInt(),
+                color = Color(0xFF4CAF50),
+                subtitle = "Fiber, saturated fat, sodium, sugar"
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            CompactComponentScoreRow(
+                label = "Carb & fat balance (15% of food score)",
+                score = ls.balanceScore.roundToInt(),
                 color = Color(0xFFAB47BC)
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            CompactComponentScoreRow(
+                label = "Days logged",
+                score = ls.consistencyScore.roundToInt(),
+                color = Color(0xFF90A4AE),
+                subtitle = if (profile.isProvisional) {
+                    "${ls.loggedDays} of ${ls.eligibleDays} days"
+                } else {
+                    "${ls.loggedDays} of ${ls.eligibleDays} days \u2022 a missed day is \u221220 RR"
+                }
             )
         }
     }
+}
+
+/** The full-credit calorie zone and where the credit runs out, e.g. "Zone: 1,500 – 1,800 kcal". */
+internal fun calorieZoneSubtitle(strategy: FitnessGoal, zone: ClosedFloatingPointRange<Double>): String {
+    val low = String.format(Locale.US, "%,d", zone.start.roundToInt())
+    val high = String.format(Locale.US, "%,d", zone.endInclusive.roundToInt())
+    val rule = when (strategy) {
+        FitnessGoal.CUTTING -> "near or above maintenance earns nothing"
+        FitnessGoal.BULKING -> "near or below maintenance earns nothing"
+        FitnessGoal.MAINTAINING -> "10% off maintenance earns nothing"
+    }
+    return "Zone: $low \u2013 $high kcal \u2022 $rule"
 }
 
 @Composable
@@ -476,12 +627,63 @@ private fun CompactComponentScoreRow(
     }
 }
 
+/** Days per history page. */
+private const val HISTORY_PAGE_DAYS = 30
+
+/** "Oct 05", as each history row names a day; English like the rest of the screen. */
+private val historyDateFormat = DateTimeFormatter.ofPattern("MMM dd", Locale.US)
+
+/**
+ * Why a day lost RR, in a few words, or null when it did not. A day at the bottom of the ladder
+ * that would have lost RR gets its reason too, though the rank could not fall further. Today gets
+ * one only when its preview is a loss and it is not [stillEating], below the calorie zone.
+ */
+internal fun historyReasonLine(entry: RankHistoryEntry, stillEating: Boolean = false): String? {
+    if (entry.heldByCleanWeek) return "Next rank needs a clean week"
+    if (entry.isInProgress && (!entry.isLogged || stillEating || entry.rrDelta >= 0)) return null
+    val dayRR = if (entry.isLogged) RankScoringConfig.rrForDay(entry.overallScore, entry.ratingBefore) else RankScoringConfig.MISSED_DAY_RR
+    return when {
+        dayRR >= 0 -> null
+        !entry.isLogged -> "Missed day"
+        entry.calorieScore == 0.0 -> "Calories outside your zone"
+        else -> {
+            // The part that cost the day the most points
+            val credit = entry.calorieScore / 100.0
+            val food = RankScoringConfig.foodScore(entry.proteinScore, entry.qualityScore, entry.balanceScore)
+            listOf(
+                "Calories off target" to (1.0 - credit) * food,
+                "Protein off target" to RankScoringConfig.PROTEIN_SHARE * (100.0 - entry.proteinScore) * credit,
+                "Food quality low" to RankScoringConfig.QUALITY_SHARE * (100.0 - entry.qualityScore) * credit,
+                "Carbs and fat off target" to RankScoringConfig.BALANCE_SHARE * (100.0 - entry.balanceScore) * credit
+            ).maxBy { it.second }.first
+        }
+    }
+}
+
+/** "Sep 15 \u2013 Oct 14" for a page of [entries], the newest first. */
+internal fun historyPageRange(entries: List<RankHistoryEntry>): String {
+    val newest = entries.first().date.format(historyDateFormat)
+    val oldest = entries.last().date.format(historyDateFormat)
+    return if (entries.size == 1) newest else "$oldest \u2013 $newest"
+}
+
 @Composable
-private fun RecentHistoryCard(history: List<RankHistoryEntry>) {
+private fun RecentHistoryCard(
+    history: List<RankHistoryEntry>,
+    calorieZone: ClosedFloatingPointRange<Double>,
+    rankCountsFrom: LocalDate?,
+    onPageChanged: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val today = LocalDate.now()
+    // The first page holds today and the 29 days before it, each later page the 30 days before
+    val pages = remember(history) { history.chunked(HISTORY_PAGE_DAYS) }
+    // Back on the first page whenever the screen opens again
+    var page by remember { mutableIntStateOf(0) }
+    val shownPage = page.coerceIn(0, maxOf(0, pages.lastIndex))
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(4.dp))
             .background(AppColors.Surface)
@@ -504,12 +706,16 @@ private fun RecentHistoryCard(history: List<RankHistoryEntry>) {
                     color = AppColors.TextSecondary
                 )
             } else {
-                history.take(14).forEach { entry ->
-                    val dateLabel = when (entry.date) {
-                        today -> "Today"
-                        today.minusDays(1) -> "Yesterday"
-                        else -> entry.date.format(DateTimeFormatter.ofPattern("MMM dd"))
+                pages[shownPage].forEach { entry ->
+                    val dateLabel = when {
+                        // Not in the rating until the day ends (BUG-032); the RR side says so
+                        entry.isInProgress || entry.date == today -> "Today"
+                        entry.date == today.minusDays(1) -> "Yesterday"
+                        else -> entry.date.format(historyDateFormat)
                     }
+                    // Below the zone, today has simply not been eaten yet: no -15 preview each morning
+                    val stillFillingUp = entry.isInProgress && entry.calorieScore == 0.0 && entry.calories < calorieZone.start
+                    val reason = historyReasonLine(entry, stillEating = entry.isInProgress && entry.calories < calorieZone.start)
 
                     Row(
                         modifier = Modifier
@@ -522,17 +728,31 @@ private fun RecentHistoryCard(history: List<RankHistoryEntry>) {
                             Text(
                                 text = dateLabel,
                                 style = AppTypography.Body2.copy(fontWeight = FontWeight.Medium),
-                                color = AppColors.TextPrimary
+                                color = if (entry.isInProgress) AppColors.TextSecondary else AppColors.TextPrimary
                             )
                             Text(
-                                text = "${entry.rankTier.displayName} • ${entry.tierRR} RR",
+                                text = "${entry.rankTier.displayName} \u2022 ${entry.tierRR} RR",
                                 style = AppTypography.Caption,
                                 color = AppColors.TextSecondary
                             )
+                            if (reason != null) {
+                                Text(
+                                    text = reason,
+                                    style = AppTypography.Caption.copy(fontSize = 10.sp),
+                                    color = AppColors.TextSecondary.copy(alpha = 0.85f)
+                                )
+                            }
                         }
 
-                        val deltaText = if (entry.rrDelta > 0) "+${entry.rrDelta} RR" else if (entry.rrDelta < 0) "${entry.rrDelta} RR" else "0 RR"
+                        val signedDelta = if (entry.rrDelta > 0) "+${entry.rrDelta} RR" else if (entry.rrDelta < 0) "${entry.rrDelta} RR" else "0 RR"
+                        val deltaText = when {
+                            !entry.isInProgress -> signedDelta
+                            !entry.isLogged -> "Not logged yet"
+                            stillFillingUp -> "In progress"
+                            else -> "$signedDelta preview"
+                        }
                         val deltaColor = when {
+                            entry.isInProgress -> AppColors.TextSecondary
                             entry.rrDelta > 0 -> AppColors.CalorieText
                             entry.rrDelta < 0 -> Color(0xFFE53935)
                             else -> AppColors.TextSecondary
@@ -541,6 +761,7 @@ private fun RecentHistoryCard(history: List<RankHistoryEntry>) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = when {
+                                    stillFillingUp -> Icons.Default.Remove
                                     entry.rrDelta > 0 -> Icons.Default.ArrowUpward
                                     entry.rrDelta < 0 -> Icons.Default.ArrowDownward
                                     else -> Icons.Default.Remove
@@ -559,8 +780,62 @@ private fun RecentHistoryCard(history: List<RankHistoryEntry>) {
                     }
                     HorizontalDivider(color = AppColors.Divider, thickness = 0.5.dp)
                 }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // The list reads from the newest day down, so < goes to newer days and > to older ones
+                    val hasNewer = shownPage > 0
+                    val hasOlder = shownPage < pages.lastIndex
+                    IconButton(
+                        onClick = {
+                            page = shownPage - 1
+                            onPageChanged()
+                        },
+                        enabled = hasNewer
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Newer days",
+                            tint = if (hasNewer) AppColors.Primary else AppColors.TextSecondary.copy(alpha = 0.4f)
+                        )
+                    }
+                    Text(
+                        text = historyPageRange(pages[shownPage]),
+                        style = AppTypography.Caption.copy(fontWeight = FontWeight.Bold),
+                        color = AppColors.TextSecondary
+                    )
+                    IconButton(
+                        onClick = {
+                            page = shownPage + 1
+                            onPageChanged()
+                        },
+                        enabled = hasOlder
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Older days",
+                            tint = if (hasOlder) AppColors.Primary else AppColors.TextSecondary.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+            }
+
+            // Under the oldest page, or alone when every logged day came before it
+            if (rankCountsFrom != null && shownPage >= pages.lastIndex) {
+                val countsFrom = rankCountsFrom.format(historyDateFormat) +
+                    if (rankCountsFrom.year == today.year) "" else ", ${rankCountsFrom.year}"
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Your rank counts from $countsFrom, the first day with a saved goal.",
+                    style = AppTypography.Caption.copy(fontSize = 10.sp),
+                    color = AppColors.TextSecondary
+                )
             }
         }
     }
 }
-

@@ -126,7 +126,7 @@ data class WaterTrackingUiState(
  */
 data class StatisticsUiState(
     val selectedTab: Int = 0,
-    val startDate: LocalDate = LocalDate.now().minusDays(30),
+    val startDate: LocalDate = com.macrobase.app.domain.model.windowStart(LocalDate.now(), 30),
     val endDate: LocalDate = LocalDate.now(),
     val consistencyStats: ConsistencyStatistics? = null,
     val macroStats: MacroAveragesStatistics? = null,

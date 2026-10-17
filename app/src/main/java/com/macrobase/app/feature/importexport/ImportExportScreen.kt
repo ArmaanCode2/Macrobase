@@ -47,10 +47,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.PortabilityConfig
+import com.macrobase.app.core.util.briefErrorText
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
@@ -181,11 +183,13 @@ class ImportExportViewModel(
                         )
                     }
                 }
+            } catch (e: OutOfMemoryError) {
+                _uiState.update { it.copy(isValidating = false, validationError = PortabilityConfig.BACKUP_TOO_LARGE_FOR_DEVICE_MESSAGE) }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isValidating = false,
-                        validationError = "Failed to parse backup: ${e.message ?: "Corrupted file"}"
+                        validationError = "Failed to parse backup: ${briefErrorText(e, "Corrupted file")}"
                     )
                 }
             }
@@ -317,7 +321,14 @@ fun ImportExportScreen(
                 Row(modifier = Modifier.padding(AppSpacing.md), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Error, contentDescription = null, tint = AppColors.TextPrimary)
                     Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    Text(text = err, style = AppTypography.Body1, color = AppColors.TextPrimary)
+                    // Bounded even if a message ever grows: it once held a whole backup file (BUG-047)
+                    Text(
+                        text = err,
+                        style = AppTypography.Body1,
+                        color = AppColors.TextPrimary,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

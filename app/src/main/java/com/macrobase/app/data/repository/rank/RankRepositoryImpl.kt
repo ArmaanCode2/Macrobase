@@ -2,80 +2,99 @@ package com.macrobase.app.data.repository.rank
 
 import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.core.util.DeviceClock
+import com.macrobase.app.data.repository.FoodRepositoryImpl
 import com.macrobase.app.domain.model.Goal
-import com.macrobase.app.domain.model.UserPreferences
+import com.macrobase.app.domain.model.Nutrition
+import com.macrobase.app.domain.model.Recipe
+import com.macrobase.app.domain.model.rank.BestRank
 import com.macrobase.app.domain.model.rank.LifestyleScore
+import com.macrobase.app.domain.model.rank.PastSeason
+import com.macrobase.app.domain.model.rank.RankDayNutrients
+import com.macrobase.app.domain.model.rank.RankDayNutrients.KnownAmount
 import com.macrobase.app.domain.model.rank.RankHistoryEntry
 import com.macrobase.app.domain.model.rank.RankProfile
+import com.macrobase.app.domain.model.rank.RankSeason
+import com.macrobase.app.domain.model.rank.RatingPoint
 import com.macrobase.app.domain.model.rank.ratingToRankTier
 import com.macrobase.app.domain.model.rank.scoreToRankBreakdown
+import com.macrobase.app.domain.model.windowStart
 import com.macrobase.app.domain.repository.DiaryRepository
+import com.macrobase.app.domain.repository.FoodRepository
 import com.macrobase.app.domain.repository.GoalsRepository
+import com.macrobase.app.domain.repository.LoggedFoodNutrients
 import com.macrobase.app.domain.repository.PreferencesRepository
-import com.macrobase.app.domain.repository.StatisticsRepository
-import com.macrobase.app.domain.repository.WeightRepository
 import com.macrobase.app.domain.repository.rank.RankRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
+import java.time.ZonedDateTime
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 class RankRepositoryImpl(
-    private val statisticsRepository: StatisticsRepository,
     private val goalsRepository: GoalsRepository,
-    private val weightRepository: WeightRepository,
-    private val preferencesRepository: PreferencesRepository,
     private val diaryRepository: DiaryRepository,
-    private val clock: Clock = DeviceClock
+    /**
+     * Built-in foods' nutrients for entries logged before the diary kept fiber, sugar, saturated
+     * fat and sodium. Only read; the entries never change (AGENTS.md 1.4). Null skips the lookup.
+     */
+    private val foodRepository: FoodRepository? = null,
+    /** Where the "rank recalculated" notice is remembered; null never shows it. */
+    private val preferencesRepository: PreferencesRepository? = null,
+    private val clock: Clock = DeviceClock,
+    /** Where the replay runs; tests pass their own to drive the midnight check in virtual time. */
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : RankRepository {
 
-    private data class StatsAndGoals(
-        val consistencyStats: com.macrobase.app.domain.model.ConsistencyStatistics,
-        val macroStats: com.macrobase.app.domain.model.MacroAveragesStatistics,
-        val weightStats: com.macrobase.app.domain.model.WeightStatistics,
-        val goals: Goal
-    )
+    /** A built-in food's nutrients by food id and logged name; null when it is not that food. */
+    private data class CatalogNutrition(val nutrition: Nutrition?)
 
-    override fun observeRankProfile(): Flow<RankProfile> {
-        val today = LocalDate.now(clock)
-        // The lifestyle breakdown and the history list cover the last 30 days
-        val startDate = today.minusDays((RankScoringConfig.ROLLING_WINDOW_DAYS - 1).toLong())
+    private val catalogCache = ConcurrentHashMap<Pair<Long, String>, CatalogNutrition>()
 
-        val statsAndGoalsFlow = combine(
-            statisticsRepository.observeNutritionConsistency(startDate, today),
-            statisticsRepository.observeMacroAverages(startDate, today),
-            statisticsRepository.observeWeightStatistics(startDate, today),
-            goalsRepository.observeGoals()
-        ) { consistencyStats, macroStats, weightStats, goals ->
-            StatsAndGoals(consistencyStats, macroStats, weightStats, goals)
-        }
-
-        return combine(
-            statsAndGoalsFlow,
-            preferencesRepository.observePreferences(),
-            // The rating itself is replayed over every logged day (BUG-023)
-            diaryRepository.observeNutritionAggregations(HISTORY_START, today),
-            weightRepository.observeWeightHistory()
-        ) { statsAndGoals, preferences, aggregations, weights ->
-            buildRankProfile(
-                today = today,
-                startDate = startDate,
-                consistencyStats = statsAndGoals.consistencyStats,
-                macroStats = statsAndGoals.macroStats,
-                weightStats = statsAndGoals.weightStats,
-                goals = statsAndGoals.goals,
-                preferences = preferences,
-                aggregations = aggregations,
-                weights = weights
-            )
-        }
+    /**
+     * The profile for the current day. "Today" is read again after each midnight, so a profile
+     * kept open overnight counts the day that just ended (BUG-032).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeRankProfile(): Flow<RankProfile> =
+        observeToday()
+            .flatMapLatest { today -> observeRankProfile(today) }
             // Replaying years of history is real work: keep it off the main thread
-            .flowOn(Dispatchers.Default)
+            .flowOn(dispatcher)
+
+    /** Today, then each new day as it starts, checked at least hourly in case the clock or zone changes. */
+    private fun observeToday(): Flow<LocalDate> = flow {
+        while (true) {
+            val now = ZonedDateTime.now(clock)
+            emit(now.toLocalDate())
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
+            delay(Duration.between(now, nextMidnight).toMillis().coerceIn(MIN_DAY_CHECK_MS, MAX_DAY_CHECK_MS))
+        }
+    }.distinctUntilChanged()
+
+    private fun observeRankProfile(today: LocalDate): Flow<RankProfile> = combine(
+        // A replay covers the whole diary: only a real change to these starts another
+        goalsRepository.observeGoals().distinctUntilChanged(),
+        // The rating is replayed over every logged day (BUG-023)
+        diaryRepository.observeLoggedFoodNutrients(HISTORY_START, today),
+        (preferencesRepository?.observeSeenRankRulesVersion() ?: flowOf(RankScoringConfig.RULES_VERSION)).distinctUntilChanged(),
+        (preferencesRepository?.observeSeenRankSeason() ?: flowOf(Long.MAX_VALUE)).distinctUntilChanged()
+    ) { goals, foods, seenRulesVersion, seenSeasonOn ->
+        buildRankProfile(today, goals, foods, seenRulesVersion, seenSeasonOn)
     }
 
     override suspend fun getRankProfile(): RankProfile {
@@ -83,209 +102,92 @@ class RankRepositoryImpl(
     }
 
     override suspend fun calculateLifestyleScoreForPeriod(startDate: LocalDate, endDate: LocalDate): LifestyleScore {
-        val consistencyStats = statisticsRepository.getNutritionConsistency(startDate, endDate)
-        val macroStats = statisticsRepository.getMacroAverages(startDate, endDate)
-        val weightStats = statisticsRepository.getWeightStatistics(startDate, endDate)
-        val goals = goalsRepository.getGoals()
-        val preferences = preferencesRepository.getPreferences()
-
-        return computeLifestyleScore(
-            consistencyStats = consistencyStats,
-            macroStats = macroStats,
-            weightStats = weightStats,
-            goals = goals,
-            preferences = preferences
-        )
+        val countFrom = goalsRepository.getGoalHistoryStart()
+        val foods = diaryRepository.observeLoggedFoodNutrients(startDate, endDate).first()
+            .filter { countFrom == null || !it.date.isBefore(countFrom) }
+        return summarize(scoreDays(foods, endDate), startDate, endDate)
     }
 
-    private fun computeLifestyleScore(
-        consistencyStats: com.macrobase.app.domain.model.ConsistencyStatistics,
-        macroStats: com.macrobase.app.domain.model.MacroAveragesStatistics,
-        weightStats: com.macrobase.app.domain.model.WeightStatistics,
-        goals: Goal,
-        preferences: UserPreferences
-    ): LifestyleScore {
-        val consistencyScore = consistencyStats.consistencyScorePercentage.toDouble()
+    override suspend fun dismissRulesNotice() {
+        preferencesRepository?.setSeenRankRulesVersion(RankScoringConfig.RULES_VERSION)
+    }
 
-        val calorieScore = RankScoringConfig.evaluateCalorieScore(
-            actualCalories = macroStats.averageCalories,
-            maintenanceCalories = goals.maintenanceCalories,
-            goal = goals.fitnessGoal
-        )
-
-        val macroScore = RankScoringConfig.evaluateMacroBalanceScore(
-            actualP = macroStats.averageProteinGrams,
-            targetP = goals.proteinGrams,
-            actualC = macroStats.averageCarbsGrams,
-            targetC = goals.carbGrams,
-            actualF = macroStats.averageFatGrams,
-            targetF = goals.fatGrams
-        )
-
-        val weightScore = RankScoringConfig.evaluateWeightTrendScore(
-            deltaWeightKg = weightStats.deltaWeightKg,
-            entryCount = weightStats.entries.size,
-            goal = goals.fitnessGoal
-        )
-
-        val overallScore = RankScoringConfig.calculateLifestyleScore(
-            consistencyScore = consistencyScore,
-            calorieScore = calorieScore,
-            macroScore = macroScore,
-            weightTrendScore = weightScore
-        )
-
-        return LifestyleScore(
-            consistencyScore = consistencyScore,
-            calorieScore = calorieScore,
-            macroScore = macroScore,
-            weightTrendScore = weightScore,
-            overallScore = overallScore
-        )
+    override suspend fun dismissSeasonNotice(seasonStart: LocalDate) {
+        preferencesRepository?.setSeenRankSeason(seasonStart.toEpochDay())
     }
 
     private suspend fun buildRankProfile(
         today: LocalDate,
-        startDate: LocalDate,
-        consistencyStats: com.macrobase.app.domain.model.ConsistencyStatistics,
-        macroStats: com.macrobase.app.domain.model.MacroAveragesStatistics,
-        weightStats: com.macrobase.app.domain.model.WeightStatistics,
         goals: Goal,
-        preferences: UserPreferences,
-        aggregations: List<com.macrobase.app.domain.repository.DailyMacroAggregation>,
-        weights: List<com.macrobase.app.domain.model.WeightEntry>
+        foods: List<LoggedFoodNutrients>,
+        seenRulesVersion: Int,
+        seenSeasonOn: Long
     ): RankProfile {
-        val lifestyleScore = computeLifestyleScore(
-            consistencyStats = consistencyStats,
-            macroStats = macroStats,
-            weightStats = weightStats,
-            goals = goals,
-            preferences = preferences
-        )
-
-        // The rating is replayed over the whole history from the first logged day. A 30-day
-        // window rebuilt from 0 capped it at 30 x 20 = 600 (rank 3 of 8) and dropped it as good
-        // days left the window (BUG-023).
-        val aggMap = aggregations.associateBy { it.date }
-        val loggedDates = aggregations.filter { it.calories > 0.0 && !it.date.isAfter(today) }.map { it.date }.sorted()
-        val loggedDaysCount = loggedDates.size
-        val isProvisional = loggedDaysCount < RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD
-        val days = loggedDates.firstOrNull()
-            ?.let { first -> generateSequence(first) { it.plusDays(1) }.takeWhile { !it.isAfter(today) }.toList() }
-            ?: emptyList()
-        // Each day is scored against the goal in force that day (BUG-024), read in one pass
-        val dayGoals = goalsRepository.getGoalsForDates(days)
-        val sortedWeights = weights.sortedBy { it.date }
-
-        val historyEntries = mutableListOf<RankHistoryEntry>()
-
-        var runningRating = RankScoringConfig.MIN_RATING
-        var evaluatedLoggedDays = 0
-        // Weigh-ins in the 30 days up to the current day: [windowFirst, windowEnd) of sortedWeights,
-        // moved forward with the days so the replay stays linear over long histories
-        var windowFirst = 0
-        var windowEnd = 0
-
-        for ((dayIndex, curr) in days.withIndex()) {
-            val dayAgg = aggMap[curr]
-            val hasLogged = dayAgg != null && dayAgg.calories > 0.0
-            if (hasLogged) {
-                evaluatedLoggedDays++
-            }
-
-            val dayGoal = dayGoals[dayIndex]
-
-            val dayCalScore = if (dayAgg != null && dayAgg.calories > 0.0) {
-                RankScoringConfig.evaluateCalorieScore(
-                    actualCalories = dayAgg.calories,
-                    maintenanceCalories = dayGoal.maintenanceCalories,
-                    goal = dayGoal.fitnessGoal
-                )
-            } else {
-                0.0
-            }
-
-            val dayMacroScore = if (dayAgg != null && dayAgg.calories > 0.0) {
-                RankScoringConfig.evaluateMacroBalanceScore(
-                    actualP = dayAgg.proteinGrams,
-                    targetP = dayGoal.proteinGrams,
-                    actualC = dayAgg.carbsGrams,
-                    targetC = dayGoal.carbGrams,
-                    actualF = dayAgg.fatGrams,
-                    targetF = dayGoal.fatGrams
-                )
-            } else {
-                0.0
-            }
-
-            val dayConsistencyScore = if (hasLogged) 100.0 else 0.0
-            // Weight trend over the 30 days up to this day, not the last 30 days for every day
-            val windowStart = curr.minusDays((RankScoringConfig.ROLLING_WINDOW_DAYS - 1).toLong())
-            while (windowEnd < sortedWeights.size && !sortedWeights[windowEnd].date.isAfter(curr)) windowEnd++
-            while (windowFirst < windowEnd && sortedWeights[windowFirst].date.isBefore(windowStart)) windowFirst++
-            val weighIns = windowEnd - windowFirst
-            val dayWeightScore = RankScoringConfig.evaluateWeightTrendScore(
-                deltaWeightKg = if (weighIns == 0) null else sortedWeights[windowEnd - 1].weightKg - sortedWeights[windowFirst].weightKg,
-                entryCount = weighIns,
-                goal = dayGoal.fitnessGoal
-            )
-
-            val dayOverallScore = RankScoringConfig.calculateLifestyleScore(
-                consistencyScore = dayConsistencyScore,
-                calorieScore = dayCalScore,
-                macroScore = dayMacroScore,
-                weightTrendScore = dayWeightScore
-            )
-
-            val rrDelta = RankScoringConfig.calculateRRDelta(
-                lifestyleScore = dayOverallScore,
-                loggedDaysCount = if (isProvisional) evaluatedLoggedDays else loggedDaysCount,
-                macroScore = dayMacroScore
-            )
-
-            val ratingBefore = runningRating
-            runningRating = (runningRating + rrDelta).coerceIn(RankScoringConfig.MIN_RATING, RankScoringConfig.MAX_RATING)
-
-            // The screen lists the last 30 days; older days still count toward the rating
-            if (!curr.isBefore(startDate)) {
-                historyEntries.add(
-                    RankHistoryEntry(
-                        date = curr,
-                        rankTier = ratingToRankTier(runningRating),
-                        tierRR = runningRating % 100,
-                        overallRating = runningRating,
-                        rrDelta = rrDelta,
-                        overallScore = dayOverallScore,
-                        ratingBefore = ratingBefore,
-                        rankTierBefore = ratingToRankTier(ratingBefore),
-                        calorieScore = dayCalScore,
-                        consistencyScore = dayConsistencyScore,
-                        macroScore = dayMacroScore,
-                        weightTrendScore = dayWeightScore
-                    )
-                )
-            }
-        }
-
-        val breakdown = scoreToRankBreakdown(runningRating)
-
-        // Today's active score for display on the Breakdown Card (or 30-day aggregate fallback)
-        val todayAgg = aggMap[today]
-        val displayLifestyleScore = if (todayAgg != null && todayAgg.calories > 0.0) {
-            val todayHistory = historyEntries.lastOrNull { it.date == today }
-            if (todayHistory != null) {
-                LifestyleScore(
-                    consistencyScore = todayHistory.consistencyScore,
-                    calorieScore = todayHistory.calorieScore,
-                    macroScore = todayHistory.macroScore,
-                    weightTrendScore = todayHistory.weightTrendScore,
-                    overallScore = todayHistory.overallScore
-                )
-            } else {
-                lifestyleScore
+        // A day before the first saved goal would be scored against a guessed goal: left out
+        val countFrom = goalsRepository.getGoalHistoryStart()
+        // Every day the rank may count, across seasons; the score card reads these
+        val countedDays = scoreDays(if (countFrom == null) foods else foods.filter { !it.date.isBefore(countFrom) }, today)
+        // The rank starts again from the bottom on each anniversary of the first logged day
+        val firstLogged = foods.filter { it.calories > 0.0 }.minOfOrNull { it.date }
+        val season = firstLogged?.let { RankSeason.containing(it, today) }
+        val days = if (season == null) countedDays else seasonDays(countedDays, season)
+        // Each earlier season replayed on its own, for its best rank and the rank history graph
+        // A year with nothing logged is left out
+        val pastSeasonRatings = if (firstLogged != null && season != null) {
+            (1 until season.number).mapNotNull { number ->
+                val past = RankSeason.containing(firstLogged, firstLogged.plusYears(number - 1L))
+                val pastDays = seasonDays(countedDays, past)
+                if (pastDays.isEmpty()) null else past to seasonRatings(pastDays, number)
             }
         } else {
-            lifestyleScore
+            emptyList()
+        }
+        val pastSeasons = pastSeasonRatings.map { (past, ratings) -> PastSeason(past, bestOf(ratings)) }
+        // Named under the oldest history page, when this season's logged days were left out
+        val rankCountsFrom = countFrom?.takeIf { start ->
+            foods.any { it.calories > 0.0 && it.date.isBefore(start) && (season == null || !it.date.isBefore(season.start)) }
+        }
+        // Today is still in progress (owner decision D3): it changes the rating only once it
+        // ends, so an empty or half-logged morning costs nothing (BUG-032)
+        val loggedDaysCount = days.count { it.isLogged && it.date.isBefore(today) }
+
+        // Ended days make the rating. Today, when listed, is the last day and only a preview.
+        val endedDays = if (days.lastOrNull()?.date == today) days.size - 1 else days.size
+        // Every counted day; the screen shows them 30 days to a page
+        val historyEntries = mutableListOf<RankHistoryEntry>()
+        val currentRating = replayRating(days, endedDays, loggedDaysCount) { day, ratingBefore, rrDelta, rating, heldByCleanWeek ->
+            historyEntries.add(day.toHistoryEntry(ratingBefore, rrDelta, rating, isInProgress = false, heldByCleanWeek = heldByCleanWeek))
+        }
+        // Before 7 logged days the rating is not a rank yet, only a 0 waiting to be replayed
+        val thisSeasonRatings = if (loggedDaysCount < RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD) {
+            emptyList()
+        } else {
+            historyEntries.map { RatingPoint(it.date, it.overallRating, season?.number ?: 1) }
+        }
+        if (endedDays < days.size) {
+            val todayScores = days.last()
+            // The rating once today ends, minus the rating now. Ending a day can change earlier
+            // days too, for example on the day the rating is established, so this is a replay
+            // rather than today's own delta. Nothing logged yet: no preview.
+            val preview = if (todayScores.isLogged) {
+                replayRating(days, days.size, loggedDaysCount + 1) - currentRating
+            } else {
+                0
+            }
+            historyEntries.add(todayScores.toHistoryEntry(currentRating, preview, currentRating, isInProgress = true))
+        }
+
+        // The score card covers the 30 days that have ended, so a half-logged morning does not
+        // lower it (BUG-032). It judges the food, not the rank, so a new season does not empty it.
+        val lastEndedDay = today.minusDays(1)
+        val lifestyleScore = summarize(countedDays, windowStart(lastEndedDay, RankScoringConfig.ROLLING_WINDOW_DAYS.toLong()), lastEndedDay)
+        val breakdown = scoreToRankBreakdown(currentRating)
+        // The next rank that needs a clean week, once the rating is in the tier just below it
+        val nextGate = RankScoringConfig.CLEAN_WEEK_GATES.firstOrNull { it > currentRating }
+        val cleanWeekGate = nextGate?.takeIf {
+            loggedDaysCount >= RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD &&
+                currentRating >= it - RankScoringConfig.RR_PER_TIER &&
+                !hasRecentCleanWeek(days, endedDays)
         }
 
         val pendingChange = if (goals.scheduledFitnessGoal != null && (goals.scheduledFitnessGoal != goals.fitnessGoal || goals.scheduledMaintenanceCalories != goals.maintenanceCalories)) {
@@ -298,21 +200,259 @@ class RankRepositoryImpl(
         } else null
 
         return RankProfile(
-            currentRating = runningRating,
+            currentRating = currentRating,
             rankTier = breakdown.rankTier,
             tierRR = breakdown.tierRR,
-            isProvisional = isProvisional,
+            isProvisional = loggedDaysCount < RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD,
             loggedDaysCount = loggedDaysCount,
-            lifestyleScore = displayLifestyleScore,
+            lifestyleScore = lifestyleScore,
             recentHistory = historyEntries.reversed(), // Most recent first for UI
             fitnessGoal = goals.fitnessGoal,
             maintenanceCalories = goals.maintenanceCalories,
-            pendingStrategyChange = pendingChange
+            pendingStrategyChange = pendingChange,
+            calorieZone = RankScoringConfig.calorieZone(goals.fitnessGoal, goals.maintenanceCalories),
+            // Also when every logged day was left out: that rank was just recalculated to nothing
+            // Anyone with a day logged before today had a rank to recalculate, even one now left out
+            showRulesNotice = seenRulesVersion < RankScoringConfig.RULES_VERSION && firstLogged?.isBefore(today) == true,
+            season = season,
+            bestThisSeason = bestOf(thisSeasonRatings),
+            // Only the season just before: a year with nothing logged has no best to name
+            lastSeasonBest = pastSeasons.lastOrNull()?.takeIf { it.season.number == (season?.number ?: 0) - 1 }?.best,
+            showNewSeasonNotice = season != null && season.number > 1 && season.start.toEpochDay() > seenSeasonOn,
+            cleanWeekGate = cleanWeekGate,
+            rankCountsFrom = rankCountsFrom,
+            ratingHistory = pastSeasonRatings.flatMap { it.second } + thisSeasonRatings,
+            pastSeasons = pastSeasons
         )
     }
 
+    /**
+     * Every day from the first logged day to [lastDay], each scored against the goal in force that
+     * day (BUG-024). A day with no calories logged is a missed day.
+     */
+    private suspend fun scoreDays(foods: List<LoggedFoodNutrients>, lastDay: LocalDate): List<ScoredDay> {
+        val byDate = withCatalogNutrients(foods.filter { !it.date.isAfter(lastDay) }).groupBy { it.date }
+        val dayNutrients = byDate.mapValues { (_, entries) -> entries.toDayNutrients() }
+        val firstLogged = dayNutrients.filterValues { it.calories > 0.0 }.keys.minOrNull() ?: return emptyList()
+        val dates = generateSequence(firstLogged) { it.plusDays(1) }.takeWhile { !it.isAfter(lastDay) }.toList()
+        // Read in one pass
+        val dayGoals = goalsRepository.getGoalsForDates(dates)
+        return dates.mapIndexed { index, date ->
+            val nutrients = dayNutrients[date]?.takeIf { it.calories > 0.0 }
+            ScoredDay(
+                date = date,
+                calories = nutrients?.calories ?: 0.0,
+                scores = nutrients?.let { RankScoringConfig.scoreDay(it, dayGoals[index]) }
+            )
+        }
+    }
+
+    private fun List<LoggedFoodNutrients>.toDayNutrients() = RankDayNutrients(
+        calories = sumOf { it.calories },
+        proteinGrams = sumOf { it.proteinGrams },
+        carbsGrams = sumOf { it.carbsGrams },
+        fatGrams = sumOf { it.fatGrams },
+        fiber = fold(KnownAmount.NONE) { sum, it -> sum + KnownAmount.of(it.fiberGrams, it.calories) },
+        sugar = fold(KnownAmount.NONE) { sum, it -> sum + KnownAmount.of(it.sugarGrams, it.calories) },
+        saturatedFat = fold(KnownAmount.NONE) { sum, it -> sum + KnownAmount.of(it.saturatedFatGrams, it.calories) },
+        sodium = fold(KnownAmount.NONE) { sum, it -> sum + KnownAmount.of(it.sodiumMg, it.calories) }
+    )
+
+    /**
+     * Fills the secondary nutrients an entry left unknown from the built-in food it logged, scaled
+     * by the entry's calories. A logged 0.0 is a real zero and stays. Only for the score: nothing
+     * is written back.
+     */
+    private suspend fun withCatalogNutrients(foods: List<LoggedFoodNutrients>): List<LoggedFoodNutrients> {
+        val repository = foodRepository ?: return foods
+        return foods.map { food ->
+            val missesAValue = food.fiberGrams == null || food.sugarGrams == null || food.saturatedFatGrams == null || food.sodiumMg == null
+            if (!missesAValue || !isCatalogFoodId(food.foodId) || food.calories <= 0.0) return@map food
+            val catalog = catalogNutrition(repository, food.foodId, food.foodName) ?: return@map food
+            val scale = food.calories / catalog.calories
+            food.copy(
+                fiberGrams = food.fiberGrams ?: catalog.fiberGrams?.times(scale),
+                sugarGrams = food.sugarGrams ?: catalog.sugarGrams?.times(scale),
+                saturatedFatGrams = food.saturatedFatGrams ?: catalog.saturatedFatGrams?.times(scale),
+                sodiumMg = food.sodiumMg ?: catalog.sodiumMg?.times(scale)
+            )
+        }
+    }
+
+    /**
+     * The built-in food [foodId], when it is the food the entry logged: ids from older versions
+     * can point at a different food, so the name must match (as Food.isSameFoodAs). A food with
+     * no calories cannot be scaled to an entry and gives nothing.
+     */
+    private suspend fun catalogNutrition(repository: FoodRepository, foodId: Long, foodName: String): Nutrition? {
+        val key = foodId to foodName.trim().lowercase(Locale.US)
+        catalogCache[key]?.let { return it.nutrition }
+        val food = try {
+            repository.getFoodById(foodId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Not remembered: the next replay asks again
+            return null
+        }
+        val nutrition = food
+            ?.takeIf { it.name.trim().equals(foodName.trim(), ignoreCase = true) }
+            ?.nutrition
+            ?.takeIf { it.calories > 0.0 }
+        catalogCache[key] = CatalogNutrition(nutrition)
+        return nutrition
+    }
+
+    /** The days of [season] in [days], from its first logged day, as a new diary would start. */
+    private fun seasonDays(days: List<ScoredDay>, season: RankSeason): List<ScoredDay> =
+        days.filter { !it.date.isBefore(season.start) && it.date.isBefore(season.nextReset) }.dropWhile { !it.isLogged }
+
+    /**
+     * The rating after each of [endedDays], replayed as season [seasonNumber] on its own; none when
+     * the season never had 7 logged days, so never had a rank.
+     */
+    private fun seasonRatings(endedDays: List<ScoredDay>, seasonNumber: Int): List<RatingPoint> {
+        val loggedDays = endedDays.count { it.isLogged }
+        if (loggedDays < RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD) return emptyList()
+        val ratings = mutableListOf<RatingPoint>()
+        replayRating(endedDays, endedDays.size, loggedDays) { day, _, _, rating, _ ->
+            ratings.add(RatingPoint(day.date, rating, seasonNumber))
+        }
+        return ratings
+    }
+
+    /**
+     * The highest of [ratings], with the first day its rank and tier were reached; null while the
+     * rating is not established or never rose above 0.
+     */
+    private fun bestOf(ratings: List<RatingPoint>): BestRank? {
+        var best: BestRank? = null
+        for (point in ratings) {
+            val before = best
+            if (point.rating > (before?.rating ?: 0)) {
+                val tier = ratingToRankTier(point.rating)
+                // More RR in the same tier keeps the day the tier was first reached
+                best = BestRank(tier, point.rating, if (before?.rankTier == tier) before.date else point.date)
+            }
+        }
+        return best
+    }
+
+    /**
+     * The card over [from]..[to], from the first logged day: each logged day's parts averaged, and
+     * the day score averaged over every day, a missed day scoring 0.
+     */
+    private fun summarize(days: List<ScoredDay>, from: LocalDate, to: LocalDate): LifestyleScore {
+        val window = days.filter { !it.date.isBefore(from) && !it.date.isAfter(to) }
+        if (window.isEmpty()) return LifestyleScore.ZERO
+        val logged = window.mapNotNull { it.scores }
+        fun average(score: (RankScoringConfig.DayScores) -> Double) =
+            if (logged.isEmpty()) 0.0 else logged.sumOf(score) / logged.size
+        return LifestyleScore(
+            consistencyScore = logged.size * 100.0 / window.size,
+            calorieScore = average { it.calorieCredit * 100.0 },
+            proteinScore = average { it.protein },
+            qualityScore = average { it.quality },
+            balanceScore = average { it.balance },
+            overallScore = logged.sumOf { it.dayScore } / window.size,
+            loggedDays = logged.size,
+            eligibleDays = window.size
+        )
+    }
+
+    /** One day's scores, before any rating is applied; [scores] is null for a missed day. */
+    private data class ScoredDay(
+        val date: LocalDate,
+        val calories: Double,
+        val scores: RankScoringConfig.DayScores?
+    ) {
+        val isLogged: Boolean get() = scores != null
+
+        /** Counts toward a clean week: logged with at least half the calorie credit. */
+        val isCleanDay: Boolean get() = scores != null && scores.calorieCredit >= RankScoringConfig.CLEAN_DAY_MIN_CALORIE_CREDIT
+
+        fun toHistoryEntry(ratingBefore: Int, rrDelta: Int, rating: Int, isInProgress: Boolean, heldByCleanWeek: Boolean = false) = RankHistoryEntry(
+            date = date,
+            rankTier = ratingToRankTier(rating),
+            tierRR = rating % 100,
+            overallRating = rating,
+            rrDelta = rrDelta,
+            overallScore = scores?.dayScore ?: 0.0,
+            ratingBefore = ratingBefore,
+            rankTierBefore = ratingToRankTier(ratingBefore),
+            calorieScore = (scores?.calorieCredit ?: 0.0) * 100.0,
+            consistencyScore = if (isLogged) 100.0 else 0.0,
+            proteinScore = scores?.protein ?: 0.0,
+            qualityScore = scores?.quality ?: 0.0,
+            balanceScore = scores?.balance ?: 0.0,
+            expectedScore = RankScoringConfig.expectedScore(ratingBefore),
+            calories = calories,
+            isLogged = isLogged,
+            isInProgress = isInProgress,
+            heldByCleanWeek = heldByCleanWeek
+        )
+    }
+
+    /**
+     * True when [days] ends a clean week at [index]: 7 days with at most one off day. A missed day
+     * and a day outside the zone are both off days, so skipping a bad day never beats logging it.
+     */
+    private fun endsCleanWeek(days: List<ScoredDay>, index: Int): Boolean {
+        if (index < RankScoringConfig.CLEAN_WEEK_DAYS - 1) return false
+        val week = days.subList(index - RankScoringConfig.CLEAN_WEEK_DAYS + 1, index + 1)
+        return week.count { !it.isCleanDay } <= RankScoringConfig.CLEAN_WEEK_OFF_DAYS_ALLOWED
+    }
+
+    /** A clean week ended within the lookback before the day at [index]. */
+    private fun cleanWeekWithin(lastCleanWeekEnd: Int, index: Int) =
+        index - lastCleanWeekEnd < RankScoringConfig.CLEAN_WEEK_LOOKBACK_DAYS
+
+    /** Whether a clean week ended within the lookback of the last of the first [count] days. */
+    private fun hasRecentCleanWeek(days: List<ScoredDay>, count: Int): Boolean =
+        (maxOf(0, count - RankScoringConfig.CLEAN_WEEK_LOOKBACK_DAYS + 1) until count).any { endsCleanWeek(days, it) }
+
+    /**
+     * The rating after the first [count] of [days], from the minimum. Nothing moves until
+     * [loggedDaysCount] reaches the provisional threshold; then every day counts, the earliest
+     * included (BUG-023). [onDay] gets the change each day actually made, and whether the
+     * clean-week rule held it back.
+     */
+    private fun replayRating(
+        days: List<ScoredDay>,
+        count: Int,
+        loggedDaysCount: Int,
+        onDay: (day: ScoredDay, ratingBefore: Int, rrDelta: Int, rating: Int, heldByCleanWeek: Boolean) -> Unit = { _, _, _, _, _ -> }
+    ): Int {
+        val isProvisional = loggedDaysCount < RankScoringConfig.PROVISIONAL_DAYS_THRESHOLD
+        var rating = RankScoringConfig.MIN_RATING
+        var lastCleanWeekEnd = Int.MIN_VALUE / 2
+        for (index in 0 until count) {
+            val day = days[index]
+            if (endsCleanWeek(days, index)) lastCleanWeekEnd = index
+            val ratingBefore = rating
+            var held = false
+            if (!isProvisional) {
+                val rrDelta = if (day.isLogged) RankScoringConfig.rrForDay(day.scores!!.dayScore, rating) else RankScoringConfig.MISSED_DAY_RR
+                rating = RankScoringConfig.applyDelta(rating, rrDelta, hasRecentCleanWeek = cleanWeekWithin(lastCleanWeekEnd, index))
+                held = rating < (ratingBefore + rrDelta).coerceIn(RankScoringConfig.MIN_RATING, RankScoringConfig.MAX_RATING)
+            }
+            onDay(day, ratingBefore, rating - ratingBefore, rating, held)
+        }
+        return rating
+    }
+
     private companion object {
-        /** Earlier than any diary entry, so the aggregation query returns every logged day. */
+        /** Earlier than any diary entry, so the query returns every logged day. */
         val HISTORY_START: LocalDate = LocalDate.of(1970, 1, 1)
+
+        /**
+         * A food from the built-in catalog: any positive id outside the custom food and recipe
+         * ranges. Catalog ids are large hashes, not the 1-99,999,999 of older versions.
+         */
+        fun isCatalogFoodId(foodId: Long): Boolean =
+            foodId > 0 && !(foodId >= FoodRepositoryImpl.CUSTOM_FOOD_ID_OFFSET && foodId < Recipe.FOOD_ID_RANGE_END)
+
+        const val MIN_DAY_CHECK_MS = 1_000L
+        const val MAX_DAY_CHECK_MS = 60 * 60 * 1_000L
     }
 }

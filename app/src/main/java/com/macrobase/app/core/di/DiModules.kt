@@ -24,6 +24,7 @@ import com.macrobase.app.domain.usecase.AddWaterEntryUseCase
 import com.macrobase.app.domain.usecase.AddWeightEntryUseCase
 import com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase
 import com.macrobase.app.domain.usecase.DeleteDiaryEntryUseCase
+import com.macrobase.app.domain.usecase.MoveDiaryEntriesUseCase
 import com.macrobase.app.domain.usecase.DeleteWaterEntryUseCase
 import com.macrobase.app.domain.usecase.DeleteWeightEntryUseCase
 import com.macrobase.app.domain.usecase.GetCalendarAdherenceUseCase
@@ -43,8 +44,11 @@ import com.macrobase.app.domain.usecase.LogFoodUseCase
 import com.macrobase.app.domain.usecase.SearchFoodsUseCase
 import com.macrobase.app.domain.usecase.UpdateDiaryEntryUseCase
 import com.macrobase.app.domain.usecase.UpdateGoalsUseCase
+import com.macrobase.app.domain.usecase.CancelScheduledGoalUseCase
 import com.macrobase.app.domain.usecase.UpdateWaterEntryUseCase
+import android.content.Context
 import com.macrobase.app.data.repository.PortabilityRepositoryImpl
+import com.macrobase.app.feature.widget.MacroBaseWidgetProvider
 import com.macrobase.app.domain.repository.PortabilityRepository
 import com.macrobase.app.domain.usecase.ExportUserDataUseCase
 import com.macrobase.app.domain.usecase.ImportUserDataUseCase
@@ -53,7 +57,6 @@ import com.macrobase.app.feature.calendar.CalendarViewModel
 import com.macrobase.app.feature.customfoods.CustomFoodsViewModel
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import com.macrobase.app.feature.detail.FoodDetailViewModel
-import com.macrobase.app.feature.goals.DailyGoalsViewModel
 import com.macrobase.app.feature.importexport.ImportExportViewModel
 import com.macrobase.app.feature.preferences.PreferencesViewModel
 import com.macrobase.app.feature.recipes.RecipesViewModel
@@ -79,9 +82,12 @@ import com.macrobase.app.domain.repository.rank.RankRepository
 import com.macrobase.app.data.repository.rank.RankRepositoryImpl
 import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
 import com.macrobase.app.domain.usecase.rank.CalculateLifestyleScoreUseCase
+import com.macrobase.app.domain.usecase.rank.DismissRankRulesNoticeUseCase
+import com.macrobase.app.domain.usecase.rank.DismissRankSeasonNoticeUseCase
 import com.macrobase.app.feature.rank.RankViewModel
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
@@ -105,12 +111,15 @@ val repositoryModule = module {
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
     single<GoalsRepository> { GoalsRepositoryImpl(get()) }
     single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get(), get()) }
-    single<FoodRepository> { FoodRepositoryImpl(get(), get()) }
+    single<FoodRepository> { FoodRepositoryImpl(get(), get(), get()) }
     single<RecipeRepository> { RecipeRepositoryImpl(get()) }
     single<WeightRepository> { WeightRepositoryImpl(get()) }
     single<WaterRepository> { WaterRepositoryImpl(get()) }
     single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get(), get()) }
-    single<PortabilityRepository> { PortabilityRepositoryImpl(get(), get(), get()) }
+    single<PortabilityRepository> {
+        val context = get<Context>()
+        PortabilityRepositoryImpl(get(), get(), get(), onUserDataChanged = { MacroBaseWidgetProvider.updateAllWidgets(context) })
+    }
     // Saved to the app's private files so staged items survive the process being killed (BUG-015)
     single<com.macrobase.app.domain.repository.basket.BasketRepository> {
         com.macrobase.app.data.repository.basket.PersistentBasketRepository(
@@ -118,7 +127,15 @@ val repositoryModule = module {
             scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
         )
     }
-    single<RankRepository> { RankRepositoryImpl(get(), get(), get(), get(), get(), get()) }
+    single<RankRepository> {
+        RankRepositoryImpl(
+            goalsRepository = get(),
+            diaryRepository = get(),
+            foodRepository = get(),
+            preferencesRepository = get(),
+            clock = get()
+        )
+    }
 }
 
 val useCaseModule = module {
@@ -131,6 +148,7 @@ val useCaseModule = module {
     singleOf(::LogFoodUseCase)
     singleOf(::UpdateDiaryEntryUseCase)
     singleOf(::DeleteDiaryEntryUseCase)
+    singleOf(::MoveDiaryEntriesUseCase)
     singleOf(::GetDiaryEntryUseCase)
     singleOf(::GetCalendarAdherenceUseCase)
     singleOf(::GetWeightHistoryUseCase)
@@ -145,6 +163,7 @@ val useCaseModule = module {
     singleOf(::GetWaterHistoryUseCase)
     singleOf(::GetGoalsUseCase)
     singleOf(::UpdateGoalsUseCase)
+    singleOf(::CancelScheduledGoalUseCase)
     singleOf(::GetStatisticsUseCase)
     singleOf(::ExportUserDataUseCase)
     singleOf(::ValidateBackupUseCase)
@@ -167,6 +186,8 @@ val useCaseModule = module {
 
     // Rank
     singleOf(::GetRankProfileUseCase)
+    singleOf(::DismissRankRulesNoticeUseCase)
+    singleOf(::DismissRankSeasonNoticeUseCase)
     singleOf(::CalculateLifestyleScoreUseCase)
 }
 
@@ -177,13 +198,12 @@ val viewModelModule = module {
     viewModelOf(::CalendarViewModel)
     viewModelOf(::WeightViewModel)
     viewModelOf(::WaterViewModel)
-    viewModelOf(::StatisticsViewModel)
+    viewModel { StatisticsViewModel(get(), get(), get(), get()) }
     viewModelOf(::CustomFoodsViewModel)
     viewModelOf(::RecipesViewModel)
-    viewModelOf(::DailyGoalsViewModel)
     viewModelOf(::PreferencesViewModel)
     viewModelOf(::ImportExportViewModel)
-    viewModelOf(::NutritionLabelScannerViewModel)
+    viewModel { NutritionLabelScannerViewModel(get()) }
     viewModelOf(::BasketViewModel)
     viewModelOf(::RankViewModel)
 }

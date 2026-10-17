@@ -239,7 +239,7 @@ class GoalsAndPreferencesUnitTests {
 
     @Test
     fun testGoalInputValidation_variousFormats() {
-        // Test parsing helper logic matching DailyGoalsScreen
+        // A simplified calorie and macro check; the form's own checks are in P3PhaseThreeGoalsAndPreferencesTests
         fun validateInputs(calText: String, cText: String, pText: String, fText: String): Boolean {
             val parsedCalorie = calText.toDoubleOrNull()
             val isCalorieValid = parsedCalorie != null && parsedCalorie > 0.0
@@ -263,7 +263,7 @@ class GoalsAndPreferencesUnitTests {
                 proteinPercentage = proteinPctVal,
                 fatPercentage = fatPctVal
             )
-            val isValidSum = kotlin.math.abs(previewGoal.totalPercentage - 100.0) < 0.01
+            val isValidSum = previewGoal.isValidPercentageSum
             return isCalorieValid && isCarbsValid && isProteinValid && isFatValid && isValidSum
         }
 

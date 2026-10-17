@@ -104,8 +104,9 @@ class StatisticsUnitTests {
 
         val stats = getStatisticsUseCase.getNutritionConsistency(fromDate, toDate)
 
-        // Eligible days should only be fromDate to today (11 days: today - 10 to today)
-        assertEquals(11, stats.totalEligibleDays)
+        // Eligible days should only be fromDate to yesterday: today, with nothing logged yet, is not
+        // a missed day (10 days: today - 10 to today - 1, BUG-032)
+        assertEquals(10, stats.totalEligibleDays)
 
         // Verify future cells are flagged
         val futureCells = stats.allCells.filter { it.isFuture }

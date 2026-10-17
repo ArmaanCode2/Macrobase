@@ -140,7 +140,8 @@ fun SearchScreen(
     viewModel: SearchViewModel,
     mealType: MealType? = null,
     dateEpochDay: Long? = null,
-    onFoodClick: (Long, MealType, Long) -> Unit,
+    /** The day is null when Search was opened without one: the food then logs to today (BUG-040). */
+    onFoodClick: (Long, MealType, Long?) -> Unit,
     onCreateCustomFood: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -251,7 +252,7 @@ fun SearchScreen(
                             items(uiState.customFoods, key = { "custom_${it.id}" }) { item ->
                                 FoodResultItem(
                                     food = item,
-                                    onClick = { onFoodClick(item.id, uiState.targetMealType, date.toEpochDay()) }
+                                    onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                                 )
                                 HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                             }
@@ -280,7 +281,7 @@ fun SearchScreen(
                             items(recentOnly, key = { "recent_${it.id}" }) { item ->
                                 FoodResultItem(
                                     food = item,
-                                    onClick = { onFoodClick(item.id, uiState.targetMealType, date.toEpochDay()) }
+                                    onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                                 )
                                 HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                             }
@@ -332,7 +333,7 @@ fun SearchScreen(
                     items(uiState.searchResults, key = { it.id }) { item ->
                         FoodResultItem(
                             food = item,
-                            onClick = { onFoodClick(item.id, uiState.targetMealType, date.toEpochDay()) }
+                            onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                         )
                         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                     }

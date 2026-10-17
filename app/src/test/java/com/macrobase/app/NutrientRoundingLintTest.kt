@@ -29,9 +29,7 @@ class NutrientRoundingLintTest {
     /** Known non-display truncations (path to a snippet of the line). */
     private val allowed = listOf(
         // Matches label text such as "30g"; not a displayed value
-        "feature/scanner/SpatialTableDetector.kt" to "servingGrams.toInt()}g",
-        // Open bug BUG-026 (goal percentage-sum validation), outside BUG-034's display scope
-        "domain/model/Goal.kt" to "fatPercentage).toInt()"
+        "feature/scanner/SpatialTableDetector.kt" to "servingGrams.toInt()}g"
     )
 
     @Test

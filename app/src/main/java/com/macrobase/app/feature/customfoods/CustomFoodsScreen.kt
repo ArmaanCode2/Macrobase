@@ -69,6 +69,8 @@ import com.macrobase.app.core.designsystem.components.EmptyStateCard
 import com.macrobase.app.core.designsystem.components.PrimaryButton
 import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.Food
+import com.macrobase.app.core.util.hasThousandsSeparator
+import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.feature.detail.formatQuantityForInput
 import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.Nutrition
@@ -152,6 +154,7 @@ class CustomFoodsViewModel(
         protein: Double,
         carbs: Double,
         fat: Double,
+        saturatedFat: Double? = null,
         fiber: Double? = null,
         sugar: Double? = null,
         sodium: Double? = null,
@@ -177,6 +180,7 @@ class CustomFoodsViewModel(
                     proteinGrams = protein,
                     carbsGrams = carbs,
                     fatGrams = fat,
+                    saturatedFatGrams = saturatedFat,
                     fiberGrams = fiber,
                     sugarGrams = sugar,
                     sodiumMg = sodium,
@@ -426,6 +430,23 @@ fun CustomFoodRow(
     }
 }
 
+/** A number typed into the custom food form: its value, or why it was refused. Blank is neither. */
+internal data class FormNumber(val value: Double?, val error: String?)
+
+/**
+ * Reads one number field of the custom food form. "1,5" reads as 1.5, as comma keyboards type it.
+ * NaN, infinity and negative values are refused, since a stored NaN would break every later
+ * backup. A [largeAmount] field refuses "2,000", which means 2000 there, rather than save 2.
+ */
+internal fun readFormNumber(text: String, largeAmount: Boolean = false): FormNumber {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return FormNumber(null, null)
+    if (largeAmount && hasThousandsSeparator(trimmed)) return FormNumber(null, "Leave out the thousands separator")
+    val number = parseDecimalInput(trimmed) ?: return FormNumber(null, "Enter a number")
+    if (number < 0.0) return FormNumber(null, "Cannot be negative")
+    return FormNumber(number, null)
+}
+
 @Composable
 fun EditCustomFoodScreen(
     foodId: Long = 0L,
@@ -444,6 +465,7 @@ fun EditCustomFoodScreen(
     var protein by remember { mutableStateOf("") }
     var carbs by remember { mutableStateOf("") }
     var fat by remember { mutableStateOf("") }
+    var saturatedFat by remember { mutableStateOf("") }
     var fiber by remember { mutableStateOf("") }
     var sugar by remember { mutableStateOf("") }
     var sodium by remember { mutableStateOf("") }
@@ -456,15 +478,16 @@ fun EditCustomFoodScreen(
             activeDraftForBanner = draft
             if (!draft.foodName.isNullOrBlank()) name = draft.foodName
             if (!draft.brand.isNullOrBlank()) brand = draft.brand
-            draft.servingSize?.let { servingSize = if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }
+            draft.servingSize?.let { servingSize = formatQuantityForInput(it) }
             draft.servingUnit?.let { selectedServingUnit = it }
-            draft.calories?.let { calories = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.protein?.let { protein = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.carbs?.let { carbs = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.fat?.let { fat = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.fiber?.let { fiber = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.sugar?.let { sugar = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
-            draft.sodium?.let { sodium = if (it.value % 1.0 == 0.0) it.value.toInt().toString() else it.value.toString() }
+            draft.calories?.let { calories = formatQuantityForInput(it.value) }
+            draft.protein?.let { protein = formatQuantityForInput(it.value) }
+            draft.carbs?.let { carbs = formatQuantityForInput(it.value) }
+            draft.fat?.let { fat = formatQuantityForInput(it.value) }
+            draft.saturatedFat?.let { saturatedFat = formatQuantityForInput(it.value) }
+            draft.fiber?.let { fiber = formatQuantityForInput(it.value) }
+            draft.sugar?.let { sugar = formatQuantityForInput(it.value) }
+            draft.sodium?.let { sodium = formatQuantityForInput(it.value) }
             viewModel.clearScannedDraft()
         }
     }
@@ -485,6 +508,7 @@ fun EditCustomFoodScreen(
                 protein = formatQuantityForInput(nutrition.proteinGrams)
                 carbs = formatQuantityForInput(nutrition.carbsGrams)
                 fat = formatQuantityForInput(nutrition.fatGrams)
+                saturatedFat = nutrition.saturatedFatGrams?.let { formatQuantityForInput(it) } ?: ""
                 fiber = nutrition.fiberGrams?.let { formatQuantityForInput(it) } ?: ""
                 sugar = nutrition.sugarGrams?.let { formatQuantityForInput(it) } ?: ""
                 sodium = nutrition.sodiumMg?.let { formatQuantityForInput(it) } ?: ""
@@ -493,9 +517,26 @@ fun EditCustomFoodScreen(
     }
 
     val isEditing = foodId > 0L && existingFood != null
-    val cVal = calories.toDoubleOrNull()
+    val servingSizeInput = readFormNumber(servingSize, largeAmount = true)
+    val caloriesInput = readFormNumber(calories, largeAmount = true)
+    val proteinInput = readFormNumber(protein)
+    val carbsInput = readFormNumber(carbs)
+    val fatInput = readFormNumber(fat)
+    // Saturated fat is part of total fat; more of it is a typo or a misread label
+    val saturatedFatInput = readFormNumber(saturatedFat).let { input ->
+        val value = input.value
+        if (value != null && value > (fatInput.value ?: 0.0)) FormNumber(null, "More than total fat") else input
+    }
+    val fiberInput = readFormNumber(fiber)
+    val sugarInput = readFormNumber(sugar)
+    val sodiumInput = readFormNumber(sodium, largeAmount = true)
+    val numberInputs = listOf(
+        servingSizeInput, caloriesInput, proteinInput, carbsInput, fatInput,
+        saturatedFatInput, fiberInput, sugarInput, sodiumInput
+    )
     val isCustomUnitValid = selectedServingUnit != ServingUnit.CUSTOM || customUnitName.isNotBlank()
-    val isFormValid = name.isNotBlank() && (cVal != null && cVal >= 0.0) && (servingSize.toDoubleOrNull() ?: 0.0) > 0.0 && isCustomUnitValid
+    val isFormValid = name.isNotBlank() && caloriesInput.value != null && (servingSizeInput.value ?: 0.0) > 0.0 &&
+        numberInputs.none { it.error != null } && isCustomUnitValid
 
     Column(
         modifier = modifier
@@ -579,6 +620,17 @@ fun EditCustomFoodScreen(
                             color = AppColors.Primary
                         )
                     }
+                    // A value no food can have, or calories that do not match the macros (BUG-042)
+                    if (draft.criticalWarnings.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(AppSpacing.xs))
+                        draft.criticalWarnings.forEach { warning ->
+                            Text(
+                                text = "\u2022 $warning",
+                                style = AppTypography.Caption,
+                                color = AppColors.AlertRed
+                            )
+                        }
+                    }
                     if (draft.warnings.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(AppSpacing.xs))
                         draft.warnings.forEach { warning ->
@@ -623,6 +675,8 @@ fun EditCustomFoodScreen(
                 onValueChange = { servingSize = it },
                 label = { Text("Serving Size *") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                isError = servingSizeInput.error != null,
+                supportingText = servingSizeInput.error?.let { message -> { Text(message) } },
                 modifier = Modifier.weight(1f)
             )
 
@@ -689,6 +743,8 @@ fun EditCustomFoodScreen(
             onValueChange = { calories = it },
             label = { Text("Calories (kcal) *") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = caloriesInput.error != null,
+            supportingText = caloriesInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -701,6 +757,8 @@ fun EditCustomFoodScreen(
             onValueChange = { protein = it },
             label = { Text("Protein (g)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = proteinInput.error != null,
+            supportingText = proteinInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -710,6 +768,8 @@ fun EditCustomFoodScreen(
             onValueChange = { carbs = it },
             label = { Text("Carbohydrates (g)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = carbsInput.error != null,
+            supportingText = carbsInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -719,18 +779,39 @@ fun EditCustomFoodScreen(
             onValueChange = { fat = it },
             label = { Text("Fat (g)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = fatInput.error != null,
+            supportingText = fatInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(AppSpacing.md))
         Text(text = "ADDITIONAL NUTRIENTS (OPTIONAL)", style = AppTypography.Caption, color = AppColors.TextSecondary)
+        Text(
+            text = "Saturated fat, fiber, sugar and sodium count toward your rank's food quality. " +
+                "A blank field counts as unknown.",
+            style = AppTypography.Caption,
+            color = AppColors.TextSecondary
+        )
         Spacer(modifier = Modifier.height(AppSpacing.xs))
+
+        OutlinedTextField(
+            value = saturatedFat,
+            onValueChange = { saturatedFat = it },
+            label = { Text("Saturated Fat (g)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = saturatedFatInput.error != null,
+            supportingText = saturatedFatInput.error?.let { message -> { Text(message) } },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(AppSpacing.sm))
 
         OutlinedTextField(
             value = fiber,
             onValueChange = { fiber = it },
             label = { Text("Dietary Fiber (g)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = fiberInput.error != null,
+            supportingText = fiberInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -740,6 +821,8 @@ fun EditCustomFoodScreen(
             onValueChange = { sugar = it },
             label = { Text("Total Sugars (g)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = sugarInput.error != null,
+            supportingText = sugarInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -749,6 +832,8 @@ fun EditCustomFoodScreen(
             onValueChange = { sodium = it },
             label = { Text("Sodium (mg)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            isError = sodiumInput.error != null,
+            supportingText = sodiumInput.error?.let { message -> { Text(message) } },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -763,16 +848,17 @@ fun EditCustomFoodScreen(
                     uuid = existingFood?.uuid ?: UUID.randomUUID().toString(),
                     name = name,
                     brand = brand,
-                    servingSize = servingSize.toDoubleOrNull() ?: 1.0,
+                    servingSize = servingSizeInput.value ?: 1.0,
                     servingUnit = selectedServingUnit,
                     customUnitName = if (selectedServingUnit == ServingUnit.CUSTOM) customUnitName else null,
-                    calories = cVal ?: 0.0,
-                    protein = protein.toDoubleOrNull() ?: 0.0,
-                    carbs = carbs.toDoubleOrNull() ?: 0.0,
-                    fat = fat.toDoubleOrNull() ?: 0.0,
-                    fiber = fiber.toDoubleOrNull(),
-                    sugar = sugar.toDoubleOrNull(),
-                    sodium = sodium.toDoubleOrNull(),
+                    calories = caloriesInput.value ?: 0.0,
+                    protein = proteinInput.value ?: 0.0,
+                    carbs = carbsInput.value ?: 0.0,
+                    fat = fatInput.value ?: 0.0,
+                    saturatedFat = saturatedFatInput.value,
+                    fiber = fiberInput.value,
+                    sugar = sugarInput.value,
+                    sodium = sodiumInput.value,
                     // Not editable in this form: carry the stored values through
                     potassium = existingFood?.nutritionPerServing?.potassiumMg,
                     calcium = existingFood?.nutritionPerServing?.calciumMg,

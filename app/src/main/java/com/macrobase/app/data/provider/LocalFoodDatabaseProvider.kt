@@ -28,9 +28,10 @@ class LocalFoodDatabaseProvider(
         val trimmed = query.trim()
         if (trimmed.isEmpty() || limit <= 0) return@withContext emptyList()
 
-        val db = databaseManager.getDatabase()
+        // Nothing searchable is left, such as "!!!"
         val ftsQuery = sanitizeFtsQuery(trimmed)
         if (ftsQuery.isBlank()) return@withContext emptyList()
+        val db = databaseManager.getDatabase()
 
         val foods = mutableListOf<Food>()
         val foodIds = mutableListOf<Long>()
@@ -62,32 +63,14 @@ class LocalFoodDatabaseProvider(
             android.util.Log.d("LocalFoodDb", "Query '$trimmed' (FTS '$ftsQuery') matched ${foods.size} foods")
         } catch (e: Exception) {
             android.util.Log.w("LocalFoodDb", "FTS5 search unavailable on OS SQLite, falling back to indexed LIKE search: ${e.message}")
-            val safeLike = escapeLikeWildcards(trimmed)
-            val fallbackSql = """
-                SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
-                       f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
-                       f.saturated_fat, f.trans_fat, f.cholesterol, f.sodium,
-                       f.potassium, f.calcium, f.iron, f.magnesium, f.phosphorus, f.zinc,
-                       f.vitamin_a_rae, f.vitamin_c, f.vitamin_d_mcg, f.vitamin_e, f.vitamin_k,
-                       f.vitamin_b6, f.vitamin_b12, f.folate_b9, f.water,
-                       c.name as category_name
-                FROM foods f
-                LEFT JOIN categories c ON f.category_id = c.id
-                WHERE (f.normalized_name LIKE ? ESCAPE '/' OR f.name LIKE ? ESCAPE '/') AND f.is_active = 1
-                ORDER BY CASE WHEN f.normalized_name LIKE ? ESCAPE '/' THEN 0 ELSE 1 END, f.name ASC
-                LIMIT ?
-            """.trimIndent()
-            try {
-                db.rawQuery(fallbackSql, arrayOf("%$safeLike%", "%$safeLike%", "$safeLike%", limit.toString())).use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val food = cursor.extractFoodWithoutServings()
-                        foods.add(food)
-                        foodIds.add(food.id)
-                    }
-                }
-                android.util.Log.d("LocalFoodDb", "Fallback LIKE query '$trimmed' matched ${foods.size} foods")
-            } catch (fallbackEx: Exception) {
-                android.util.Log.e("LocalFoodDb", "Fallback search query '$trimmed' failed: ${fallbackEx.message}", fallbackEx)
+        }
+
+        // No full-text match: a fragment inside a word ("ancake" in "pancake"), or a script the
+        // catalog does not use. A substring match still gets a chance (BUG-054).
+        if (foods.isEmpty()) {
+            likeSearch(db, trimmed, limit).forEach { food ->
+                foods.add(food)
+                foodIds.add(food.id)
             }
         }
 
@@ -280,18 +263,60 @@ class LocalFoodDatabaseProvider(
         return getDouble(idx)
     }
 
-    /**
-     * Sanitizes and constructs an FTS5 search query supporting prefix matching.
-     * E.g. "greek yogurt" -> "greek* yogurt*"
-     */
-    private fun sanitizeFtsQuery(raw: String): String {
-        val tokens = raw.replace(Regex("[^a-zA-Z0-9 ]"), " ")
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
+    /** Foods whose name contains [query] anywhere, best (prefix) matches first. */
+    private fun likeSearch(db: SQLiteDatabase, query: String, limit: Int): List<Food> {
+        val words = query.replace(WHITESPACE, " ")
+        val safeName = escapeLikeWildcards(words)
+        // normalized_name is lower case without accents, so the query is folded the same way
+        val safeNormalized = escapeLikeWildcards(foldForNormalizedName(words))
+        val sql = """
+            SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
+                   f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
+                   f.saturated_fat, f.trans_fat, f.cholesterol, f.sodium,
+                   f.potassium, f.calcium, f.iron, f.magnesium, f.phosphorus, f.zinc,
+                   f.vitamin_a_rae, f.vitamin_c, f.vitamin_d_mcg, f.vitamin_e, f.vitamin_k,
+                   f.vitamin_b6, f.vitamin_b12, f.folate_b9, f.water,
+                   c.name as category_name
+            FROM foods f
+            LEFT JOIN categories c ON f.category_id = c.id
+            WHERE (f.normalized_name LIKE ? ESCAPE '/' OR f.name LIKE ? ESCAPE '/') AND f.is_active = 1
+            ORDER BY CASE WHEN f.normalized_name LIKE ? ESCAPE '/' THEN 0 ELSE 1 END, f.name ASC
+            LIMIT ?
+        """.trimIndent()
+        val foods = mutableListOf<Food>()
+        try {
+            db.rawQuery(sql, arrayOf("%$safeNormalized%", "%$safeName%", "$safeNormalized%", limit.toString())).use { cursor ->
+                while (cursor.moveToNext()) foods.add(cursor.extractFoodWithoutServings())
+            }
+            android.util.Log.d("LocalFoodDb", "LIKE query '$query' matched ${foods.size} foods")
+        } catch (e: Exception) {
+            android.util.Log.e("LocalFoodDb", "LIKE search for '$query' failed: ${e.message}", e)
+        }
+        return foods
+    }
 
-        if (tokens.isEmpty()) return ""
+    companion object {
+        private val NOT_A_WORD_CHARACTER = Regex("""[^\p{L}\p{M}\p{N}]+""")
+        private val WHITESPACE = Regex("""\s+""")
+        // Accents on Latin letters only: the vowel signs of Indic scripts are part of the word
+        private val LATIN_ACCENTS = Regex("""(?<=\p{IsLatin})\p{Mn}+""")
 
-        return tokens.joinToString(" ") { "$it*" }
+        /**
+         * An FTS5 prefix query from what the user typed: "greek yogurt" becomes `"greek"* "yogurt"*`.
+         * Letters of every script, their combining marks and digits are kept (BUG-054), and the
+         * table's unicode61 tokenizer folds accents, so an accented word finds the plain spelling.
+         * Each word is quoted, so nothing in it is read as FTS5 syntax. Empty when no word is left.
+         */
+        internal fun sanitizeFtsQuery(raw: String): String =
+            raw.split(NOT_A_WORD_CHARACTER)
+                .filter { it.isNotEmpty() }
+                .joinToString(" ") { "\"$it\"*" }
+
+        /** [text] lower-cased without accents on Latin letters, as the catalog's normalized_name is stored. */
+        internal fun foldForNormalizedName(text: String): String =
+            java.text.Normalizer.normalize(text.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFD)
+                .replace(LATIN_ACCENTS, "")
+                .let { java.text.Normalizer.normalize(it, java.text.Normalizer.Form.NFC) }
     }
 
     private fun escapeLikeWildcards(input: String): String {

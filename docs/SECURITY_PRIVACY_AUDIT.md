@@ -20,7 +20,7 @@ MacroBase was designed and verified under an **offline-first, zero-cloud, privac
 | Threat Description | Attack Surface | Implemented Mitigation | Risk Level |
 | :--- | :--- | :--- | :---: |
 | **ZIP Path Traversal Attack** | Malicious backup ZIP containing `../` or absolute path entry names | `BackupArchiveManager` validates all entry names against `..`, `/`, `\`, and `:`, rejecting malicious archives immediately | **MITIGATED (Low)** |
-| **Decompression Bomb (Zip Bomb)** | Malicious tiny ZIP extracting gigabytes of data | Hard limits: Max archive size 50 MB, Max entry size 50 MB, Max total extracted bytes 100 MB, Max 50 entries | **MITIGATED (Low)** |
+| **Decompression Bomb (Zip Bomb)** | Malicious tiny ZIP extracting gigabytes of data | Hard limits: Max archive size 50 MB compressed, Max data file 96 MB, Max total extracted bytes 128 MB, Max 50 entries; records parsed one at a time as small flat objects, capped per file type, with a 24-million-character text budget (BUG-047) | **MITIGATED (Low)** |
 | **Malformed JSON & Corrupted DTOs** | Injected NaN/Infinity, negative values, or oversized strings in backup | `BackupJsonSerializer` and `JsonObject` validate finite numbers, sanitize NaN/Infinity to null, and cap string lengths | **MITIGATED (Low)** |
 | **Partial Restore / Database Inconsistency** | App crash or constraint violation mid-import | Entire import is wrapped in Room's `runInTransaction`; automatically rolls back 100% on any failure | **MITIGATED (Low)** |
 | **Built-in Database Mutation / Injection** | Malicious food injection into packaged catalog | `BuiltInDatabaseManager` opens catalog strictly with `SQLiteDatabase.OPEN_READONLY`; physical file in app storage is read-only | **MITIGATED (Low)** |

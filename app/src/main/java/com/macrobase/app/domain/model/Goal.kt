@@ -3,6 +3,7 @@ package com.macrobase.app.domain.model
 import com.macrobase.app.core.config.NutritionStandardConfig
 import java.time.LocalDate
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 enum class FitnessGoal(val displayName: String) {
     MAINTAINING("Maintaining"),
@@ -52,19 +53,20 @@ data class Goal(
         get() = if (dailyCalorieGoal > 0) (dailyCalorieGoal * (fatPercentage / 100.0)) / NutritionStandardConfig.CALORIES_PER_GRAM_FAT else 0.0
 
     /**
-     * Total percentage sum as an integer.
+     * Total percentage sum, rounded for display (AGENTS.md section 2.2).
      */
     val totalPercentage: Int
-        get() = (carbPercentage + proteinPercentage + fatPercentage).toInt()
+        get() = totalPercentageExact.roundToInt()
 
     val totalPercentageExact: Double
         get() = carbPercentage + proteinPercentage + fatPercentage
 
     /**
-     * Validates that carb + protein + fat percentages total exactly 100% (within tolerance).
+     * Validates that carb + protein + fat percentages total exactly 100% (within tolerance). Uses the
+     * exact sum: 30.4 + 34.8 + 34.8 is 99.99999999999999 in floating point (BUG-026).
      */
     val isValidPercentageSum: Boolean
-        get() = abs(totalPercentage - 100.0) < 0.01
+        get() = abs(totalPercentageExact - 100.0) < 0.01
 
     /**
      * Validates overall goal configuration.

@@ -1,5 +1,6 @@
 package com.macrobase.app.data.portability
 
+import com.macrobase.app.core.util.printableText
 import com.macrobase.app.domain.model.BackupCompatibilityDto
 import com.macrobase.app.domain.model.BackupManifestDto
 import com.macrobase.app.domain.model.BackupRecordCountsDto
@@ -11,6 +12,8 @@ import com.macrobase.app.domain.model.RecipeBackupDto
 import com.macrobase.app.domain.model.UserPreferencesBackupDto
 import com.macrobase.app.domain.model.WaterLogBackupDto
 import com.macrobase.app.domain.model.WeightEntryBackupDto
+import java.io.Reader
+import java.io.StringReader
 import java.util.Locale
 
 /**
@@ -130,10 +133,10 @@ object BackupJsonSerializer {
         return "[\n$items\n]"
     }
 
-    fun parseDiaryEntries(json: String): List<DiaryEntryBackupDto> {
-        val array = SimpleJsonParser.parseArray(json)
-        return array.map { raw ->
-            val obj = raw as? JsonObject ?: throw IllegalArgumentException("Expected diary object")
+    fun parseDiaryEntries(json: String): List<DiaryEntryBackupDto> = parseDiaryEntries(StringReader(json), RecordLimits.unbounded())
+
+    fun parseDiaryEntries(reader: Reader, limits: RecordLimits): List<DiaryEntryBackupDto> {
+        return SimpleJsonParser.parseRecords(reader, limits) { obj ->
             DiaryEntryBackupDto(
                 uuid = obj.getString("uuid") ?: java.util.UUID.randomUUID().toString(),
                 dateEpochDay = obj.getLong("dateEpochDay") ?: 0L,
@@ -208,6 +211,7 @@ object BackupJsonSerializer {
     "proteinGrams": ${f.proteinGrams},
     "carbsGrams": ${f.carbsGrams},
     "fatGrams": ${f.fatGrams},
+    "saturatedFatGrams": ${f.saturatedFatGrams ?: "null"},
     "fiberGrams": ${f.fiberGrams ?: "null"},
     "sugarGrams": ${f.sugarGrams ?: "null"},
     "sodiumMg": ${f.sodiumMg ?: "null"},
@@ -220,10 +224,10 @@ object BackupJsonSerializer {
         return "[\n$items\n]"
     }
 
-    fun parseCustomFoods(json: String): List<CustomFoodBackupDto> {
-        val array = SimpleJsonParser.parseArray(json)
-        return array.map { raw ->
-            val obj = raw as? JsonObject ?: throw IllegalArgumentException("Expected custom food object")
+    fun parseCustomFoods(json: String): List<CustomFoodBackupDto> = parseCustomFoods(StringReader(json), RecordLimits.unbounded())
+
+    fun parseCustomFoods(reader: Reader, limits: RecordLimits): List<CustomFoodBackupDto> {
+        return SimpleJsonParser.parseRecords(reader, limits) { obj ->
             CustomFoodBackupDto(
                 uuid = obj.getString("uuid") ?: java.util.UUID.randomUUID().toString(),
                 name = obj.getString("name") ?: "",
@@ -235,6 +239,8 @@ object BackupJsonSerializer {
                 proteinGrams = obj.getDouble("proteinGrams") ?: 0.0,
                 carbsGrams = obj.getDouble("carbsGrams") ?: 0.0,
                 fatGrams = obj.getDouble("fatGrams") ?: 0.0,
+                // Absent before format 1.4.0: not known
+                saturatedFatGrams = obj.getDouble("saturatedFatGrams"),
                 fiberGrams = obj.getDouble("fiberGrams"),
                 sugarGrams = obj.getDouble("sugarGrams"),
                 sodiumMg = obj.getDouble("sodiumMg"),
@@ -267,10 +273,10 @@ object BackupJsonSerializer {
         return "[\n$items\n]"
     }
 
-    fun parseRecipes(json: String): List<RecipeBackupDto> {
-        val array = SimpleJsonParser.parseArray(json)
-        return array.map { raw ->
-            val obj = raw as? JsonObject ?: throw IllegalArgumentException("Expected recipe object")
+    fun parseRecipes(json: String): List<RecipeBackupDto> = parseRecipes(StringReader(json), RecordLimits.unbounded())
+
+    fun parseRecipes(reader: Reader, limits: RecordLimits): List<RecipeBackupDto> {
+        return SimpleJsonParser.parseRecords(reader, limits) { obj ->
             RecipeBackupDto(
                 uuid = obj.getString("uuid") ?: java.util.UUID.randomUUID().toString(),
                 name = obj.getString("name") ?: "",
@@ -303,10 +309,10 @@ object BackupJsonSerializer {
         return "[\n$items\n]"
     }
 
-    fun parseWeightEntries(json: String): List<WeightEntryBackupDto> {
-        val array = SimpleJsonParser.parseArray(json)
-        return array.map { raw ->
-            val obj = raw as? JsonObject ?: throw IllegalArgumentException("Expected weight object")
+    fun parseWeightEntries(json: String): List<WeightEntryBackupDto> = parseWeightEntries(StringReader(json), RecordLimits.unbounded())
+
+    fun parseWeightEntries(reader: Reader, limits: RecordLimits): List<WeightEntryBackupDto> {
+        return SimpleJsonParser.parseRecords(reader, limits) { obj ->
             WeightEntryBackupDto(
                 dateEpochDay = obj.getLong("dateEpochDay") ?: 0L,
                 dateString = obj.getString("dateString") ?: "",
@@ -333,10 +339,10 @@ object BackupJsonSerializer {
         return "[\n$items\n]"
     }
 
-    fun parseWaterLogs(json: String): List<WaterLogBackupDto> {
-        val array = SimpleJsonParser.parseArray(json)
-        return array.map { raw ->
-            val obj = raw as? JsonObject ?: throw IllegalArgumentException("Expected water object")
+    fun parseWaterLogs(json: String): List<WaterLogBackupDto> = parseWaterLogs(StringReader(json), RecordLimits.unbounded())
+
+    fun parseWaterLogs(reader: Reader, limits: RecordLimits): List<WaterLogBackupDto> {
+        return SimpleJsonParser.parseRecords(reader, limits) { obj ->
             WaterLogBackupDto(
                 dateEpochDay = obj.getLong("dateEpochDay") ?: 0L,
                 dateString = obj.getString("dateString") ?: "",
@@ -487,168 +493,300 @@ class JsonObject(val map: Map<String, Any?>) {
     fun getArray(key: String): List<Any?>? = map[key] as? List<Any?>
 }
 
+/** A backup that is well formed but bigger than MacroBase restores (BUG-047). */
+class BackupTooLargeException(message: String) : IllegalArgumentException(message)
+
+/** Characters of string values that one whole backup may keep in memory, shared by all its files. */
+class TextBudget(val maxChars: Long) {
+    var usedChars = 0L
+        private set
+
+    fun spend(chars: Long) {
+        usedChars += chars
+        if (usedChars > maxChars) throw BackupTooLargeException("The backup holds more than $maxChars characters of text")
+    }
+}
+
+/**
+ * Bounds for one backup file of records (BUG-047). Every record is a flat JSON object: no nested
+ * objects or arrays, at most [maxFields] fields and [maxCharsPerRecord] characters of JSON. With
+ * [maxRecords] and the shared [budget], memory stays bounded however a file is built.
+ */
+class RecordLimits(
+    val maxRecords: Int,
+    val maxCharsPerRecord: Long,
+    val budget: TextBudget,
+    val maxFields: Int = 64
+) {
+    companion object {
+        /** Only the record shape is checked; for text that does not come from an archive. */
+        fun unbounded() = RecordLimits(Int.MAX_VALUE, Long.MAX_VALUE, TextBudget(Long.MAX_VALUE), Int.MAX_VALUE)
+    }
+}
+
 object SimpleJsonParser {
 
-    fun parseObject(json: String): JsonObject {
-        val parser = StringParser(json.trim())
-        val res = parser.parseValue()
-        return (res as? JsonObject) ?: throw IllegalArgumentException("JSON is not an object: $json")
-    }
+    private const val MAX_JSON_DEPTH = 32
+
+    /**
+     * Longest string value accepted. Real values are far shorter: a recipe's ingredient list is a few
+     * KB. Even all non-ASCII, this many characters fits a SQLite row that Android can read back.
+     */
+    const val MAX_STRING_CHARS = 200_000
+
+    private const val READ_BUFFER_CHARS = 8192
+
+    fun parseObject(json: String): JsonObject = parseObject(StringReader(json), bufferFor(json))
+
+    fun parseArray(json: String): List<Any?> = parseArray(StringReader(json), bufferFor(json))
+
+    // Error messages give a position and at most a 40-character field name or a number token,
+    // never a string value: backups hold the user's diary (BUG-047)
+    fun parseObject(reader: Reader, bufferChars: Int = READ_BUFFER_CHARS): JsonObject =
+        Parser(reader, bufferChars).parseValue() as? JsonObject ?: throw IllegalArgumentException("JSON is not an object")
 
     @Suppress("UNCHECKED_CAST")
-    fun parseArray(json: String): List<Any?> {
-        val parser = StringParser(json.trim())
-        val res = parser.parseValue()
-        return (res as? List<Any?>) ?: throw IllegalArgumentException("JSON is not an array: $json")
-    }
+    fun parseArray(reader: Reader, bufferChars: Int = READ_BUFFER_CHARS): List<Any?> =
+        Parser(reader, bufferChars).parseValue() as? List<Any?> ?: throw IllegalArgumentException("JSON is not an array")
 
-    private class StringParser(private val text: String) {
-        private var pos = 0
+    /**
+     * Reads a top-level JSON array of flat records one at a time. Each record goes to [transform] and
+     * is then dropped, so memory holds the results only, never the whole text or its tree (BUG-047).
+     */
+    fun <T> parseRecords(reader: Reader, limits: RecordLimits, transform: (JsonObject) -> T): List<T> =
+        Parser(reader, READ_BUFFER_CHARS).parseRecordArray(limits, transform)
+
+    private fun bufferFor(json: String) = json.length.coerceIn(16, READ_BUFFER_CHARS)
+
+    /** One character for an error message: quoted when printable ASCII, else its code point. */
+    private fun describe(c: Char): String =
+        if (c in ' '..'~') "'$c'" else String.format(Locale.US, "U+%04X", c.code)
+
+    /** Pulls characters from a [Reader] through a small buffer, with one character of lookahead. */
+    private class Parser(private val reader: Reader, bufferChars: Int) {
+        private val buffer = CharArray(bufferChars)
+        private var bufferLength = 0
+        private var bufferIndex = 0
+        private var position = 0L
         private var depth = 0
 
-        companion object {
-            private const val MAX_JSON_DEPTH = 32
+        // While a record is read, reading past this position fails
+        private var recordEnd = Long.MAX_VALUE
+        private var recordStart = 0L
+
+        private fun fill(): Boolean {
+            if (bufferIndex < bufferLength) return true
+            bufferLength = reader.read(buffer, 0, buffer.size)
+            bufferIndex = 0
+            return bufferLength > 0
+        }
+
+        private fun atEnd(): Boolean = !fill()
+
+        private fun peek(): Char = if (fill()) buffer[bufferIndex] else '\u0000'
+
+        private fun next(): Char {
+            if (!fill()) throw IllegalArgumentException("Unexpected end of JSON at position $position")
+            if (position >= recordEnd) {
+                throw IllegalArgumentException("Record at position $recordStart is longer than ${recordEnd - recordStart} characters")
+            }
+            position++
+            return buffer[bufferIndex++]
         }
 
         private fun skipWhitespace() {
-            while (pos < text.length && text[pos].isWhitespace()) {
-                pos++
+            while (fill() && buffer[bufferIndex].isWhitespace()) {
+                bufferIndex++
+                position++
             }
         }
 
-        private fun peek(): Char = if (pos < text.length) text[pos] else '\u0000'
+        private fun describeNext(): String = if (atEnd()) "end of input" else describe(peek())
 
-        private fun checkDepth() {
+        private inline fun <T> nested(block: () -> T): T {
             if (depth >= MAX_JSON_DEPTH) {
                 throw IllegalArgumentException("Exceeded maximum JSON nesting depth ($MAX_JSON_DEPTH)")
+            }
+            depth++
+            try {
+                return block()
+            } finally {
+                depth--
             }
         }
 
         fun parseValue(): Any? {
             skipWhitespace()
-            if (pos >= text.length) return null
+            if (atEnd()) return null
             return when (val c = peek()) {
-                '{' -> {
-                    checkDepth()
-                    depth++
-                    val res = parseObject()
-                    depth--
-                    res
-                }
-                '[' -> {
-                    checkDepth()
-                    depth++
-                    val res = parseArray()
-                    depth--
-                    res
-                }
+                '{' -> nested { parseObjectBody(flat = false, maxFields = Int.MAX_VALUE) }
+                '[' -> nested { parseArrayBody() }
                 '"' -> parseString()
-                't', 'f' -> parseBoolean()
-                'n' -> parseNull()
+                't' -> expectLiteral("true", true)
+                'f' -> expectLiteral("false", false)
+                'n' -> expectLiteral("null", null)
                 else -> {
                     if (c == '-' || c.isDigit()) parseNumber()
-                    else throw IllegalArgumentException("Unexpected char '$c' at pos $pos in $text")
+                    else throw IllegalArgumentException("Unexpected character ${describe(c)} at position $position")
                 }
             }
         }
 
-        private fun parseObject(): JsonObject {
-            pos++ // skip '{'
-            val map = mutableMapOf<String, Any?>()
+        fun <T> parseRecordArray(limits: RecordLimits, transform: (JsonObject) -> T): List<T> {
+            skipWhitespace()
+            if (peek() != '[') throw IllegalArgumentException("JSON is not an array")
+            val result = ArrayList<T>()
+            nested {
+                readArray { index ->
+                    if (index >= limits.maxRecords) {
+                        throw BackupTooLargeException("More than ${limits.maxRecords} records in one file")
+                    }
+                    result.add(transform(readRecord(limits)))
+                }
+            }
+            return result
+        }
+
+        private fun readRecord(limits: RecordLimits): JsonObject {
+            skipWhitespace()
+            if (peek() != '{') throw IllegalArgumentException("Expected a record object at position $position")
+            recordStart = position
+            recordEnd = if (limits.maxCharsPerRecord == Long.MAX_VALUE) Long.MAX_VALUE else position + limits.maxCharsPerRecord
+            val record = try {
+                nested { parseObjectBody(flat = true, maxFields = limits.maxFields) }
+            } finally {
+                recordEnd = Long.MAX_VALUE
+            }
+            var chars = 0L
+            for (value in record.map.values) if (value is String) chars += value.length
+            limits.budget.spend(chars)
+            return record
+        }
+
+        /** In a [flat] object every value is a string, number, boolean or null. */
+        private fun parseObjectBody(flat: Boolean, maxFields: Int): JsonObject {
+            next() // '{'
+            val map = LinkedHashMap<String, Any?>()
             skipWhitespace()
             if (peek() == '}') {
-                pos++
+                next()
                 return JsonObject(map)
             }
-            while (pos < text.length) {
+            while (true) {
                 skipWhitespace()
                 val key = parseString()
                 skipWhitespace()
-                if (peek() != ':') throw IllegalArgumentException("Expected ':' after key '$key' at pos $pos")
-                pos++ // skip ':'
-                val value = parseValue()
-                map[key] = value
+                if (peek() != ':') {
+                    throw IllegalArgumentException("Expected ':' after key \"${printableText(key, 40)}\" at position $position")
+                }
+                next()
+                if (flat) {
+                    skipWhitespace()
+                    if (peek() == '{' || peek() == '[') {
+                        throw IllegalArgumentException("Nested value in a record at position $position")
+                    }
+                }
+                map[key] = parseValue()
+                if (map.size > maxFields) throw IllegalArgumentException("Record has more than $maxFields fields")
                 skipWhitespace()
-                if (peek() == ',') {
-                    pos++
-                } else if (peek() == '}') {
-                    pos++
-                    break
-                } else {
-                    throw IllegalArgumentException("Expected ',' or '}' at pos $pos, found '${peek()}'")
+                when (peek()) {
+                    ',' -> next()
+                    '}' -> {
+                        next()
+                        return JsonObject(map)
+                    }
+                    else -> throw IllegalArgumentException("Expected ',' or '}' at position $position, found ${describeNext()}")
                 }
             }
-            return JsonObject(map)
         }
 
-        private fun parseArray(): List<Any?> {
-            pos++ // skip '['
+        private fun parseArrayBody(): List<Any?> {
             val list = mutableListOf<Any?>()
-            skipWhitespace()
-            if (peek() == ']') {
-                pos++
-                return list
-            }
-            while (pos < text.length) {
-                val value = parseValue()
-                list.add(value)
-                skipWhitespace()
-                if (peek() == ',') {
-                    pos++
-                } else if (peek() == ']') {
-                    pos++
-                    break
-                } else {
-                    throw IllegalArgumentException("Expected ',' or ']' at pos $pos, found '${peek()}'")
-                }
-            }
+            readArray { list.add(parseValue()) }
             return list
         }
 
-        private fun parseString(): String {
-            if (peek() != '"') throw IllegalArgumentException("Expected '\"' at pos $pos")
-            pos++ // skip opening '"'
-            val sb = StringBuilder()
-            while (pos < text.length) {
-                val c = text[pos++]
-                if (c == '"') {
-                    return sb.toString()
-                } else if (c == '\\') {
-                    if (pos >= text.length) throw IllegalArgumentException("Unterminated escape at pos $pos")
-                    when (val esc = text[pos++]) {
-                        '"' -> sb.append('"')
-                        '\\' -> sb.append('\\')
-                        '/' -> sb.append('/')
-                        'b' -> sb.append('\b')
-                        'f' -> sb.append('\u000C')
-                        'n' -> sb.append('\n')
-                        'r' -> sb.append('\r')
-                        't' -> sb.append('\t')
-                        'u' -> {
-                            if (pos + 4 > text.length) throw IllegalArgumentException("Invalid unicode escape at pos $pos")
-                            val hex = text.substring(pos, pos + 4)
-                            val charCode = hex.toIntOrNull(16) ?: throw IllegalArgumentException("Invalid hex character in unicode escape: '\\u$hex'")
-                            sb.append(charCode.toChar())
-                            pos += 4
-                        }
-                        else -> sb.append(esc)
+        /** Reads '[' ... ']'; [readElement] reads one element and gets its index. A cut-off array is an error. */
+        private inline fun readArray(readElement: (Int) -> Unit) {
+            next() // '['
+            skipWhitespace()
+            if (peek() == ']') {
+                next()
+                return
+            }
+            var index = 0
+            while (true) {
+                readElement(index++)
+                skipWhitespace()
+                when (peek()) {
+                    ',' -> next()
+                    ']' -> {
+                        next()
+                        return
                     }
-                } else {
-                    sb.append(c)
+                    else -> throw IllegalArgumentException("Expected ',' or ']' at position $position, found ${describeNext()}")
                 }
             }
-            throw IllegalArgumentException("Unterminated string starting at $pos")
+        }
+
+        private fun parseString(): String {
+            if (peek() != '"') throw IllegalArgumentException("Expected '\"' at position $position")
+            next() // opening '"'
+            val start = position
+            val sb = StringBuilder()
+            while (true) {
+                if (atEnd()) throw IllegalArgumentException("Unterminated string starting at position $start")
+                when (val c = next()) {
+                    '"' -> return sb.toString()
+                    '\\' -> {
+                        if (atEnd()) throw IllegalArgumentException("Unterminated escape at position $position")
+                        when (val esc = next()) {
+                            '"' -> sb.append('"')
+                            '\\' -> sb.append('\\')
+                            '/' -> sb.append('/')
+                            'b' -> sb.append('\b')
+                            'f' -> sb.append('\u000C')
+                            'n' -> sb.append('\n')
+                            'r' -> sb.append('\r')
+                            't' -> sb.append('\t')
+                            'u' -> sb.append(readUnicodeEscape())
+                            else -> sb.append(esc)
+                        }
+                    }
+                    else -> sb.append(c)
+                }
+                if (sb.length > MAX_STRING_CHARS) {
+                    throw IllegalArgumentException("String starting at position $start is longer than $MAX_STRING_CHARS characters")
+                }
+            }
+        }
+
+        private fun readUnicodeEscape(): Char {
+            val hex = StringBuilder(4)
+            repeat(4) {
+                if (atEnd()) throw IllegalArgumentException("Invalid unicode escape at position $position")
+                hex.append(next())
+            }
+            val digits = hex.toString()
+            if (!digits.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                throw IllegalArgumentException("Invalid hex character in unicode escape at position $position")
+            }
+            return digits.toInt(16).toChar()
         }
 
         private fun parseNumber(): Number {
-            val start = pos
-            if (peek() == '-') pos++
-            while (pos < text.length && (text[pos].isDigit() || text[pos] == '.' || text[pos] == 'e' || text[pos] == 'E' || text[pos] == '+' || text[pos] == '-')) {
-                pos++
+            val start = position
+            val sb = StringBuilder()
+            if (peek() == '-') sb.append(next())
+            while (!atEnd()) {
+                val c = peek()
+                if (!(c.isDigit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-')) break
+                sb.append(next())
+                if (sb.length > 64) throw IllegalArgumentException("Number at position $start is too long")
             }
-            val numStr = text.substring(start, pos)
+            val numStr = printableText(sb.toString(), 64)
             if (numStr == "-" || numStr.isEmpty()) {
-                throw IllegalArgumentException("Malformed number token '$numStr' at pos $start")
+                throw IllegalArgumentException("Malformed number token '$numStr' at position $start")
             }
             return if (numStr.contains('.') || numStr.contains('e') || numStr.contains('E')) {
                 numStr.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid floating-point number: '$numStr'")
@@ -657,24 +795,12 @@ object SimpleJsonParser {
             }
         }
 
-        private fun parseBoolean(): Boolean {
-            if (text.startsWith("true", pos)) {
-                pos += 4
-                return true
+        private fun expectLiteral(word: String, value: Any?): Any? {
+            for (expected in word) {
+                if (atEnd() || peek() != expected) throw IllegalArgumentException("Expected $word at position $position")
+                next()
             }
-            if (text.startsWith("false", pos)) {
-                pos += 5
-                return false
-            }
-            throw IllegalArgumentException("Expected boolean at pos $pos")
-        }
-
-        private fun parseNull(): Any? {
-            if (text.startsWith("null", pos)) {
-                pos += 4
-                return null
-            }
-            throw IllegalArgumentException("Expected null at pos $pos")
+            return value
         }
     }
 }

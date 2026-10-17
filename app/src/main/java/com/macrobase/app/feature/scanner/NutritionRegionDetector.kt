@@ -130,9 +130,9 @@ class NutritionRegionDetector {
     }
 
     /**
-     * Crops the detected table region from the source bitmap.
+     * Crops the detected table region from the source bitmap, with where the crop starts in it.
      */
-    fun cropTable(bitmap: Bitmap, region: TableRegionResult): Bitmap? {
+    fun cropTable(bitmap: Bitmap, region: TableRegionResult): CroppedTable? {
         val box = region.boundingBox ?: return null
         if (bitmap.isRecycled) return null
 
@@ -144,9 +144,12 @@ class NutritionRegionDetector {
         if (width < 50 || height < 50) return null
 
         return try {
-            Bitmap.createBitmap(bitmap, left, top, width, height)
+            CroppedTable(Bitmap.createBitmap(bitmap, left, top, width, height), originX = left, originY = top)
         } catch (t: Throwable) {
             null
         }
     }
 }
+
+/** A crop of an image, and where its top-left corner sits in that image (BUG-043). */
+data class CroppedTable(val bitmap: Bitmap, val originX: Int, val originY: Int)

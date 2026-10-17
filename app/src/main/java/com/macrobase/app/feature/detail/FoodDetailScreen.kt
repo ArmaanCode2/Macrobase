@@ -100,6 +100,8 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.text.style.TextAlign
+import java.util.Locale
+import kotlin.math.roundToInt
 
 fun formatQuantityForInput(value: Double, tolerance: Double = 0.0001): String {
     if (!value.isFinite()) return "0"
@@ -135,7 +137,8 @@ class FoodDetailViewModel(
     private val commitSingleBasketItemUseCase: CommitSingleBasketItemUseCase,
     private val updateDiaryEntryUseCase: UpdateDiaryEntryUseCase,
     private val deleteDiaryEntryUseCase: DeleteDiaryEntryUseCase,
-    private val getDiaryEntryUseCase: com.macrobase.app.domain.usecase.GetDiaryEntryUseCase
+    private val getDiaryEntryUseCase: com.macrobase.app.domain.usecase.GetDiaryEntryUseCase,
+    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FoodDetailUiState())
@@ -143,6 +146,12 @@ class FoodDetailViewModel(
 
     private var editingEntryId: Long? = null
     private var editingBasketItemId: String? = null
+
+    /** Opened without a day, so it logs to today, whatever day that is when it is logged (BUG-040). */
+    private var dateFollowsToday = false
+
+    // The diary entry this screen loaded, to notice a newer save made elsewhere
+    private var loadedEntry: DiaryEntry? = null
 
     /**
      * True from the first tap of Log/Save/Keep/Delete/Remove until it fails; after success the
@@ -163,6 +172,58 @@ class FoodDetailViewModel(
         _uiState.update { it.copy(isSaving = false, actionError = message) }
     }
 
+    /** The arguments the screen was opened with (BUG-038). */
+    private data class OpenRequest(
+        val foodId: Long,
+        val mealType: MealType?,
+        val date: LocalDate?,
+        val entryId: Long?,
+        val basketItemId: String?
+    )
+
+    private var openedWith: OpenRequest? = null
+
+    /**
+     * Loads what the screen was opened for, once. A screen recreated by rotation asks again with
+     * the same arguments and keeps what the user typed, even after Copy switched it to another
+     * item (BUG-038). [loadFood] always reloads.
+     */
+    fun openFood(foodId: Long, mealType: MealType? = null, date: LocalDate? = null, entryId: Long? = null, basketItemId: String? = null) {
+        val request = OpenRequest(foodId, mealType, date, entryId, basketItemId)
+        if (request == openedWith) {
+            reloadIfEntryChanged(request)
+            return
+        }
+        openedWith = request
+        loadFood(foodId, mealType, date, entryId, basketItemId)
+    }
+
+    /**
+     * A screen shown again keeps what the user typed, unless its diary entry was saved elsewhere
+     * meanwhile: then it shows the saved entry, so Save cannot overwrite it with an older one.
+     */
+    private fun reloadIfEntryChanged(request: OpenRequest) {
+        val entryId = editingEntryId ?: return
+        val loaded = loadedEntry ?: return
+        viewModelScope.launch {
+            if (getDiaryEntryUseCase(entryId) != loaded) {
+                loadFood(request.foodId, request.mealType, request.date, request.entryId, request.basketItemId)
+            }
+        }
+    }
+
+    /** The screen is in the foreground again (BUG-040). */
+    fun onResumed() {
+        refreshImplicitDate()
+    }
+
+    /** A food opened without a day logs to today, so after midnight that is the new day (BUG-040). */
+    private fun refreshImplicitDate() {
+        if (!dateFollowsToday) return
+        val today = LocalDate.now(clock)
+        if (_uiState.value.targetDate != today) _uiState.update { it.copy(targetDate = today) }
+    }
+
     fun loadFood(foodId: Long, mealType: MealType? = null, date: LocalDate? = null, entryId: Long? = null, basketItemId: String? = null) {
         editingEntryId = if (entryId != null && entryId > 0L) entryId else null
         editingBasketItemId = basketItemId
@@ -175,6 +236,8 @@ class FoodDetailViewModel(
             if (currentEditingEntryId != null && currentEditingEntryId > 0L) {
                 val diaryEntry = getDiaryEntryUseCase(currentEditingEntryId)
                 if (diaryEntry != null) {
+                    dateFollowsToday = false
+                    loadedEntry = diaryEntry
                     // Trust a looked-up food only if it is the one this entry logged; otherwise
                     // keep the entry's own snapshot so Save never rewrites it with another food.
                     val catalogFood = getFoodDetailsUseCase(diaryEntry.food.id)
@@ -247,6 +310,8 @@ class FoodDetailViewModel(
                     }
                     return@launch
                 } else {
+                    // Nothing to keep, so a recreated screen tries again
+                    openedWith = null
                     _uiState.update { it.copy(food = null, isLoading = false, errorMessage = "Diary entry not found") }
                     return@launch
                 }
@@ -266,6 +331,7 @@ class FoodDetailViewModel(
             }
 
             if (item == null) {
+                openedWith = null
                 _uiState.update { it.copy(food = null, isLoading = false, errorMessage = "Food record not found") }
                 return@launch
             }
@@ -282,7 +348,10 @@ class FoodDetailViewModel(
             val calculated = calculateNutritionForServingUseCase(item, defaultServing, initialQty)
             val split = MacroCalorieSplit.fromNutrition(calculated)
             
-            val targetDate = basketItem?.date ?: (date ?: LocalDate.now())
+            // Opened without a day (Track, the widget, a dashboard on today): it logs to today
+            dateFollowsToday = basketItem == null && date == null
+            loadedEntry = null
+            val targetDate = basketItem?.date ?: (date ?: LocalDate.now(clock))
             val targetMealType = basketItem?.mealType ?: (mealType ?: MealType.BREAKFAST)
 
             _uiState.update {
@@ -373,11 +442,13 @@ class FoodDetailViewModel(
     }
     
     fun onDateSelected(date: LocalDate) {
+        dateFollowsToday = false
         _uiState.update { it.copy(targetDate = date) }
         saveCurrentStateToBasket()
     }
 
     fun logFood(onSuccess: () -> Unit) {
+        refreshImplicitDate()
         val state = _uiState.value
         val food = state.food ?: return
         val serving = state.selectedServing ?: return
@@ -438,6 +509,7 @@ class FoodDetailViewModel(
     }
     
     fun keepInBasket(onSuccess: () -> Unit) {
+        refreshImplicitDate()
         val state = _uiState.value
         val food = state.food ?: return
         val serving = state.selectedServing ?: return
@@ -523,7 +595,13 @@ fun FoodDetailScreen(
     BackHandler(onBack = onNavigateBack)
 
     LaunchedEffect(foodId, entryId, basketItemId) {
-        viewModel.loadFood(foodId, mealType, date, entryId, basketItemId)
+        viewModel.openFood(foodId, mealType, date, entryId, basketItemId)
+    }
+
+    // A food opened without a day moves to the new day after midnight (BUG-040)
+    androidx.lifecycle.compose.LifecycleResumeEffect(viewModel) {
+        viewModel.onResumed()
+        onPauseOrDispose { }
     }
 
     if (uiState.isLoading) {
@@ -699,7 +777,7 @@ fun FoodDetailScreen(
                     Icon(androidx.compose.material.icons.Icons.Default.Info, contentDescription = "Info", tint = AppColors.TextSecondary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(AppSpacing.sm))
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(String.format("%.0f", uiState.calculatedNutrition.calories), style = AppTypography.Header3, color = AppColors.CalorieText)
+                        Text("${uiState.calculatedNutrition.calories.roundToInt()}", style = AppTypography.Header3, color = AppColors.CalorieText)
                         Text("cal", style = AppTypography.Caption, color = AppColors.TextSecondary)
                     }
                 }
@@ -723,7 +801,7 @@ fun FoodDetailScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Total Calories", style = AppTypography.Header3, color = AppColors.TextPrimary)
-            Text(String.format("%.0f", uiState.calculatedNutrition.calories), style = AppTypography.Header3, color = AppColors.CalorieText)
+            Text("${uiState.calculatedNutrition.calories.roundToInt()}", style = AppTypography.Header3, color = AppColors.CalorieText)
         }
         HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
         
@@ -1061,7 +1139,7 @@ fun FoodDetailScreen(
 @Composable
 private fun MacroValue(label: String, value: Double, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(String.format("%.0fg", value), style = AppTypography.Body2, color = color)
+        Text("${value.roundToInt()}g", style = AppTypography.Body2, color = color)
         Spacer(modifier = Modifier.width(4.dp))
         Text(label, style = AppTypography.Caption, color = AppColors.TextSecondary)
     }
@@ -1117,7 +1195,7 @@ private fun NutritionRow(label: String, value: Double?, unit: String, isMain: Bo
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, style = if (isMain) AppTypography.Body1 else AppTypography.Body2, color = AppColors.TextPrimary)
-        val valueStr = if (value != null) String.format("%.1f %s", value, unit) else "-"
+        val valueStr = if (value != null) String.format(Locale.US, "%.1f %s", value, unit) else "-"
         Text(valueStr, style = AppTypography.Body1, color = AppColors.TextPrimary)
     }
 }

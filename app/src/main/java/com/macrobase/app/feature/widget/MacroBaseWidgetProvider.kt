@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.widget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.context.GlobalContext
 import java.time.LocalDate
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -28,6 +30,9 @@ import kotlin.math.roundToInt
 class MacroBaseWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        // Booked before anything can fail, so every update, the 30-minute one included, re-arms the
+        // next midnight refresh; that also restores it after a reboot (BUG-048)
+        scheduleMidnightRefresh(context)
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
@@ -40,6 +45,21 @@ class MacroBaseWidgetProvider : AppWidgetProvider() {
                 pendingResult.finish()
             }
         }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        when (intent.action) {
+            // The date changed, or the clock or time zone moved: today is another day (BUG-048)
+            ACTION_MIDNIGHT_REFRESH, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> updateAllWidgets(context)
+        }
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        // The last widget is gone, so nothing needs refreshing at midnight
+        runCatching { midnightAlarmManager(context)?.cancel(midnightRefreshIntent(context)) }
+            .onFailure { Log.w("MacroBaseWidget", "Could not cancel the midnight refresh", it) }
     }
 
     private suspend fun renderWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
@@ -118,10 +138,12 @@ class MacroBaseWidgetProvider : AppWidgetProvider() {
         )
         views.setTextViewText(R.id.tv_widget_macros, macrosText)
 
-        // 6. Root Click Action: Opens MainActivity
+        // 6. Root Click Action: Opens MainActivity on today's dashboard
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
-            action = ACTION_WIDGET_LOG_FOOD
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            action = ACTION_WIDGET_OPEN_TODAY
+            // With SINGLE_TOP the running activity gets onNewIntent instead of being recreated;
+            // CLEAR_TOP closes anything opened above it, such as a file picker (BUG-030)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingAppIntent = PendingIntent.getActivity(
             context,
@@ -136,7 +158,48 @@ class MacroBaseWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        const val ACTION_WIDGET_LOG_FOOD = "com.macrobase.app.ACTION_WIDGET_LOG_FOOD"
+        const val ACTION_WIDGET_OPEN_TODAY = "com.macrobase.app.ACTION_WIDGET_OPEN_TODAY"
+
+        /** The action widgets drawn before 1.2.4 still send until their next redraw. */
+        const val LEGACY_ACTION_WIDGET_LOG_FOOD = "com.macrobase.app.ACTION_WIDGET_LOG_FOOD"
+        const val ACTION_MIDNIGHT_REFRESH = "com.macrobase.app.ACTION_WIDGET_MIDNIGHT_REFRESH"
+        private const val REQUEST_MIDNIGHT_REFRESH = 1002
+
+        /** How late after midnight the refresh may land: the shortest inexact window Android 12+ allows. */
+        internal const val MIDNIGHT_WINDOW_MILLIS = 10 * 60_000L
+
+        /**
+         * The first instant of tomorrow in [now]'s time zone. Where a DST change skips midnight,
+         * that is the first valid time of the day.
+         */
+        internal fun nextMidnightMillis(now: ZonedDateTime): Long =
+            now.toLocalDate().plusDays(1).atStartOfDay(now.zone).toInstant().toEpochMilli()
+
+        /**
+         * Books one refresh just after the next midnight, replacing any booked before (BUG-048).
+         * RTC does not wake the phone: the refresh lands when it is next awake, which is when the
+         * widget can be seen. An inexact window needs no exact-alarm permission.
+         */
+        internal fun scheduleMidnightRefresh(context: Context, now: ZonedDateTime = ZonedDateTime.now()) {
+            runCatching {
+                midnightAlarmManager(context)?.setWindow(
+                    AlarmManager.RTC,
+                    nextMidnightMillis(now),
+                    MIDNIGHT_WINDOW_MILLIS,
+                    midnightRefreshIntent(context)
+                )
+            }.onFailure { Log.w("MacroBaseWidget", "Could not book the midnight refresh", it) }
+        }
+
+        private fun midnightAlarmManager(context: Context): AlarmManager? =
+            context.getSystemService(AlarmManager::class.java)
+
+        private fun midnightRefreshIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_MIDNIGHT_REFRESH,
+            Intent(context, MacroBaseWidgetProvider::class.java).setAction(ACTION_MIDNIGHT_REFRESH),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         fun updateAllWidgets(context: Context) {
             runCatching {

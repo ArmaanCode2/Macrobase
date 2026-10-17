@@ -26,6 +26,15 @@ data class HeatmapWeek(
 )
 
 /**
+ * The first day of a [days]-day window that ends on [today], so the window holds exactly [days]
+ * days: "30 days" is today and the 29 before it (BUG-033).
+ */
+fun windowStart(today: LocalDate, days: Long): LocalDate {
+    require(days >= 1) { "A window holds at least one day, not $days" }
+    return today.minusDays(days - 1)
+}
+
+/**
  * Domain statistics model for Nutrition Consistency Heatmap & Consistency Score.
  */
 data class ConsistencyStatistics(
@@ -33,7 +42,7 @@ data class ConsistencyStatistics(
     val endDate: LocalDate,
     val totalEligibleDays: Int,
     val loggedDaysCount: Int,
-    val consistencyScorePercentage: Int, // round((loggedDaysCount / totalEligibleDays) * 100)
+    val consistencyScorePercentage: Int, // (loggedDaysCount / totalEligibleDays * 100).roundToInt()
     val weeks: List<HeatmapWeek> = emptyList(),
     val allCells: List<HeatmapCellData> = emptyList()
 )

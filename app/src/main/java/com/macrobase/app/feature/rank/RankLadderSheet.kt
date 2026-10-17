@@ -52,12 +52,37 @@ import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.domain.model.rank.Rank
 import com.macrobase.app.domain.model.rank.RankTier
 import com.macrobase.app.domain.model.rank.Tier
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.util.Locale
+
+/**
+ * "Resets on Aug 29, 2027 \u2022 319 days left", then why. Before anything is logged there is
+ * no date yet.
+ */
+internal fun rankResetText(nextReset: LocalDate?, today: LocalDate): String {
+    if (nextReset == null) {
+        return "Your rank starts again from Fat Bear one year after the first day you log food, and every year after that."
+    }
+    val daysLeft = ChronoUnit.DAYS.between(today, nextReset)
+    val date = nextReset.format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US))
+    // A profile from before midnight can still be on screen on the reset day
+    val left = when {
+        daysLeft <= 0L -> "Resets today"
+        daysLeft == 1L -> "Resets on $date \u2022 1 day left"
+        else -> "Resets on $date \u2022 $daysLeft days left"
+    }
+    return "$left. Your rank starts again from Fat Bear every year on the date you first logged food."
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RankLadderSheet(
     currentRankTier: RankTier,
     currentTierRR: Int,
+    /** The day the rank next starts again from Fat Bear; null before anything is logged. */
+    nextRankReset: LocalDate?,
     onDismissRequest: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
@@ -141,7 +166,7 @@ fun RankLadderSheet(
             ) {
                 Column {
                     Text(
-                        text = "PROGRESSION: I → II → III → NEXT RANK",
+                        text = "PROGRESSION: I \u2192 II \u2192 III \u2192 NEXT RANK",
                         style = AppTypography.Caption.copy(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.5.sp,
@@ -150,7 +175,36 @@ fun RankLadderSheet(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Each tier requires 100 RR (0–99 RR). Lifestyle consistency determines daily RR gain/loss.",
+                        text = "Each tier requires 100 RR (0\u201399 RR). You gain RR when a day scores above what your rank expects and lose RR when it falls short, so higher ranks need better days. Moving up into Fart Monster or GigaChad also needs a clean week: 7 days in a row in your calorie zone, with one day off or missed allowed.",
+                        style = AppTypography.Caption.copy(fontSize = 11.sp),
+                        color = AppColors.TextSecondary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
+
+            // 3. When the rank starts again
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(AppColors.SurfaceAlt)
+                    .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
+                    .padding(horizontal = AppSpacing.sm, vertical = 8.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "RANK RESET",
+                        style = AppTypography.Caption.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            color = AppColors.Primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = rankResetText(nextRankReset, LocalDate.now()),
                         style = AppTypography.Caption.copy(fontSize = 11.sp),
                         color = AppColors.TextSecondary
                     )
@@ -159,7 +213,7 @@ fun RankLadderSheet(
 
             Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-            // 3. Complete 24-Tier List
+            // 4. Complete 24-Tier List
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -342,7 +396,7 @@ private fun RankLadderItemRow(
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = if (isCurrent) "${currentTierRR} / 100 RR" else "0–99 RR",
+                    text = if (isCurrent) "${currentTierRR} / 100 RR" else "0\u201399 RR",
                     style = AppTypography.Caption.copy(
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 11.sp

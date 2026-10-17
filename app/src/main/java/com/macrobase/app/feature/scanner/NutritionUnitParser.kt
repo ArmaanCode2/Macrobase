@@ -20,7 +20,7 @@ object NutritionUnitParser {
         return when {
             lower == "g" || lower == "gm" || lower == "gms" || lower == "gram" || lower == "grams" -> "g"
             lower == "mg" || lower == "rng" || lower == "mgs" || lower == "milligram" || lower == "milligrams" -> "mg"
-            lower == "mcg" || lower == "µg" || lower == "μg" || lower == "microgram" || lower == "micrograms" -> "mcg"
+            lower == "mcg" || lower == "\u00b5g" || lower == "\u03bcg" || lower == "microgram" || lower == "micrograms" -> "mcg"
             lower == "kcal" || lower == "cal" || lower == "calories" || lower == "calorie" -> "kcal"
             lower == "kj" || lower == "kilojoules" || lower == "kilojoule" -> "kJ"
             lower == "ml" || lower == "milliliter" || lower == "milliliters" -> "ml"

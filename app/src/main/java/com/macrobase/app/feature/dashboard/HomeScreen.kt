@@ -61,6 +61,7 @@ import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.usecase.DeleteDiaryEntryUseCase
 import com.macrobase.app.domain.usecase.GetDailyDiaryUseCase
 import com.macrobase.app.domain.usecase.GetFoodDetailsUseCase
+import com.macrobase.app.domain.usecase.MoveDiaryEntriesUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -109,7 +110,8 @@ class HomeViewModel(
     private val addFoodToBasketUseCase: com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase,
     private val getFoodDetailsUseCase: GetFoodDetailsUseCase? = null,
     private val getWeightForDateUseCase: GetWeightForDateUseCase? = null,
-    private val clock: Clock = DeviceClock
+    private val clock: Clock = DeviceClock,
+    private val moveDiaryEntriesUseCase: MoveDiaryEntriesUseCase? = null
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(LocalDate.now(clock))
@@ -134,24 +136,54 @@ class HomeViewModel(
         initialValue = null
     )
 
-    fun onPreviousDay() {
+    /**
+     * True while the dashboard shows the current day. It then moves to the new day when the app
+     * comes back after midnight; a day the user picked stays (BUG-040).
+     */
+    private var followsToday = true
+
+    /** Today by this ViewModel's clock, so the "Today" label and the rollover agree. */
+    fun today(): LocalDate = LocalDate.now(clock)
+
+    private fun showDate(date: LocalDate) {
         _revealedEntryId.value = null
-        _selectedDate.value = _selectedDate.value.minusDays(1)
+        _selectedDate.value = date
+        followsToday = date == today()
+    }
+
+    fun onPreviousDay() {
+        showDate(_selectedDate.value.minusDays(1))
     }
 
     fun onNextDay() {
-        _revealedEntryId.value = null
-        _selectedDate.value = _selectedDate.value.plusDays(1)
+        showDate(_selectedDate.value.plusDays(1))
     }
 
     fun onSelectDate(date: LocalDate) {
-        _revealedEntryId.value = null
-        _selectedDate.value = date
+        showDate(date)
     }
 
     fun resetToToday(zoneId: ZoneId = clock.zone) {
         _revealedEntryId.value = null
         _selectedDate.value = LocalDate.now(clock.withZone(zoneId))
+        followsToday = true
+    }
+
+    /**
+     * The day for food logged from the dashboard, or null for "today when it is logged", so a
+     * screen left open overnight logs to the new day (BUG-040).
+     */
+    fun dateForNewLog(): LocalDate? = if (followsToday) null else _selectedDate.value
+
+    /** The app is in the foreground again: a dashboard left on today moves to the new day (BUG-040). */
+    fun onAppResumed() {
+        val today = today()
+        // A day the user picked that has since become today follows the calendar from now on
+        if (_selectedDate.value == today) followsToday = true
+        if (followsToday && _selectedDate.value != today) {
+            _revealedEntryId.value = null
+            _selectedDate.value = today
+        }
     }
 
     fun setRevealedEntry(entryId: Long?) {
@@ -167,28 +199,56 @@ class HomeViewModel(
 
     fun copyEntry(entry: DiaryEntry) {
         _revealedEntryId.value = null
-        viewModelScope.launch {
-            val fullFood = getFoodDetailsUseCase?.invoke(entry.food.id)
-                ?.takeIf { it.isSameFoodAs(entry.food) && it.canScale(it.resolveLoggedServing(entry.serving)) }
-                ?: entry.food
-            val matchedServing = fullFood.resolveLoggedServing(entry.serving)
+        viewModelScope.launch { addToBasket(entry) }
+    }
 
-            addFoodToBasketUseCase(
-                food = fullFood,
-                serving = matchedServing,
-                quantity = entry.quantity,
-                calculatedNutrition = entry.calculatedNutrition,
-                date = entry.date,
-                mealType = entry.mealType
-            )
-        }
+    /**
+     * Puts every food of [meal] in the basket, in the meal's order, under the day and meal it was
+     * logged in; the user picks where it goes and logs it from there.
+     */
+    fun copyMeal(meal: Meal) {
+        _revealedEntryId.value = null
+        viewModelScope.launch { meal.entries.forEach { addToBasket(it) } }
+    }
+
+    /** Moves every food of [meal] to [mealType] on [date]; what each food logged stays as it was. */
+    fun moveMeal(meal: Meal, date: LocalDate, mealType: MealType) {
+        val move = moveDiaryEntriesUseCase ?: return
+        val entryIds = meal.entries.map { it.id }
+        if (entryIds.isEmpty()) return
+        _revealedEntryId.value = null
+        viewModelScope.launch { move(entryIds, date, mealType) }
+    }
+
+    /** Deletes every food of [meal]. */
+    fun deleteMeal(meal: Meal) {
+        val entryIds = meal.entries.map { it.id }
+        if (entryIds.isEmpty()) return
+        _revealedEntryId.value = null
+        viewModelScope.launch { deleteDiaryEntryUseCase(entryIds) }
+    }
+
+    private suspend fun addToBasket(entry: DiaryEntry) {
+        val fullFood = getFoodDetailsUseCase?.invoke(entry.food.id)
+            ?.takeIf { it.isSameFoodAs(entry.food) && it.canScale(it.resolveLoggedServing(entry.serving)) }
+            ?: entry.food
+        val matchedServing = fullFood.resolveLoggedServing(entry.serving)
+
+        addFoodToBasketUseCase(
+            food = fullFood,
+            serving = matchedServing,
+            quantity = entry.quantity,
+            calculatedNutrition = entry.calculatedNutrition,
+            date = entry.date,
+            mealType = entry.mealType
+        )
     }
 }
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
-    onNavigateToSearch: (MealType, Long) -> Unit,
+    onNavigateToSearch: (MealType, Long?) -> Unit,
     onNavigateToDetail: (Long, MealType, Long, Long) -> Unit,
     onNavigateToCalendar: () -> Unit,
     onNavigateToWater: (Long) -> Unit,
@@ -222,7 +282,7 @@ fun HomeScreen(
             }
             Spacer(modifier = Modifier.width(AppSpacing.md))
             Text(
-                text = if (selectedDate == LocalDate.now()) "Today" else DashboardDateFormatter.formatDashboardDate(selectedDate),
+                text = if (selectedDate == viewModel.today()) "Today" else DashboardDateFormatter.formatDashboardDate(selectedDate),
                 style = AppTypography.Body1,
                 color = AppColors.TextPrimary,
                 modifier = Modifier
@@ -310,7 +370,7 @@ fun HomeScreen(
                 meal = meal,
                 revealedEntryId = revealedEntryId,
                 onRevealEntry = { entryId -> viewModel.setRevealedEntry(entryId) },
-                onAddFoodClick = { onNavigateToSearch(meal.type, selectedDate.toEpochDay()) },
+                onAddFoodClick = { onNavigateToSearch(meal.type, viewModel.dateForNewLog()?.toEpochDay()) },
                 onInfoClick = { selectedMealForInfo = meal },
                 onEntryClick = { entry ->
                     viewModel.setRevealedEntry(null)
@@ -412,75 +472,25 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(AppSpacing.xl))
     }
 
-    // Modal Meal Info Dialog
+    // Meal card: totals, and Copy / Move / Delete for the whole meal
     selectedMealForInfo?.let { meal ->
-        AlertDialog(
-            onDismissRequest = { selectedMealForInfo = null },
-            title = { Text("${meal.type.displayName} Nutrition", style = AppTypography.Header2) },
-            text = {
-                Column {
-                    Text("Calories: ${meal.totalCalories.roundToInt()} kcal", style = AppTypography.Header3)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroProtein)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Protein: ${String.format(Locale.US, "%.1f", meal.totalProtein)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroProtein
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroCarbs)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Carbs: ${String.format(Locale.US, "%.1f", meal.totalCarbs)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroCarbs
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroFat)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Fat: ${String.format(Locale.US, "%.1f", meal.totalFat)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroFat
-                        )
-                    }
-                }
+        MealCardDialog(
+            meal = meal,
+            day = meal.entries.firstOrNull()?.date ?: selectedDate,
+            today = viewModel.today(),
+            onDismiss = { selectedMealForInfo = null },
+            onCopy = {
+                selectedMealForInfo = null
+                viewModel.copyMeal(meal)
             },
-            confirmButton = {
-                TextButton(onClick = { selectedMealForInfo = null }) {
-                    Text("Close", color = AppColors.Primary)
-                }
+            onMove = { date, mealType ->
+                selectedMealForInfo = null
+                viewModel.moveMeal(meal, date, mealType)
             },
-            containerColor = AppColors.SurfaceAlt,
-            shape = AppShapes.Dialog
+            onDelete = {
+                selectedMealForInfo = null
+                viewModel.deleteMeal(meal)
+            }
         )
     }
 

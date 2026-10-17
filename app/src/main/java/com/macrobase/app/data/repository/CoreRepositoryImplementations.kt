@@ -237,10 +237,13 @@ class StatisticsRepositoryImpl(
 ) : StatisticsRepository {
 
     override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
+        val days = daysBetween(startDate, endDate)
         return combine(
             diaryRepository.observeNutritionAggregations(startDate, endDate),
-            goalsRepository.observeGoals()
-        ) { aggregations, goals ->
+            // Each day is judged against the goal in force on it, not today's (BUG-049)
+            goalsRepository.observeGoalsForDates(days)
+        ) { aggregations, dayGoals ->
+            val goalByDate = days.zip(dayGoals).toMap()
             val aggMap = aggregations.associateBy { it.date }
             val today = LocalDate.now(clock)
             val allCells = mutableListOf<com.macrobase.app.domain.model.HeatmapCellData>()
@@ -249,8 +252,9 @@ class StatisticsRepositoryImpl(
             while (!curr.isAfter(endDate)) {
                 val agg = aggMap[curr]
                 val cals = agg?.calories ?: 0.0
-                val goalCals = goals.dailyCalorieGoal
-                val isEligible = !curr.isAfter(today)
+                val goalCals = goalByDate.getValue(curr).dailyCalorieGoal
+                // Today counts once something is logged; until then it is not a missed day (BUG-032)
+                val isEligible = curr.isBefore(today) || (curr == today && cals > 0.0)
                 val isFuture = curr.isAfter(today)
                 val category = if (isFuture) {
                     com.macrobase.app.core.config.CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED
@@ -301,9 +305,13 @@ class StatisticsRepositoryImpl(
 
             val eligibleCells = allCells.filter { it.isEligible }
             val loggedDays = eligibleCells.count { it.caloriesLogged > 0.0 }
-            val score = if (eligibleCells.isNotEmpty()) {
-                ((loggedDays.toDouble() / eligibleCells.size.toDouble()) * 100.0).toInt()
-            } else 0
+            // Rounded, not truncated: 29 of 30 days is 97%, not 96% (BUG-033). Only every day logged
+            // shows 100% and only none shows 0%, so 364 of 365 reads 99% and 1 of 365 reads 1%.
+            val score = when {
+                eligibleCells.isEmpty() || loggedDays == 0 -> 0
+                loggedDays == eligibleCells.size -> 100
+                else -> ((loggedDays.toDouble() / eligibleCells.size.toDouble()) * 100.0).roundToInt().coerceIn(1, 99)
+            }
 
             com.macrobase.app.domain.model.ConsistencyStatistics(
                 startDate = startDate,
@@ -322,12 +330,32 @@ class StatisticsRepositoryImpl(
     }
 
     override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
+        val days = daysBetween(startDate, endDate)
         return combine(
             diaryRepository.observeNutritionAggregations(startDate, endDate),
+            goalsRepository.observeGoalsForDates(days),
             goalsRepository.observeGoals()
-        ) { aggregations, goals ->
+        ) { aggregations, dayGoals, currentGoal ->
             val loggedDays = aggregations.filter { it.calories > 0.0 }
             val count = loggedDays.size
+            // The averages cover logged days only, so the targets come from those same days' goals;
+            // with no logged day they are today's (BUG-049). The actual split is a share of all the
+            // calories eaten, so each day's target split counts by its calorie goal.
+            val goalByDate = days.zip(dayGoals).toMap()
+            val loggedGoals = loggedDays.mapNotNull { goalByDate[it.date] }
+            val goalCalories = loggedGoals.sumOf { it.dailyCalorieGoal }
+            fun weighted(percentage: (com.macrobase.app.domain.model.Goal) -> Double) =
+                loggedGoals.sumOf { it.dailyCalorieGoal * percentage(it) } / goalCalories
+            val goals = if (loggedGoals.isEmpty() || goalCalories <= 0.0) {
+                currentGoal
+            } else {
+                currentGoal.copy(
+                    dailyCalorieGoal = goalCalories / loggedGoals.size,
+                    carbPercentage = weighted { it.carbPercentage },
+                    proteinPercentage = weighted { it.proteinPercentage },
+                    fatPercentage = weighted { it.fatPercentage }
+                )
+            }
 
             if (count == 0) {
                 com.macrobase.app.domain.model.MacroAveragesStatistics(
@@ -389,6 +417,9 @@ class StatisticsRepositoryImpl(
     override suspend fun getMacroAverages(startDate: LocalDate, endDate: LocalDate): com.macrobase.app.domain.model.MacroAveragesStatistics {
         return observeMacroAverages(startDate, endDate).first()
     }
+
+    private fun daysBetween(startDate: LocalDate, endDate: LocalDate): List<LocalDate> =
+        generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
 
     override fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
         return weightRepository.observeWeightRange(startDate, endDate).map { entries ->

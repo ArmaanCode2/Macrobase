@@ -7,11 +7,14 @@ import com.macrobase.app.domain.model.rank.Rank
 import com.macrobase.app.domain.model.rank.RankProfile
 import com.macrobase.app.domain.model.rank.RankTier
 import com.macrobase.app.domain.model.rank.Tier
+import com.macrobase.app.domain.usecase.rank.DismissRankRulesNoticeUseCase
+import com.macrobase.app.domain.usecase.rank.DismissRankSeasonNoticeUseCase
 import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 data class RankUiState(
     val isLoading: Boolean = false,
@@ -27,7 +30,9 @@ data class RankUiState(
 )
 
 class RankViewModel(
-    getRankProfileUseCase: GetRankProfileUseCase
+    getRankProfileUseCase: GetRankProfileUseCase,
+    private val dismissRankRulesNoticeUseCase: DismissRankRulesNoticeUseCase,
+    private val dismissRankSeasonNoticeUseCase: DismissRankSeasonNoticeUseCase
 ) : ViewModel() {
 
     val uiState: StateFlow<RankUiState> = getRankProfileUseCase()
@@ -42,4 +47,13 @@ class RankViewModel(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = RankUiState(isLoading = true)
         )
+
+    fun dismissRulesNotice() {
+        viewModelScope.launch { dismissRankRulesNoticeUseCase() }
+    }
+
+    fun dismissSeasonNotice() {
+        val seasonStart = uiState.value.rankProfile.season?.start ?: return
+        viewModelScope.launch { dismissRankSeasonNoticeUseCase(seasonStart) }
+    }
 }

@@ -2,6 +2,7 @@ package com.macrobase.app.core.navigation
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +43,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -96,21 +98,7 @@ fun MacroBaseScaffold(
                     currentRoute = currentRoute,
                     onNavigate = { screen ->
                         scope.launch { drawerState.close() }
-                        if (screen == Screen.Home) {
-                            homeViewModel?.resetToToday()
-                            navController.navigate(Screen.Home.todayRoute()) {
-                                popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        } else {
-                            val targetRoute = screen.route.substringBefore("?")
-                            navController.navigate(targetRoute) {
-                                popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
+                        navController.navigateToTopLevel(screen, homeViewModel)
                     }
                 )
             }
@@ -243,65 +231,20 @@ fun MacroBaseScaffold(
                             horizontalArrangement = Arrangement.SpaceEvenly,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val isHome = currentRoute?.substringBefore("?") == Screen.Home.route.substringBefore("?")
-                            val isStats = currentRoute?.substringBefore("?") == Screen.Statistics.route.substringBefore("?")
-                            val isRank = currentRoute?.substringBefore("?") == Screen.Rank.route.substringBefore("?")
-                            val isPrefs = currentRoute?.substringBefore("?") == Screen.Preferences.route.substringBefore("?")
-                            
-                            BottomNavTab(
-                                title = "Dashboard",
-                                icon = Screen.Home.icon!!,
-                                selected = isHome,
-                                onClick = {
-                                    homeViewModel?.resetToToday()
-                                    navController.navigate(Screen.Home.todayRoute()) {
-                                        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            BottomNavTab(
-                                title = "Stats",
-                                icon = Screen.Statistics.icon!!,
-                                selected = isStats,
-                                onClick = {
-                                    navController.navigate(Screen.Statistics.route) {
-                                        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.weight(1f)) // Space for Track button
-                            BottomNavTab(
-                                title = "Rank",
-                                icon = Screen.Rank.icon!!,
-                                selected = isRank,
-                                onClick = {
-                                    navController.navigate(Screen.Rank.route) {
-                                        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            BottomNavTab(
-                                title = "Preferences",
-                                icon = Screen.Preferences.icon!!,
-                                selected = isPrefs,
-                                onClick = {
-                                    navController.navigate(Screen.Preferences.route) {
-                                        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
+                            // The bar is drawn from Screen.bottomNavScreens, in that order
+                            Screen.bottomNavScreens.forEach { screen ->
+                                if (screen == Screen.Statistics) {
+                                    Spacer(modifier = Modifier.weight(1f)) // Space for the raised Stats button
+                                } else {
+                                    BottomNavTab(
+                                        title = bottomTabLabel(screen),
+                                        icon = screen.icon!!,
+                                        selected = currentRoute?.substringBefore("?") == screen.route.substringBefore("?"),
+                                        onClick = { navController.navigateToTopLevel(screen, homeViewModel) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
                         
                         Box(
@@ -310,13 +253,10 @@ fun MacroBaseScaffold(
                                 .fillMaxHeight()
                                 .align(Alignment.TopCenter)
                                 .background(AppColors.Primary, androidx.compose.foundation.shape.RoundedCornerShape(2.dp))
-                                .clickable { navController.navigate(Screen.Search.createRoute()) },
+                                .clickable { navController.navigateToTopLevel(Screen.Statistics, homeViewModel) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "Track", tint = AppColors.TextPrimary, modifier = Modifier.size(28.dp))
-                                Text("Track", style = AppTypography.Caption, color = AppColors.TextPrimary)
-                            }
+                            Icon(Screen.Statistics.icon!!, contentDescription = bottomTabLabel(Screen.Statistics), tint = AppColors.TextPrimary, modifier = Modifier.size(28.dp))
                         }
                     }
                 }
@@ -363,13 +303,62 @@ fun BottomNavTab(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .clickable(onClick = onClick),
+            // With no text under the icon, screen readers get the tab role and its selected state
+            .selectable(selected = selected, onClick = onClick, role = Role.Tab),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         val color = if (selected) AppColors.Primary else AppColors.TextSecondary
+        // Icon only; the title stays as the screen reader label
         Icon(icon, contentDescription = title, tint = color, modifier = Modifier.size(24.dp))
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(title, style = AppTypography.Caption, color = color)
+    }
+}
+
+/** The screen reader label of a bottom bar tab. The bar shows icons only. */
+internal fun bottomTabLabel(screen: Screen): String = when (screen) {
+    Screen.Home -> "Home"
+    Screen.Statistics -> "Stats"
+    Screen.Preferences -> "Settings"
+    else -> screen.title
+}
+
+/**
+ * Opens a bottom bar tab or a drawer item. Home is always today's dashboard, and Custom Foods is
+ * always its list.
+ */
+fun NavHostController.navigateToTopLevel(screen: Screen, homeViewModel: HomeViewModel?) {
+    when (screen) {
+        Screen.Home -> navigateToTodayDashboard(homeViewModel)
+        // Never restored, so a half-filled food form saved by a tab switch never comes back
+        Screen.CustomFoods -> navigateToTab(Screen.CustomFoods.route, restoreState = false)
+        else -> navigateToTab(screen.route.substringBefore("?"))
+    }
+}
+
+/**
+ * Today's dashboard, with every screen above it closed. The Home tab, the drawer's Home item and a
+ * widget tap all come here, so they behave the same from any screen.
+ *
+ * Nothing is saved or restored here. A tab's `popUpTo(home) { saveState = true }` also files the
+ * screens it closed under Home itself, so `restoreState` on Home brought those screens back
+ * instead of the dashboard.
+ */
+fun NavHostController.navigateToTodayDashboard(homeViewModel: HomeViewModel?) {
+    homeViewModel?.resetToToday()
+    navigate(Screen.Home.todayRoute()) {
+        popUpTo(Screen.Home.route.substringBefore("?"))
+        launchSingleTop = true
+    }
+}
+
+/**
+ * A tab above the dashboard. The screens open above Home are saved under the tab they belong to;
+ * with [restoreState] this tab's saved screens come back, otherwise it opens fresh.
+ */
+fun NavHostController.navigateToTab(route: String, restoreState: Boolean = true) {
+    navigate(route) {
+        popUpTo(Screen.Home.route.substringBefore("?")) { saveState = true }
+        launchSingleTop = true
+        this.restoreState = restoreState
     }
 }

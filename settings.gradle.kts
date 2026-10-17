@@ -22,5 +22,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "MacroBase"
 include(":app")
-
-include(":ppocr-sdk")

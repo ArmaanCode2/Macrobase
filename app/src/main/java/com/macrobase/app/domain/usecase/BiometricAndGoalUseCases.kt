@@ -1,5 +1,6 @@
 package com.macrobase.app.domain.usecase
 
+import java.util.Locale
 import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.MacroAveragesStatistics
@@ -137,7 +138,11 @@ class UpdateGoalsUseCase(
 ) {
     suspend operator fun invoke(goal: Goal): Result<Unit> {
         if (!goal.isValidPercentageSum) {
-            return Result.failure(IllegalArgumentException("Macro percentages must total exactly 100% (currently ${goal.totalPercentage}%)"))
+            return Result.failure(
+                IllegalArgumentException(
+                    "Macro percentages must total exactly 100% (currently ${String.format(Locale.US, "%.2f", goal.totalPercentageExact)}%)"
+                )
+            )
         }
         if (goal.dailyCalorieGoal <= 0.0) {
             return Result.failure(IllegalArgumentException("Calorie goal must be greater than 0"))
@@ -145,6 +150,14 @@ class UpdateGoalsUseCase(
         goalsRepository.updateGoals(goal)
         return Result.success(Unit)
     }
+}
+
+/** Drops a strategy change scheduled for tomorrow, so the current strategy stays (BUG-031). */
+class CancelScheduledGoalUseCase(
+    private val goalsRepository: GoalsRepository
+) {
+    /** False when there was no change left to cancel. */
+    suspend operator fun invoke(): Boolean = goalsRepository.cancelScheduledGoal()
 }
 
 class GetStatisticsUseCase(

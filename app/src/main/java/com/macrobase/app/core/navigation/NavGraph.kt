@@ -4,6 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -73,8 +76,12 @@ fun NavGraph(
         ) { backStackEntry ->
             val dateEpochDayArg = backStackEntry.arguments?.getString("dateEpochDay")?.toLongOrNull()
 
+            // A day passed in the route is applied once. Coming back to Home (Back, rotation) must
+            // not undo a later day change or the move to a new day after midnight (BUG-040)
+            var appliedDateArg by rememberSaveable { mutableStateOf<Long?>(null) }
             LaunchedEffect(dateEpochDayArg) {
-                if (dateEpochDayArg != null) {
+                if (dateEpochDayArg != null && dateEpochDayArg != appliedDateArg) {
+                    appliedDateArg = dateEpochDayArg
                     homeViewModel.onSelectDate(LocalDate.ofEpochDay(dateEpochDayArg))
                 }
             }

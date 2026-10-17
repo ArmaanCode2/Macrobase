@@ -75,9 +75,12 @@ import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.util.formatDecimalInput
+import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.WeightEntry
+import com.macrobase.app.domain.model.windowStart
 import com.macrobase.app.domain.repository.PreferencesRepository
 import com.macrobase.app.domain.usecase.AddWeightEntryUseCase
 import com.macrobase.app.domain.usecase.DeleteWeightEntryUseCase
@@ -93,6 +96,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.util.Locale
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -108,6 +112,20 @@ enum class WeightTimeInterval(val label: String) {
     CUSTOM("Custom")
 }
 
+/**
+ * The days [this] covers, ending [today]. "Last 30 days" is today and the 29 before it, and the
+ * month and year ranges leave out the extra day at the start (BUG-033).
+ */
+fun WeightTimeInterval.dateRange(today: LocalDate, customFrom: LocalDate, customTo: LocalDate): Pair<LocalDate, LocalDate> =
+    when (this) {
+        WeightTimeInterval.LAST_30_DAYS -> windowStart(today, 30) to today
+        WeightTimeInterval.LAST_3_MONTHS -> today.minusMonths(3).plusDays(1) to today
+        WeightTimeInterval.LAST_6_MONTHS -> today.minusMonths(6).plusDays(1) to today
+        WeightTimeInterval.ONE_YEAR -> today.minusYears(1).plusDays(1) to today
+        WeightTimeInterval.ALL_TIME -> LocalDate.of(2000, 1, 1) to today
+        WeightTimeInterval.CUSTOM -> (if (customFrom.isAfter(customTo)) customTo else customFrom) to customTo
+    }
+
 data class WeightMetrics(
     val startWeightKg: Double? = null,
     val currentWeightKg: Double? = null,
@@ -120,7 +138,7 @@ data class WeightMetrics(
 data class WeightUiState(
     val selectedDate: LocalDate = LocalDate.now(),
     val selectedInterval: WeightTimeInterval = WeightTimeInterval.LAST_30_DAYS,
-    val fromDate: LocalDate = LocalDate.now().minusDays(30),
+    val fromDate: LocalDate = windowStart(LocalDate.now(), 30),
     val toDate: LocalDate = LocalDate.now(),
     val entries: List<WeightEntry> = emptyList(),
     val metrics: WeightMetrics = WeightMetrics(),
@@ -139,7 +157,8 @@ class WeightViewModel(
     private val getWeightForDateUseCase: GetWeightForDateUseCase,
     private val addWeightEntryUseCase: AddWeightEntryUseCase,
     private val deleteWeightEntryUseCase: DeleteWeightEntryUseCase,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(LocalDate.now())
@@ -148,7 +167,7 @@ class WeightViewModel(
     private val _selectedInterval = MutableStateFlow(WeightTimeInterval.LAST_30_DAYS)
     val selectedInterval: StateFlow<WeightTimeInterval> = _selectedInterval.asStateFlow()
 
-    private val _customFromDate = MutableStateFlow(LocalDate.now().minusDays(30))
+    private val _customFromDate = MutableStateFlow(windowStart(LocalDate.now(clock), 30))
     val customFromDate: StateFlow<LocalDate> = _customFromDate.asStateFlow()
 
     private val _customToDate = MutableStateFlow(LocalDate.now())
@@ -201,20 +220,7 @@ class WeightViewModel(
         interval: WeightTimeInterval,
         customFrom: LocalDate,
         customTo: LocalDate
-    ): Pair<LocalDate, LocalDate> {
-        val today = LocalDate.now()
-        return when (interval) {
-            WeightTimeInterval.LAST_30_DAYS -> today.minusDays(30) to today
-            WeightTimeInterval.LAST_3_MONTHS -> today.minusMonths(3) to today
-            WeightTimeInterval.LAST_6_MONTHS -> today.minusMonths(6) to today
-            WeightTimeInterval.ONE_YEAR -> today.minusYears(1) to today
-            WeightTimeInterval.ALL_TIME -> LocalDate.of(2000, 1, 1) to today
-            WeightTimeInterval.CUSTOM -> {
-                val from = if (customFrom.isAfter(customTo)) customTo else customFrom
-                from to customTo
-            }
-        }
-    }
+    ): Pair<LocalDate, LocalDate> = interval.dateRange(LocalDate.now(clock), customFrom, customTo)
 
     private fun calculateMetrics(entries: List<WeightEntry>, targetWeightKg: Double?): WeightMetrics {
         if (entries.isEmpty()) {
@@ -466,7 +472,7 @@ fun WeightScreen(
                     val currentDisplay = formatWeightValue(uiState.metrics.currentWeightKg, isImperial)
                     val deltaVal = uiState.metrics.deltaWeightKg
                     val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
-                    val percentDisplay = uiState.metrics.percentageChange?.let { "(${String.format("%.1f", abs(it))}%)" } ?: ""
+                    val percentDisplay = uiState.metrics.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
 
                     val changeColor = if (deltaVal != null) {
                         if (deltaVal <= 0.0) Color(0xFF00C853) else AppColors.ProgressOver
@@ -647,13 +653,9 @@ fun WeightScreen(
 
     // 6. Log Weight Dialog
     if (showLogDialog) {
+        val prefillKg = remember { uiState.selectedDateWeight?.weightKg }
         var inputWeight by remember {
-            mutableStateOf(
-                uiState.selectedDateWeight?.let {
-                    val w = if (isImperial) UnitConversions.kgToLbs(it.weightKg) else it.weightKg
-                    String.format("%.1f", w)
-                } ?: ""
-            )
+            mutableStateOf(prefillKg?.let { weightPrefillText(it, isImperial) } ?: "")
         }
         var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -694,12 +696,11 @@ fun WeightScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = inputWeight.toDoubleOrNull()
-                        if (parsed == null || parsed <= 0.0) {
+                        val kg = weightFromInput(inputWeight, prefillKg, isImperial)
+                        if (kg == null || kg <= 0.0) {
                             errorMessage = "Please enter a valid positive number"
                             return@Button
                         }
-                        val kg = if (isImperial) UnitConversions.lbsToKg(parsed) else parsed
                         if (kg < 20.0 || kg > 500.0) {
                             errorMessage = "Weight must be between 20.0 kg and 500.0 kg"
                             return@Button
@@ -723,11 +724,7 @@ fun WeightScreen(
 
     // 7. Edit Weight Dialog
     entryToEdit?.let { entry ->
-        val initVal = if (isImperial) {
-            String.format("%.1f", UnitConversions.kgToLbs(entry.weightKg))
-        } else {
-            String.format("%.1f", entry.weightKg)
-        }
+        val initVal = weightPrefillText(entry.weightKg, isImperial)
         var editInput by remember { mutableStateOf(initVal) }
         var editError by remember { mutableStateOf<String?>(null) }
 
@@ -768,12 +765,11 @@ fun WeightScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = editInput.toDoubleOrNull()
-                        if (parsed == null || parsed <= 0.0) {
+                        val kg = weightFromInput(editInput, entry.weightKg, isImperial)
+                        if (kg == null || kg <= 0.0) {
                             editError = "Please enter a valid positive number"
                             return@Button
                         }
-                        val kg = if (isImperial) UnitConversions.lbsToKg(parsed) else parsed
                         if (kg < 20.0 || kg > 500.0) {
                             editError = "Weight must be between 20.0 kg and 500.0 kg"
                             return@Button
@@ -879,7 +875,7 @@ fun WeightLineGraph(
 
             // Y Label
             drawContext.canvas.nativeCanvas.drawText(
-                String.format("%.0f", wVal),
+                String.format(Locale.US, "%.0f", wVal),
                 paddingLeft - 8.dp.toPx(),
                 yPos + 4.dp.toPx(),
                 textPaint
@@ -1181,13 +1177,25 @@ internal fun formatWeightValue(kg: Double?, isImperial: Boolean): String {
     if (kg == null || kg <= 0.0) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(kg) else kg
     val unit = if (isImperial) "lb" else "kg"
-    return "${String.format("%.1f", v)} $unit"
+    return "${String.format(Locale.US, "%.1f", v)} $unit"
 }
 
 internal fun formatWeightDelta(deltaKg: Double?, isImperial: Boolean): String {
     if (deltaKg == null) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(deltaKg) else deltaKg
     val unit = if (isImperial) "lb" else "kg"
-    val arrow = if (v < 0) "↓ " else if (v > 0) "↑ " else ""
-    return "$arrow${String.format("%.1f", abs(v))} $unit"
+    val arrow = if (v < 0) "\u2193 " else if (v > 0) "\u2191 " else ""
+    return "$arrow${String.format(Locale.US, "%.1f", abs(v))} $unit"
 }
+
+/** A weight for an editable field: always with "." (BUG-027), so [parseWeightInput] reads it back. */
+internal fun weightPrefillText(kg: Double, isImperial: Boolean): String =
+    formatDecimalInput(if (isImperial) UnitConversions.kgToLbs(kg) else kg)
+
+/** A typed weight in kilograms, accepting "72,5" as well as "72.5"; null when it is not a number. */
+internal fun parseWeightInput(text: String, isImperial: Boolean): Double? =
+    parseDecimalInput(text)?.let { if (isImperial) UnitConversions.lbsToKg(it) else it }
+
+/** [parseWeightInput], except that an untouched pre-fill keeps the exact stored kilograms. */
+internal fun weightFromInput(text: String, prefillKg: Double?, isImperial: Boolean): Double? =
+    if (prefillKg != null && text == weightPrefillText(prefillKg, isImperial)) prefillKg else parseWeightInput(text, isImperial)

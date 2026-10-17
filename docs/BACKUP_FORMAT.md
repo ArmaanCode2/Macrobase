@@ -5,7 +5,7 @@
 MacroBase provides 100% offline data portability. Users own and control their personal nutrition and biometric data without accounts, servers, or cloud dependencies.
 
 - **Format Name**: `MacroBaseBackup`
-- **Format Version**: `1.0.0`
+- **Format Version**: `1.4.0`
 - **MIME Type**: `application/zip`
 - **Default Filename**: `MacroBase_Backup_YYYY-MM-DD.zip`
 - **Storage Strategy**: Decoupled from AndroidX Room internal SQLite schemas. Serialized as structured JSON documents within a standard ZIP archive.
@@ -40,9 +40,9 @@ The manifest contains metadata, schema compatibility, exact record counts, and S
 ```json
 {
   "format": "MacroBaseBackup",
-  "backupVersion": "1.0.0",
-  "appVersion": "1.0.0",
-  "schemaVersion": 1,
+  "backupVersion": "1.4.0",
+  "appVersion": "1.2.5",
+  "schemaVersion": 5,
   "exportedAt": "2026-08-19T07:15:30Z",
   "timeZone": "America/New_York",
   "deviceInfo": "Android",
@@ -66,7 +66,7 @@ The manifest contains metadata, schema compatibility, exact record counts, and S
   },
   "compatibility": {
     "minSupportedAppVersion": "1.0.0",
-    "supportedSchemaVersion": 1
+    "supportedSchemaVersion": 5
   }
 }
 ```
@@ -123,6 +123,7 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
     "proteinGrams": 24.0,
     "carbsGrams": 3.0,
     "fatGrams": 1.0,
+    "saturatedFatGrams": 0.5,
     "fiberGrams": 0.0,
     "sugarGrams": 1.0,
     "sodiumMg": 130.0,
@@ -133,6 +134,8 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
   }
 ]
 ```
+
+- Format 1.4.0 added `saturatedFatGrams`, written as `null` when the food does not state it. Backups from earlier formats lack it and restore it as `null`. Apps that read format 1.x ignore the field, so they still import a 1.4.0 backup, but a backup they write afterwards no longer has it.
 
 ### 4.3. Recipes (`recipes.json`)
 ```json
@@ -221,6 +224,18 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
 ---
 
 ## 6. Transactional Safety & Integrity Verification
-- Restoration executes inside `UserDatabase.runInTransaction { ... }`.
-- If any validation failure, corrupted JSON, or SQLite error occurs during restoration, the transaction is immediately aborted and rolled back.
-- Post-import integrity checks verify record counts, non-null mandatory fields, and foreign reference validity before committing.
+- **Reading an archive** (`BackupArchiveManager.extractAndValidateBackup`) is one pass. Each file is hashed while it streams, and the data files are parsed record by record as they arrive. Files may appear in any order, and files the app does not know are skipped.
+- **Record shape**: every record in a data file is a flat JSON object, with no nested values, at most 64 fields and at most 16,384 characters (524,288 for a recipe).
+- **Size limits**:
+  - 50 MB compressed.
+  - 96 MB per data file and 128 MB in total.
+  - Records: diary 120,000, water 120,000, weight 40,000, custom foods 20,000, recipes 5,000.
+  - 200,000 characters per string, and 24 million characters of text for the whole backup.
+  - 1 MB each for `manifest.json`, `goals.json` and `preferences.json`.
+  - These allow twice a five-year backup at 30 diary entries a day.
+- **On failure**, validation returns one short message and never quotes a string value from the file (BUG-047):
+  - A backup past a limit gets "This backup is larger than MacroBase can restore."
+  - Running out of memory gets "This backup is too large to open on this device." instead of a crash.
+- **Before anything is written**, validation checks the manifest, every file's checksum, that all five data files are present, and that each file holds the record count the manifest lists.
+- **Restoration** runs the database step inside one Room transaction (`withTransaction`). Any error there rolls it back, so the diary is never left half restored.
+- **Goals and preferences** are written after that transaction commits. If writing them fails, the result says the records were restored but the settings were not saved.

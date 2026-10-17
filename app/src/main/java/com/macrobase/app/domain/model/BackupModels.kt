@@ -88,7 +88,9 @@ data class CustomFoodBackupDto(
     val calciumMg: Double?,
     val ironMg: Double?,
     val createdAt: Long,
-    val customUnitName: String? = null
+    val customUnitName: String? = null,
+    /** Format 1.4.0; null in older backups, which never stated it. */
+    val saturatedFatGrams: Double? = null
 )
 
 /**

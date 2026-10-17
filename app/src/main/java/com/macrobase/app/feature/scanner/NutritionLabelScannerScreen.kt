@@ -3,8 +3,6 @@ package com.macrobase.app.feature.scanner
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Image
@@ -57,6 +56,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -108,18 +109,8 @@ fun NutritionLabelScannerScreen(
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
-                if (bitmap != null) {
-                    viewModel.processCapturedImage(bitmap, isTestImage = true)
-                }
-            } catch (e: Exception) {
-                viewModel.onCameraCaptureError("Failed to load test image: ${e.message}")
-            }
-        }
+        // Decoded at a bounded size off the main thread, with the normal quality checks (BUG-044)
+        if (uri != null) viewModel.processGalleryImage(uri)
     }
 
     var hasCameraPermission by remember {
@@ -272,9 +263,11 @@ fun NutritionLabelScannerScreen(
             )
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Developer test image picker
+                // Photo from the gallery
                 IconButton(
                     onClick = { galleryLauncher.launch("image/*") },
+                    // Also off while a camera capture is being handed over, before the overlay shows
+                    enabled = !uiState.isAnalyzing && !isCaptureInProgress,
                     modifier = Modifier
                         .padding(end = AppSpacing.xs)
                         .size(44.dp)
@@ -282,7 +275,7 @@ fun NutritionLabelScannerScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Image,
-                        contentDescription = "Test Image",
+                        contentDescription = "Choose a photo",
                         tint = Color.White
                     )
                 }
@@ -290,6 +283,7 @@ fun NutritionLabelScannerScreen(
                 // Debug Mode Toggle
                 IconButton(
                     onClick = { isDebugMode = !isDebugMode },
+                    enabled = !uiState.isAnalyzing,
                     modifier = Modifier
                         .padding(end = AppSpacing.xs)
                         .size(44.dp)
@@ -304,6 +298,7 @@ fun NutritionLabelScannerScreen(
 
                 IconButton(
                     onClick = { viewModel.toggleTorch() },
+                    enabled = !uiState.isAnalyzing,
                     modifier = Modifier
                         .size(44.dp)
                         .background(Color(0x66000000), CircleShape)
@@ -370,15 +365,11 @@ fun NutritionLabelScannerScreen(
                                     override fun onCaptureSuccess(image: ImageProxy) {
                                         android.util.Log.d("MacroBaseScanner", "STAGE: CAPTURE_CALLBACK_STARTED (format=${image.format}, ${image.width}x${image.height})")
                                         try {
-                                            // Step 1: Extract JPEG bytes from the ImageProxy buffer
-                                            val bitmap = safeDecodeImageProxy(image)
-                                            // Step 2: ImageProxy is closed inside safeDecodeImageProxy
-                                            
-                                            if (bitmap != null) {
-                                                android.util.Log.d("MacroBaseScanner", "STAGE: BITMAP_DECODED (${bitmap.width}x${bitmap.height})")
-                                                // Route through existing processCapturedImage which handles
-                                                // quality check, multi-pass OCR, parsing, and state updates
-                                                viewModel.processCapturedImage(bitmap, isTestImage = false)
+                                            // Copy the JPEG bytes and close the frame now; decoding runs off
+                                            // the main thread in the ViewModel (BUG-044)
+                                            val frame = jpegFrame(image)
+                                            if (frame != null) {
+                                                viewModel.processCameraFrame(frame.bytes, frame.rotationDegrees)
                                             } else {
                                                 android.util.Log.e("MacroBaseScanner", "STAGE: DECODE_FAILED")
                                                 viewModel.onCameraCaptureError("Unable to decode captured frame. Please try again.")
@@ -433,6 +424,18 @@ fun NutritionLabelScannerScreen(
                     .background(Color(0xCC000000)),
                 contentAlignment = Alignment.Center
             ) {
+                // Taps anywhere but Cancel stop here, so nothing underneath starts a second scan or
+                // leaves (BUG-056). This layer sits behind the overlay's content as a sibling, so
+                // Cancel gets its own taps first, finger movement included.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        }
+                )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
@@ -451,6 +454,9 @@ fun NutritionLabelScannerScreen(
                         style = AppTypography.Body2,
                         color = AppColors.TextSecondary
                     )
+                    TextButton(onClick = { viewModel.retryCapture() }) {
+                        Text("Cancel", color = Color.White)
+                    }
                 }
             }
         }
@@ -838,76 +844,24 @@ fun CameraPermissionDeniedContent(
     }
 }
 
+/** A captured frame's JPEG bytes and how far to turn them upright. */
+private class JpegFrame(val bytes: ByteArray, val rotationDegrees: Int)
+
 /**
- * Safely decodes an ImageProxy into a downscaled, rotation-corrected Bitmap.
- * Closes the ImageProxy immediately after extracting bytes (before returning).
- *
- * Key design decisions:
- * 1. CameraX ImageCapture always delivers JPEG format. Extract bytes, close proxy immediately.
- * 2. Decode with inSampleSize to keep max dimension ≤ 1280px (prevents 48MP OOM).
- * 3. Apply rotation correction from EXIF/ImageInfo.
- * 4. Return plain Bitmap (not InputImage) — ViewModel handles ML Kit conversion.
- * 5. On ANY failure, return null and close proxy. Never crash.
+ * Copies a captured frame's JPEG bytes and closes the frame straight away, so the camera can
+ * deliver the next one. Decoding happens later, off the main thread (BUG-044).
  */
-private fun safeDecodeImageProxy(image: ImageProxy): Bitmap? {
-    val bytes: ByteArray
+private fun jpegFrame(image: ImageProxy): JpegFrame? {
     val rotationDegrees = image.imageInfo.rotationDegrees
-    try {
+    return try {
         val buffer = image.planes[0].buffer
         buffer.rewind()
-        bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
+        JpegFrame(ByteArray(buffer.remaining()).also { buffer.get(it) }, rotationDegrees)
     } catch (t: Throwable) {
         android.util.Log.e("MacroBaseScanner", "STAGE: IMAGE_BUFFER_EXTRACTION_FAILED: ${t.message}", t)
-        return null
-    } finally {
-        // Close ImageProxy IMMEDIATELY — bytes are now an independent copy
-        try { image.close() } catch (_: Throwable) {}
-        android.util.Log.d("MacroBaseScanner", "STAGE: IMAGE_PROXY_CLOSED")
-    }
-
-    return try {
-        // Step 1: Probe dimensions without allocating pixel memory
-        val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOpts)
-        val origWidth = boundsOpts.outWidth
-        val origHeight = boundsOpts.outHeight
-
-        if (origWidth <= 0 || origHeight <= 0) {
-            android.util.Log.e("MacroBaseScanner", "STAGE: JPEG_HEADER_INVALID (${origWidth}x${origHeight})")
-            return null
-        }
-
-        // Step 2: Compute inSampleSize so max dimension is <= 2560px (for higher density OCR)
-        var sampleSize = 1
-        while ((origWidth / sampleSize) > 2560 || (origHeight / sampleSize) > 2560) {
-            sampleSize *= 2
-        }
-        android.util.Log.d("MacroBaseScanner", "STAGE: DECODE_PARAMS (orig=${origWidth}x${origHeight}, inSampleSize=$sampleSize, rotation=$rotationDegrees)")
-
-        // Step 3: Decode downscaled bitmap
-        val decodeOpts = BitmapFactory.Options().apply {
-            this.inSampleSize = sampleSize
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val rawBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts) ?: return null
-
-        // Step 4: Apply rotation if needed
-        if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            val rotated = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
-            if (rotated !== rawBitmap && !rawBitmap.isRecycled) {
-                rawBitmap.recycle()
-            }
-            rotated
-        } else {
-            rawBitmap
-        }
-    } catch (t: Throwable) {
-        android.util.Log.e("MacroBaseScanner", "safeDecodeImageProxy failed: ${t.message}", t)
-        // Ensure proxy is closed even on exception
-        try { image.close() } catch (_: Throwable) {}
         null
+    } finally {
+        try { image.close() } catch (_: Throwable) {}
     }
 }
 
@@ -927,13 +881,15 @@ fun NutritionLabelReviewModal(
     var expandedFieldKey by remember { mutableStateOf<String?>(null) }
 
     // Exactly what Apply will hand to the Custom Food form
-    val shown = selectedBasis?.let { draft.withOutputBasis(it) } ?: draft
+    // Range checks for the basis chosen, so a value of unknown basis is judged once it has one (BUG-042)
+    val shown = withRangeWarnings(selectedBasis?.let { draft.withOutputBasis(it) } ?: draft)
 
     val nutrientItems = listOf(
         Triple("Calories", shown.calories, "calories"),
         Triple("Protein", shown.protein, "protein"),
         Triple("Carbohydrates", shown.carbs, "carbs"),
         Triple("Total Fat", shown.fat, "fat"),
+        Triple("Saturated Fat", shown.saturatedFat, "saturatedFat"),
         Triple("Sodium", shown.sodium, "sodium"),
         Triple("Sugars", shown.sugar, "sugar"),
         Triple("Fiber", shown.fiber, "fiber")
@@ -1185,7 +1141,40 @@ fun NutritionLabelReviewModal(
                     }
                 }
 
+                // Critical warnings first, every one of them, never cut off (BUG-042)
+                if (shown.criticalWarnings.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Surface(
+                        color = Color(0x22E53935),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(AppSpacing.sm)) {
+                            for (warn in shown.criticalWarnings) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Error,
+                                        contentDescription = "Check this value",
+                                        tint = Color(0xFFE53935),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.size(6.dp))
+                                    Text(
+                                        text = warn,
+                                        style = AppTypography.Caption,
+                                        color = AppColors.TextPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (draft.warnings.isNotEmpty()) {
+                    var showAllWarnings by remember(draft) { mutableStateOf(false) }
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Surface(
                         color = Color(0x22FF9800),
@@ -1193,7 +1182,8 @@ fun NutritionLabelReviewModal(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(AppSpacing.sm)) {
-                            for (warn in draft.warnings.take(3)) {
+                            val shownWarnings = if (showAllWarnings) draft.warnings else draft.warnings.take(3)
+                            for (warn in shownWarnings) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(vertical = 2.dp)
@@ -1212,6 +1202,15 @@ fun NutritionLabelReviewModal(
                                     )
                                 }
                             }
+                            if (draft.warnings.size > 3) {
+                                TextButton(onClick = { showAllWarnings = !showAllWarnings }) {
+                                    Text(
+                                        text = if (showAllWarnings) "Show fewer" else "Show all (${draft.warnings.size})",
+                                        style = AppTypography.Caption,
+                                        color = AppColors.Primary
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1221,7 +1220,7 @@ fun NutritionLabelReviewModal(
                 Button(
                     onClick = {
                         val basis = selectedBasis ?: return@Button
-                        onApply(draft.withOutputBasis(basis))
+                        onApply(withRangeWarnings(draft.withOutputBasis(basis)))
                     },
                     enabled = selectedBasis != null,
                     colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),

@@ -101,7 +101,13 @@ data class NutritionLabelDraft(
     val perServingValues: Map<String, ParsedNutrientValue> = emptyMap(),
     val rdaValues: Map<String, Double> = emptyMap(),
     val overallConfidence: ConfidenceLevel = ConfidenceLevel.MEDIUM,
+    /** Notes and image-quality hints; the screens may shorten this list. */
     val warnings: List<String> = emptyList(),
+    /**
+     * A value no food can have, or calories that do not match the macros: always shown in full,
+     * before [warnings] (BUG-042).
+     */
+    val criticalWarnings: List<String> = emptyList(),
     val rawOcrText: String = "",
     val tableRegionBBox: String? = null,
     val debugData: ScannerDebugData? = null

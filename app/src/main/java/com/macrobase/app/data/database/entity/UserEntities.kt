@@ -55,6 +55,8 @@ data class CustomFoodEntity(
     val proteinGrams: Double,
     val carbsGrams: Double,
     val fatGrams: Double,
+    // Null when the label or the user did not state it (version 5, MIGRATION_4_5)
+    val saturatedFatGrams: Double? = null,
     val fiberGrams: Double? = null,
     val sugarGrams: Double? = null,
     val sodiumMg: Double? = null,

@@ -15,7 +15,7 @@ class NutritionLabelParserIntegrationTest {
 
     @Test
     fun testAllLabels() = runBlocking {
-        val ocrEngine = NutritionLabelOcrEngine()
+        val ocrEngine = MlKitOcrEngine()
 
         val labels = listOf("LABEL_1.png", "LABEL_2.png", "LABEL_3.png", "LABEL_4.png", "LABEL_5.png")
 
@@ -26,7 +26,7 @@ class NutritionLabelParserIntegrationTest {
             val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: continue
 
             Log.i("ParserIntegrationTest", "PROCESSING $label")
-            val pass = ocrEngine.recognizeAllPasses(bitmap).first()
+            val pass = ocrEngine.recognizeText(bitmap)
             
             val sb = StringBuilder()
             sb.append("{\"fullText\":\"\", \"lines\":[")

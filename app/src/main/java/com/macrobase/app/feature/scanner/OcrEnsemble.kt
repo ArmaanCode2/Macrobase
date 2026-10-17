@@ -46,9 +46,9 @@ class OcrEnsembleScorer {
             "serving", "serve", "100g", "100 g", "approx", "typical", "values"
         )
 
-        private val UNIT_PATTERNS = Regex("""(?i)\b(g|gm|gms|mg|mcg|µg|μg|kcal|cal|kj|ml|%|%rda|%dv)\b""")
+        private val UNIT_PATTERNS = Regex("""(?i)\b(g|gm|gms|mg|mcg|\u00b5g|\u03bcg|kcal|cal|kj|ml|%|%rda|%dv)\b""")
         private val NUMERIC_PATTERN = Regex("""\b\d+([.,]\d+)?\b""")
-        private val NOISY_OCR_CHARS = Regex("""[~`_^{}\[\]\\|§©®™]""")
+        private val NOISY_OCR_CHARS = Regex("""[~`_^{}\[\]\\|\u00a7\u00a9\u00ae\u2122]""")
     }
 
     /**

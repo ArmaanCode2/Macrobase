@@ -19,9 +19,17 @@ data class OrchestratorResult(
     val state: ScannerState,
     val draft: NutritionLabelDraft?,
     val metadata: ScanMetadata,
-    val warnings: List<String> = emptyList(),
     val rejectionReason: String? = null
 )
+
+/** Where a scanned image came from. */
+enum class ImageSource {
+    /** A camera frame: cropped to the on-screen framing guide. */
+    CAMERA,
+
+    /** A photo picked from the gallery: no framing guide, but the same quality checks (BUG-044). */
+    GALLERY
+}
 
 /**
  * Master coordinator orchestrating the full end-to-end nutrition label scanning pipeline:
@@ -40,9 +48,7 @@ data class OrchestratorResult(
  *   ↓
  * Deterministic Multi-Column Parsing
  *   ↓
- * Nutrition Sanity & Macro Validation
- *   ↓
- * Optional Contract-Bound Gemini Adjudication
+ * Nutrition Sanity & Macro Validation (critical warnings)
  *   ↓
  * Form-Ready Draft
  */
@@ -52,16 +58,14 @@ class NutritionLabelScanOrchestrator(
     private val regionDetector: NutritionRegionDetector = NutritionRegionDetector(),
     private val ocrEngine: NutritionLabelOcrEngine,
     private val ensembleScorer: OcrEnsembleScorer = OcrEnsembleScorer(),
-    private val tableReconstructor: TableLayoutReconstructor = TableLayoutReconstructor(),
     private val parser: NutritionLabelParser = NutritionLabelParser(),
-    private val validator: NutritionValidator = NutritionValidator(),
-    private val adjudicator: NutritionLabelGeminiAdjudicator = NutritionLabelGeminiAdjudicator(validator)
+    private val validator: NutritionValidator = NutritionValidator()
 ) {
 
     suspend fun processImage(
         bitmap: Bitmap,
         guideRectRatio: RectF = RectF(0.08f, 0.18f, 0.92f, 0.72f),
-        isTestImage: Boolean = false,
+        source: ImageSource = ImageSource.CAMERA,
         onProgressUpdate: (String) -> Unit = {}
     ): OrchestratorResult = withContext(Dispatchers.Default) {
         val startTime = System.currentTimeMillis()
@@ -69,7 +73,7 @@ class NutritionLabelScanOrchestrator(
         // 1. Measurable Image Quality Analysis
         onProgressUpdate("Analyzing image quality...")
         val quality = qualityAnalyzer.analyze(bitmap)
-        if (!quality.acceptable && !isTestImage) {
+        if (!quality.acceptable) {
             return@withContext OrchestratorResult(
                 state = ScannerState.ParseFailed,
                 draft = null,
@@ -80,9 +84,9 @@ class NutritionLabelScanOrchestrator(
 
         if (!coroutineContext.isActive) return@withContext emptyCancellationResult(bitmap)
 
-        // 2. Framing Guide Cropping (with safety margin)
+        // 2. Framing Guide Cropping (with safety margin); a gallery photo has no guide
         onProgressUpdate("Optimizing framing...")
-        val cropped = if (isTestImage) {
+        val cropped = if (source == ImageSource.GALLERY) {
             bitmap
         } else {
             val marginRect = RectF(
@@ -105,12 +109,19 @@ class NutritionLabelScanOrchestrator(
         onProgressUpdate("Running multi-pass OCR ensemble...")
         val ocrStartTime = System.currentTimeMillis()
         val scoredPasses = mutableListOf<OcrPassResult>()
+        // Bitmaps of passes the engine gave up on; ML Kit may still read them (BUG-056)
+        val stillInUse = mutableListOf<Bitmap>()
 
         try {
             for ((idx, variant) in variants.withIndex()) {
                 if (!coroutineContext.isActive) break
                 val passIndex = idx + 1
                 val ocrResult = ocrEngine.recognizeText(variant.bitmap)
+                if (ocrResult.abandoned) {
+                    // The engine is stuck; more passes would only wait again
+                    stillInUse.add(variant.bitmap)
+                    break
+                }
 
                 if (ocrResult.lines.isNotEmpty()) {
                     val scoredPass = ensembleScorer.scorePass(
@@ -125,7 +136,7 @@ class NutritionLabelScanOrchestrator(
         } finally {
             // Clean up temporary variant bitmaps immediately
             for (v in variants) {
-                if (v.bitmap != safeBitmap && v.bitmap != bitmap) {
+                if (v.bitmap != safeBitmap && v.bitmap != bitmap && stillInUse.none { it === v.bitmap }) {
                     v.recycleIfNeeded()
                 }
             }
@@ -156,12 +167,17 @@ class NutritionLabelScanOrchestrator(
             imageHeight = safeBitmap.height
         )
 
-        if (regionResult.found && regionResult.boundingBox != null) {
+        // After an abandoned pass the engine is stuck, so no crop pass is started
+        if (regionResult.found && regionResult.boundingBox != null && stillInUse.isEmpty()) {
             onProgressUpdate("Focusing on nutrition table region...")
             val tableCrop = regionDetector.cropTable(safeBitmap, regionResult)
             if (tableCrop != null) {
+                var cropStillInUse = false
                 try {
-                    val cropOcr = ocrEngine.recognizeText(tableCrop)
+                    // The crop's boxes start at its own corner: move them to where the crop sits
+                    // in the image, so its rows line up with the other passes (BUG-043)
+                    val cropOcr = ocrEngine.recognizeText(tableCrop.bitmap).offsetBy(tableCrop.originX, tableCrop.originY)
+                    cropStillInUse = cropOcr.abandoned
                     if (cropOcr.lines.isNotEmpty()) {
                         val scoredCropPass = ensembleScorer.scorePass(
                             passIndex = scoredPasses.size + 1,
@@ -172,8 +188,8 @@ class NutritionLabelScanOrchestrator(
                         scoredPasses.add(scoredCropPass)
                     }
                 } finally {
-                    if (tableCrop != safeBitmap && !tableCrop.isRecycled) {
-                        tableCrop.recycle()
+                    if (!cropStillInUse && tableCrop.bitmap != safeBitmap && !tableCrop.bitmap.isRecycled) {
+                        tableCrop.bitmap.recycle()
                     }
                 }
             }
@@ -185,14 +201,12 @@ class NutritionLabelScanOrchestrator(
         val finalEnsemble = ensembleScorer.buildEnsemble(scoredPasses)
         val bestPass = finalEnsemble.bestOverallPass
 
-        // 7. 2D Table Layout & Column Reconstruction
-        onProgressUpdate("Reconstructing table geometry...")
+        // 7. The unified rows the parser reads
         val unifiedOcr = OcrResult(
             fullText = bestPass.fullText,
             blocks = bestPass.blocks,
             lines = finalEnsemble.unifiedLines
         )
-        val tableGrid = tableReconstructor.reconstructTable(unifiedOcr)
 
         // 8. Deterministic Multi-Column Parsing
         onProgressUpdate("Extracting nutrients...")
@@ -200,25 +214,9 @@ class NutritionLabelScanOrchestrator(
         var draft = parser.parse(unifiedOcr)
         val parseDuration = System.currentTimeMillis() - parseStartTime
 
-        // 9. Macro Consistency & Range Sanity Validation
-        val macroWarning = validator.validateMacroConsistency(
-            calories = draft.calories?.value,
-            protein = draft.protein?.value,
-            carbs = draft.carbs?.value,
-            fat = draft.fat?.value
-        )
-        if (macroWarning != null) {
-            draft = draft.copy(warnings = draft.warnings + macroWarning)
-        }
-
-        // Incorporate image quality warnings
-        val combinedWarnings = quality.warnings + draft.warnings
-
-        // 10. On-Device Conflict & Consistency Adjudication
-        if (adjudicator.shouldAdjudicate(draft)) {
-            onProgressUpdate("Resolving ambiguous fields...")
-            draft = adjudicator.adjudicate(draft, tableGrid)
-        }
+        // 9. Range and macro checks on every scan, then all warnings at once, so none is lost
+        // and the critical ones are kept apart (BUG-042)
+        draft = assembleScanWarnings(draft, quality.warnings, validator)
 
         val metadata = ScanMetadata(
             capturedWidth = bitmap.width,
@@ -240,15 +238,14 @@ class NutritionLabelScanOrchestrator(
         val finalState = when {
             !draft.hasNutrientData -> ScannerState.ParseFailed
             draft.recognizedFieldCount <= 2 || draft.overallConfidence == ConfidenceLevel.LOW ->
-                ScannerState.PartialSuccess(draft.copy(warnings = combinedWarnings))
-            else -> ScannerState.Success(draft.copy(warnings = combinedWarnings))
+                ScannerState.PartialSuccess(draft)
+            else -> ScannerState.Success(draft)
         }
 
         return@withContext OrchestratorResult(
             state = finalState,
-            draft = draft.copy(warnings = combinedWarnings),
-            metadata = metadata,
-            warnings = combinedWarnings
+            draft = draft,
+            metadata = metadata
         )
     }
 

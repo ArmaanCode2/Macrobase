@@ -90,22 +90,29 @@ $$\text{Net Carbs} = \max(0.0, \text{Carbohydrates} - \text{Dietary Fiber})$$
 
 ### 4.1. Room Database Versions & Migrations
 - Active Room database: `macrobase_user.db` (`DatabaseConfig.USER_DATABASE_NAME`).
-- Current version: `DatabaseConfig.USER_DATABASE_VERSION = 3`.
+- Current version: `DatabaseConfig.USER_DATABASE_VERSION = 5`.
 - Registered migrations:
   - `MIGRATION_1_2`: Added `customUnitName TEXT` to `custom_foods`.
   - `MIGRATION_2_3`: Added nullable `loggedFiber`, `loggedSugar`, `loggedSodium`, `loggedSaturatedFat`, `loggedTransFat` and `loggedCholesterol` (`REAL`, no default) to `diary_entries`. Rows from version 2 get `null` (not recorded).
+  - `MIGRATION_3_4`: Rebuilds `diary_entries` in the current layout from whichever columns exist, copying every row. Version 3 reached a phone with two layouts: the 7 Oct 2026 build had `loggedFiber`, `loggedSugar` and `loggedSodium` as `REAL NOT NULL DEFAULT 0.0`, and Room refused that layout, so 1.2.2 crashed on open there.
+    - A nutrient column that was `NOT NULL` stored 0.0 for "not recorded", so its 0.0 becomes `null`, as for a backup from before format 1.3.0.
+    - Any diary column the code does not know is kept, with every row, in `diary_entries_v3_backup`.
+    - The tables are the same as in version 3.
+  - `MIGRATION_4_5`: Added nullable `saturatedFatGrams REAL` (no default) to `custom_foods`. Custom foods saved before it get `null` (not stated).
+  - `UserDatabase.create()` copies the database file to `files/database-backups/<name>.v<N>` before Room upgrades it from version N, once per version.
 - **Migration Invariant**:
-  - All Room migrations must be non-destructive (`ALTER TABLE ... ADD COLUMN ...`, either nullable or with a `DEFAULT`).
+  - Every Room migration must keep every row. Prefer `ALTER TABLE ... ADD COLUMN ...` (nullable or with a `DEFAULT`). A change SQLite cannot make in place, such as dropping `NOT NULL`, rebuilds the table and copies every row, as `MIGRATION_3_4` does.
+  - Never change the tables under a version that has reached any device, even one test phone; bump the version and add a migration. `releasedSchemasNeverChangeInPlace` pins each version's identity hash.
   - The database is built only by `UserDatabase.create()`. It has **no** `fallbackToDestructiveMigration()`: a missing migration or a downgrade must throw, never wipe the diary. Never add a destructive fallback.
   - `exportSchema = true`: Room writes each version to `app/schemas/com.macrobase.app.data.database.UserDatabase/<version>.json`. Commit the JSON for every version; the migration tests build old databases from it.
   - When bumping schema version, define `MIGRATION_X_Y` in `UserDatabase.Companion`, add it to `UserDatabase.ALL_MIGRATIONS`, bump `DatabaseConfig.USER_DATABASE_VERSION`, and add a migration test from the previous schema JSON (see `P3PhaseOneDataSafetyTests`).
 
 ### 4.2. ID Space Partitioning
 To prevent primary key collisions across federated food sources within a unified `Food` model:
-- **Built-in Foods**: IDs in the range `1` to `99,999,999`.
-- **Custom User Foods**: IDs offset by `CUSTOM_FOOD_ID_OFFSET = 100_000_000L`:
+- **Built-in Foods**: large hash IDs from `built_in_foods.db` (the smallest is `1,896,880,878,330,341`), never inside the user ranges below. Do not test `foodId < 100_000_000` to find a catalog food: that matches no current catalog food. A catalog food id is `foodId > 0 && !(foodId >= CUSTOM_FOOD_ID_OFFSET && foodId < Recipe.FOOD_ID_RANGE_END)`, as `DiaryDao.getRecentCatalogFoods` uses.
+- **Custom User Foods**: IDs offset by `CUSTOM_FOOD_ID_OFFSET = 100_000_000L` (`FoodRepositoryImpl`):
   $$\text{foodId} = 100\_000\_000\text{L} + \text{customFoodEntity.id}$$
-- **Recipes**: IDs offset by `RECIPE_FOOD_ID_OFFSET = 200_000_000L`:
+- **Recipes**: IDs offset by `Recipe.FOOD_ID_OFFSET = 200_000_000L`, up to `Recipe.FOOD_ID_RANGE_END` (`300_000_000L`):
   $$\text{foodId} = 200\_000\_000\text{L} + \text{recipeEntity.id}$$
 - Use `isUserOwned` and `FoodSource` (`BUILT_IN`, `CUSTOM_USER`, `RECIPE`) to check origin.
 

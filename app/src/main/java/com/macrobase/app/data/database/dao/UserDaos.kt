@@ -23,6 +23,19 @@ interface DiaryDao {
     @Query("SELECT * FROM diary_entries WHERE id = :entryId LIMIT 1")
     suspend fun getEntryById(entryId: Long): DiaryEntryEntity?
 
+    /**
+     * The catalog foods logged most recently, newest first, each once with the name it was last
+     * logged under (BUG-055). The user's own ids, from [userIdsStart] up to [userIdsEnd] (custom
+     * foods and recipes), are left out here, so they never use up the limit. Catalog ids are
+     * large hashes outside that range.
+     */
+    @Query(
+        "SELECT foodId, foodName, MAX(createdAt) AS lastLogged FROM diary_entries " +
+            "WHERE foodId > 0 AND NOT (foodId >= :userIdsStart AND foodId < :userIdsEnd) " +
+            "GROUP BY foodId ORDER BY lastLogged DESC LIMIT :limit"
+    )
+    suspend fun getRecentCatalogFoods(userIdsStart: Long, userIdsEnd: Long, limit: Int): List<RecentFoodRef>
+
     @Query("SELECT * FROM diary_entries WHERE foodId > :fromExclusive AND foodId < :toExclusive")
     suspend fun getEntriesWithFoodIdBetween(fromExclusive: Long, toExclusive: Long): List<DiaryEntryEntity>
 
@@ -43,6 +56,13 @@ interface DiaryDao {
     @Query("DELETE FROM diary_entries WHERE id = :entryId")
     suspend fun deleteEntry(entryId: Long)
 
+    @Query("DELETE FROM diary_entries WHERE id IN (:entryIds)")
+    suspend fun deleteEntries(entryIds: List<Long>)
+
+    /** Moves entries to another day and meal; never touches the logged snapshot values. */
+    @Query("UPDATE diary_entries SET dateEpochDay = :dateEpochDay, mealType = :mealType WHERE id IN (:entryIds)")
+    suspend fun moveEntries(entryIds: List<Long>, dateEpochDay: Long, mealType: String)
+
     @Query("DELETE FROM diary_entries")
     suspend fun clearAllEntries()
 
@@ -57,7 +77,25 @@ interface DiaryDao {
 
     @Query("SELECT dateEpochDay, SUM(loggedCalories) as totalCal, SUM(loggedProtein) as totalProtein, SUM(loggedCarbs) as totalCarbs, SUM(loggedFat) as totalFat FROM diary_entries WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay GROUP BY dateEpochDay")
     fun observeDateNutritionSummaries(startEpochDay: Long, endEpochDay: Long): Flow<List<DateNutritionSummary>>
+
+    // Per entry, so the rank can tell how much of a day's calories each nutrient covers
+    @Query("SELECT dateEpochDay, foodId, foodName, loggedCalories, loggedProtein, loggedCarbs, loggedFat, loggedFiber, loggedSugar, loggedSaturatedFat, loggedSodium FROM diary_entries WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay")
+    fun observeEntryNutrients(startEpochDay: Long, endEpochDay: Long): Flow<List<EntryNutrientRow>>
 }
+
+data class EntryNutrientRow(
+    val dateEpochDay: Long,
+    val foodId: Long,
+    val foodName: String,
+    val loggedCalories: Double,
+    val loggedProtein: Double,
+    val loggedCarbs: Double,
+    val loggedFat: Double,
+    val loggedFiber: Double?,
+    val loggedSugar: Double?,
+    val loggedSaturatedFat: Double?,
+    val loggedSodium: Double?
+)
 
 data class DateCalorieSummary(
     val dateEpochDay: Long,
@@ -188,3 +226,10 @@ interface WaterDao {
     @Query("SELECT * FROM water_logs WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay ORDER BY dateEpochDay ASC, timestamp ASC")
     fun getWaterLogsBetween(startEpochDay: Long, endEpochDay: Long): Flow<List<WaterLogEntity>>
 }
+
+/** A food the diary logged recently, as [DiaryDao.getRecentCatalogFoods] returns it. */
+data class RecentFoodRef(
+    val foodId: Long,
+    val foodName: String,
+    val lastLogged: Long
+)

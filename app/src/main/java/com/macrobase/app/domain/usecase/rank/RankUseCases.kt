@@ -13,6 +13,18 @@ class GetRankProfileUseCase(
     suspend fun get(): RankProfile = rankRepository.getRankProfile()
 }
 
+class DismissRankRulesNoticeUseCase(
+    private val rankRepository: RankRepository
+) {
+    suspend operator fun invoke() = rankRepository.dismissRulesNotice()
+}
+
+class DismissRankSeasonNoticeUseCase(
+    private val rankRepository: RankRepository
+) {
+    suspend operator fun invoke(seasonStart: LocalDate) = rankRepository.dismissSeasonNotice(seasonStart)
+}
+
 class CalculateLifestyleScoreUseCase(
     private val rankRepository: RankRepository
 ) {

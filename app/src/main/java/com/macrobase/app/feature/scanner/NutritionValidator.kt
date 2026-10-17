@@ -167,6 +167,9 @@ class NutritionValidator {
             if (nameLower.contains("carbohydrate") && value > 100.0) {
                 return "Carbohydrates exceed 100g per 100g ($value g)"
             }
+            if (nameLower.contains("saturated") && value > 100.0) {
+                return "Saturated fat exceeds 100g per 100g ($value g)"
+            }
             if (nameLower.contains("fat") && !nameLower.contains("calories") && value > 100.0) {
                 return "Fat exceeds 100g per 100g ($value g)"
             }

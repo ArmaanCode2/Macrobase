@@ -3,6 +3,7 @@ package com.macrobase.app.domain.usecase
 import com.macrobase.app.domain.model.CalendarDaySummary
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
+import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.repository.DiaryRepository
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -63,13 +64,29 @@ class GetDiaryEntryUseCase(
 }
 
 /**
- * Use case to delete a diary entry by ID.
+ * Use case to delete a diary entry by ID, or several at once (a whole meal).
  */
 class DeleteDiaryEntryUseCase(
     private val diaryRepository: DiaryRepository
 ) {
     suspend operator fun invoke(entryId: Long) {
         diaryRepository.deleteEntry(entryId)
+    }
+
+    suspend operator fun invoke(entryIds: List<Long>) {
+        diaryRepository.deleteEntries(entryIds)
+    }
+}
+
+/**
+ * Use case to move diary entries (a whole meal) to another meal and day. What each entry logged
+ * stays as it was.
+ */
+class MoveDiaryEntriesUseCase(
+    private val diaryRepository: DiaryRepository
+) {
+    suspend operator fun invoke(entryIds: List<Long>, date: LocalDate, mealType: MealType) {
+        diaryRepository.moveEntries(entryIds, date, mealType)
     }
 }
 

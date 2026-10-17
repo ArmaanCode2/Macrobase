@@ -47,8 +47,7 @@ All documents are synchronized with the actual Kotlin codebase (`app/src/main/ja
 | Document | Description |
 | :--- | :--- |
 | **[NUTRITION_LABEL_SCANNER.md](NUTRITION_LABEL_SCANNER.md)** | **Nutrition Label OCR Architecture**: CameraX lifecycle integration, bounded bitmap memory management, ML Kit OCR recognition, multi-column regex parsing, and confidence scoring. |
-| **[PADDLE_OCR_INTEGRATION.md](PADDLE_OCR_INTEGRATION.md)** | **PaddleOCR Native Integration**: C++/JNI ONNX Runtime inference, OpenCV preprocessing, and text recognition pipeline for offline nutrition label extraction. |
-| **[RANKING_SYSTEM.md](RANKING_SYSTEM.md)** | **Food Ranking & Scoring**: Multi-dimensional nutrient density scoring, lifestyle diet profiles (High Protein, Low Carb, Keto, Mediterranean, Low Sodium, Vegan, Vegetarian), and sorting metrics. |
+| **[RANKING_SYSTEM.md](RANKING_SYSTEM.md)** | **Rank & RR**: the rank ladder, the day score (calorie zone x food score), RR per day against what each rank expects, the clean-week rule and the history replay. |
 
 ---
 

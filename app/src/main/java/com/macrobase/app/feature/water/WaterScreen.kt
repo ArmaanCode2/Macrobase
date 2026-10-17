@@ -64,6 +64,9 @@ import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.util.hasThousandsSeparator
+import com.macrobase.app.core.util.parseDecimalInput
+import com.macrobase.app.feature.detail.formatQuantityForInput
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
@@ -276,7 +279,7 @@ fun WaterScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                    Text(text = "💧 Water Intake", style = AppTypography.Header2)
+                    Text(text = "\uD83D\uDCA7 Water Intake", style = AppTypography.Header2)
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
 
                     Row(
@@ -519,14 +522,10 @@ fun WaterScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = inputAmount.toDoubleOrNull()
-                        if (parsed == null || parsed <= 0.0) {
-                            errorMessage = "Please enter a valid positive number"
-                            return@Button
-                        }
-                        val ml = if (isImperial) UnitConversions.flOzToMl(parsed) else parsed
-                        if (ml > 10000.0) {
-                            errorMessage = "Amount exceeds 10,000 mL maximum threshold"
+                        val ml = parseWaterInput(inputAmount, isImperial)
+                        val problem = waterInputError(inputAmount, ml, isImperial)
+                        if (ml == null || problem != null) {
+                            errorMessage = problem
                             return@Button
                         }
                         viewModel.addWater(ml)
@@ -548,12 +547,7 @@ fun WaterScreen(
 
     // 6. Edit Entry Dialog
     entryToEdit?.let { entry ->
-        val initialAmount = if (isImperial) {
-            com.macrobase.app.feature.detail.formatQuantityForInput(UnitConversions.mlToFlOz(entry.amountMl))
-        } else {
-            // Exact stored amount, so saving the dialog unchanged never alters the entry
-            com.macrobase.app.feature.detail.formatQuantityForInput(entry.amountMl)
-        }
+        val initialAmount = waterPrefillText(entry.amountMl, isImperial)
         var editInput by remember { mutableStateOf(initialAmount) }
         var editErrorMessage by remember { mutableStateOf<String?>(null) }
         val unitLabel = if (isImperial) "fl oz" else "mL"
@@ -602,14 +596,11 @@ fun WaterScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = editInput.toDoubleOrNull()
-                        if (parsed == null || parsed <= 0.0) {
-                            editErrorMessage = "Please enter a valid positive number"
-                            return@Button
-                        }
-                        val ml = if (isImperial) UnitConversions.flOzToMl(parsed) else parsed
-                        if (ml > 10000.0) {
-                            editErrorMessage = "Amount exceeds 10,000 mL maximum threshold"
+                        // Saving the dialog unchanged keeps the exact stored amount (BUG-050)
+                        val ml = waterFromInput(editInput, entry.amountMl, isImperial)
+                        val problem = waterInputError(editInput, ml, isImperial)
+                        if (ml == null || problem != null) {
+                            editErrorMessage = problem
                             return@Button
                         }
                         viewModel.updateWaterEntry(entry.copy(amountMl = ml))
@@ -628,4 +619,50 @@ fun WaterScreen(
             containerColor = AppColors.Surface
         )
     }
+}
+
+/**
+ * A water amount for an editable field. Metric shows the exact stored mL; imperial shows fl oz to
+ * 2 decimals ("8.45" for 250 mL), as more digits only add noise (BUG-050).
+ */
+internal fun waterPrefillText(ml: Double, isImperial: Boolean): String =
+    if (isImperial) {
+        formatQuantityForInput(kotlin.math.round(UnitConversions.mlToFlOz(ml) * 100.0) / 100.0)
+    } else {
+        formatQuantityForInput(ml)
+    }
+
+/**
+ * A typed water amount in mL, accepting "8,5" as well as "8.5"; null when it is not a number.
+ * "1,500" mL is refused: it means 1500, and reading the comma as a decimal mark would log 1.5 mL.
+ */
+internal fun parseWaterInput(text: String, isImperial: Boolean): Double? =
+    if (!isImperial && hasThousandsSeparator(text)) {
+        null
+    } else {
+        parseDecimalInput(text)?.let { if (isImperial) UnitConversions.flOzToMl(it) else it }
+    }
+
+/**
+ * [parseWaterInput], except that the pre-filled amount keeps the exact stored millilitres. The
+ * same number typed again ("8,45" for "8.45") counts as unchanged.
+ */
+internal fun waterFromInput(text: String, prefillMl: Double?, isImperial: Boolean): Double? =
+    if (prefillMl != null && isWaterPrefill(text, prefillMl, isImperial)) prefillMl else parseWaterInput(text, isImperial)
+
+/** True when [text] is the pre-filled amount, left as shown or typed again. */
+private fun isWaterPrefill(text: String, prefillMl: Double, isImperial: Boolean): Boolean {
+    val typed = parseDecimalInput(text) ?: return false
+    return typed == parseDecimalInput(waterPrefillText(prefillMl, isImperial))
+}
+
+/**
+ * Why a typed water amount cannot be saved, or null when [ml] can be. The separator message only
+ * explains a refused amount: an unchanged pre-fill such as "236.588" mL is kept as it is.
+ */
+internal fun waterInputError(text: String, ml: Double?, isImperial: Boolean): String? = when {
+    ml == null && !isImperial && hasThousandsSeparator(text) -> "Leave out the thousands separator"
+    ml == null || ml <= 0.0 -> "Please enter a valid positive number"
+    ml > 10000.0 -> "Amount exceeds 10,000 mL maximum threshold"
+    else -> null
 }

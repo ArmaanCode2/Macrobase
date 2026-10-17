@@ -26,6 +26,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/app_name"
             android:theme="@style/Theme.MacroBase">
             <intent-filter>
@@ -39,6 +40,11 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <!-- Clock and time-zone changes move "today" (BUG-048). Both are exempt from the
+                     Android 8 limits on implicit broadcasts; DATE_CHANGED is not, so a midnight
+                     alarm covers the date instead. -->
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

@@ -27,7 +27,9 @@ class SpatialTableDetector {
         val minX: Float,
         val maxX: Float,
         val centerX: Float,
-        val headerText: String
+        val headerText: String,
+        /** The bottom edge of the header row; rows above it are not nutrient rows. */
+        val headerBottomY: Int = 0
     )
 
     data class PhysicalRow(
@@ -118,10 +120,19 @@ class SpatialTableDetector {
         }
 
         // 3. Row Label Discovery (Y-span mapping)
-        val detectedRows = detectNutrientRows(ocrResult.lines, allElements, detectedColumns, logLines)
+        // Nothing from the %DV footnote down is a nutrient row of this food (BUG-045)
+        val footnoteTop = ocrResult.lines
+            .filter { LabelRowFilters.isDailyValueFootnote(it.text) }
+            .mapNotNull { (it.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(it.boundingBox))?.top }
+            .minOrNull()
+        val tableLines = ocrResult.lines.filter { line ->
+            val top = (line.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(line.boundingBox))?.top
+            footnoteTop == null || top == null || top < footnoteTop
+        }
+        val detectedRows = detectNutrientRows(tableLines, allElements, detectedColumns, logLines)
 
         // 4. Grid Cell Token Assignment (X in Column, Y in Row)
-        val cells = assignTokensToCells(allElements, detectedColumns, detectedRows, logLines)
+        val cells = assignTokensToCells(allElements, detectedColumns, detectedRows, logLines, LabelRowFilters.numbersBeforePercentSign(ocrResult.lines))
 
         // 5. Cross-Column Decimal Recovery & Relationship Validation
         val adjustedCells = reconcileCells(cells, servingInfo.grams, warnings, logLines)
@@ -389,7 +400,34 @@ class SpatialTableDetector {
             }
         }
 
-        return detected
+        // The header row ends at the topmost element of each header kind (BUG-057). A value such as
+        // "1004kJ" or "100mg" is never a header; one that matches anyway ("0.30g" with a 30 g
+        // serving, "Serving suggestion" under the table) sits lower and so is never the topmost.
+        // A bare "12%" is a %DV value, not the "%DV" header.
+        fun topmostBottom(kind: (OcrElement) -> Boolean): Int? = headerElements
+            .filter(kind)
+            .mapNotNull { it.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(it.boundingBox) }
+            .minByOrNull { it.top }
+            ?.bottom
+        val headerBottom = listOfNotNull(
+            topmostBottom { headerKind(it, servingGrams) == ColumnType.PER_100G },
+            topmostBottom { headerKind(it, servingGrams) == ColumnType.PER_SERVING },
+            topmostBottom { headerKind(it, servingGrams) == ColumnType.RDA && it.text.any { c -> c.isLetter() } }
+        ).maxOrNull() ?: 0
+        return detected.map { it.copy(headerBottomY = headerBottom) }
+    }
+
+    /** The column header [elem] would anchor, by the same tests the anchors use, or null. */
+    private fun headerKind(elem: OcrElement, servingGrams: Double?): ColumnType? {
+        val text = elem.text.lowercase(Locale.ROOT)
+        return when {
+            text.contains("size") || text.contains("total") -> null
+            text.contains("rda") || text.contains("%") -> ColumnType.RDA
+            text.contains("100g") || text.contains("100 g") || text.contains("100gm") -> ColumnType.PER_100G
+            text.contains("serving") || text.contains("serve") ||
+                (servingGrams != null && text.contains("${servingGrams.toInt()}g")) -> ColumnType.PER_SERVING
+            else -> null
+        }
     }
 
     private fun detectNutrientRows(
@@ -401,12 +439,7 @@ class SpatialTableDetector {
         val rows = mutableListOf<PhysicalRow>()
         val minDataX = columns.minOfOrNull { it.minX } ?: 300f
 
-        val headerBottomY = columns.mapNotNull { it.centerX }.let {
-            elements.filter { it.text.contains("100") || it.text.contains("serv", ignoreCase = true) }
-                .mapNotNull { it.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(it.boundingBox) }
-                .map { it.bottom }
-                .maxOrNull() ?: 0
-        }
+        val headerBottomY = columns.maxOfOrNull { it.headerBottomY } ?: 0
 
         for ((key, synonyms) in NUTRIENT_ROW_DEFINITIONS) {
             var matchedLine: OcrLine? = null
@@ -418,6 +451,8 @@ class SpatialTableDetector {
 
                 val textLower = line.text.lowercase(Locale.ROOT)
                 if (textLower.contains("ingredient") || textLower.contains("blend")) continue
+                // "Calories from Fat 72" is not the fat row, even when OCR misreads it (BUG-045)
+                if (LabelRowFilters.hasFromLabel(textLower)) continue
 
                 for (syn in synonyms) {
                     val regex = Regex("""\b${Regex.escape(syn)}\b""", RegexOption.IGNORE_CASE)
@@ -482,7 +517,8 @@ class SpatialTableDetector {
         elements: List<OcrElement>,
         columns: List<PhysicalColumn>,
         rows: List<PhysicalRow>,
-        logLines: MutableList<String>
+        logLines: MutableList<String>,
+        beforePercentSign: Set<OcrElement> = emptySet()
     ): List<TableCell> {
         val cells = mutableListOf<TableCell>()
 
@@ -491,7 +527,9 @@ class SpatialTableDetector {
 
         for (elem in elements) {
             val sBox = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox) ?: continue
+            // "7" "%" printed as two words is a %DV figure, not a value (BUG-041)
             val tokens = NutritionNumericParser.extractTokens(elem.text)
+                .map { if (elem in beforePercentSign) it.copy(isPercent = true) else it }
             if (tokens.isEmpty()) continue
 
             val matchedRow = rows.minByOrNull { row ->

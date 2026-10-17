@@ -76,6 +76,7 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 | `proteinGrams` | `REAL` | `NOT NULL` | Protein in grams |
 | `carbsGrams` | `REAL` | `NOT NULL` | Carbs in grams |
 | `fatGrams` | `REAL` | `NOT NULL` | Fat in grams |
+| `saturatedFatGrams` | `REAL` | `NULL` | Saturated fat (nullable) [Added v5] |
 | `fiberGrams` | `REAL` | `NULL` | Fiber (nullable) |
 | `sugarGrams` | `REAL` | `NULL` | Sugar (nullable) |
 | `sodiumMg` | `REAL` | `NULL` | Sodium (nullable) |
@@ -124,7 +125,7 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 - **Update Mechanism**: Asset database updates are handled atomically via `BuiltInDatabaseManager`. The database is opened strictly in read-only mode (`SQLiteDatabase.OPEN_READONLY`).
 
 ### 3.2. User Database Schema & Migration History
-The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 3`. All schema modifications are strictly non-destructive:
+The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 5`. Every schema change keeps every row:
 
 - **Version 1 (Initial Release)**:
   - Base schema with `diary_entries`, `custom_foods`, `recipes`, `weight_entries`, and `water_logs`.
@@ -143,6 +144,15 @@ The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 
   ALTER TABLE diary_entries ADD COLUMN loggedTransFat REAL;
   ALTER TABLE diary_entries ADD COLUMN loggedCholesterol REAL;
   ```
+- **Version 4 (`MIGRATION_3_4`, app 1.2.3)**:
+  - Version 3 reached a phone with two `diary_entries` layouts. The 7 Oct 2026 build added only `loggedFiber`, `loggedSugar` and `loggedSodium`, as `REAL NOT NULL DEFAULT 0.0`; Room refused that layout under version 3, so 1.2.2 crashed on open there.
+  - The migration rebuilds `diary_entries` in the current layout from whichever columns exist and copies every row (SQLite cannot drop `NOT NULL` in place). A nutrient column that was `NOT NULL` stored 0.0 for "not recorded", so its 0.0 becomes `NULL`, as for a backup from before format 1.3.0; other values are kept. A column the old table lacked becomes `NULL`. A column the code does not know is kept, with every row, in `diary_entries_v3_backup`. The AUTOINCREMENT high-water mark is kept. The tables are otherwise the same as version 3.
+  - Before Room upgrades a database from version N, `UserDatabase.create()` copies the file to `files/database-backups/<name>.v<N>`, once per version.
+- **Version 5 (`MIGRATION_4_5`)**:
+  - Custom foods can state saturated fat, which the rank's food quality score uses. The column is nullable with no default, so custom foods saved before it read as "not stated" (`NULL`) until the user edits them. The migration does not touch diary entries.
+  ```sql
+  ALTER TABLE custom_foods ADD COLUMN saturatedFatGrams REAL
+  ```
 - **Room Builder Configuration** (`UserDatabase.create()`, used by `DiModules.kt`):
   ```kotlin
   Room.databaseBuilder(context, UserDatabase::class.java, DatabaseConfig.USER_DATABASE_NAME)
@@ -150,7 +160,7 @@ The Room user database is versioned via `DatabaseConfig.USER_DATABASE_VERSION = 
       .build()
   ```
   There is no destructive fallback (BUG-046). A missing migration or a downgrade throws instead of deleting the user's data.
-- **Schema history**: `exportSchema = true`, and Room writes every version to `app/schemas/com.macrobase.app.data.database.UserDatabase/<version>.json`. `2.json` was exported from v1.0.3 (commit `054a547`). `P3PhaseOneDataSafetyTests` builds a version 2 database from it, migrates it, and checks every row survives.
+- **Schema history**: `exportSchema = true`, and Room writes every version to `app/schemas/com.macrobase.app.data.database.UserDatabase/<version>.json`. `2.json` was exported from v1.0.3 (commit `054a547`). `P3PhaseOneDataSafetyTests` builds a version 2 database from it, migrates it, and checks every row survives. It also rebuilds both 7 Oct 2026 version 3 layouts (upgraded and newly created), upgrades them to the current version, and checks that a failed upgrade leaves the database untouched. It also upgrades a version 4 database (from `4.json`) to version 5 and checks every row survives, with custom food saturated fat `NULL`.
 
 ### 3.3. Stable Food Identity Strategy
 Diary entries record the food reference (`foodId`, `uuid`) and snapshot immutable nutrition and portion descriptions (`loggedCalories`, `loggedProtein`, `loggedCarbs`, `loggedFat`, `loggedFiber`, `loggedSugar`, `loggedSodium`, `loggedSaturatedFat`, `loggedTransFat`, `loggedCholesterol`, `servingDescription`, `gramWeight`). This guarantees that older diary entries remain readable and mathematically accurate across future database updates, custom food mutations, or food deletions.

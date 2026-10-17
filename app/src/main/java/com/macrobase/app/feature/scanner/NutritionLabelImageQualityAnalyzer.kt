@@ -155,21 +155,21 @@ class NutritionLabelImageQualityAnalyzer {
 
         // Non-blocking warnings that guide preprocessing variants
         if (avgLuminance < 40.0) {
-            warnings.add("Image is dark — applying brightness recovery.")
+            warnings.add("Image is dark \u2014 applying brightness recovery.")
         } else if (avgLuminance > 225.0) {
-            warnings.add("Image is bright/washed out — enhancing contrast.")
+            warnings.add("Image is bright/washed out \u2014 enhancing contrast.")
         }
 
         if (sharpnessScore < 30.0) {
-            warnings.add("Image is slightly blurry — trying enhanced sharpening.")
+            warnings.add("Image is slightly blurry \u2014 trying enhanced sharpening.")
         }
 
         if (contrastScore < 30.0) {
-            warnings.add("Low contrast detected — applying adaptive thresholding.")
+            warnings.add("Low contrast detected \u2014 applying adaptive thresholding.")
         }
 
         if (glareRatio > 0.15) {
-            warnings.add("Glare detected — mitigating reflections.")
+            warnings.add("Glare detected \u2014 mitigating reflections.")
         }
 
         // Severe Rejections (Only when image is genuinely impossible to read)

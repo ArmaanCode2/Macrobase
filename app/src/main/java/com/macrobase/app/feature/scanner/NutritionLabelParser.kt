@@ -90,7 +90,9 @@ class NutritionLabelParser {
     /**
      * Parses raw OCR text and structured bounding lines into a typed NutritionLabelDraft.
      */
-    fun parse(ocrResult: OcrResult): NutritionLabelDraft {
+    fun parse(ocrInput: OcrResult): NutritionLabelDraft {
+        // "Calories from Fat 72" is neither the calories nor the fat (BUG-045)
+        val ocrResult = LabelRowFilters.withoutCaloriesFromFat(ocrInput)
         val rawLines = ocrResult.lines
         val fullText = ocrResult.fullText
         val warnings = mutableListOf<String>()
@@ -135,6 +137,11 @@ class NutritionLabelParser {
                 foundTableOrNutrient = true
             }
             if (foundTableOrNutrient && (lower.contains("amino acid profile") || lower.contains("typical amino acid") || lower.contains("ingredients") || lower.contains("allergens"))) {
+                break
+            }
+            // The %DV footnote and its reference rows ("Total Fat Less than 65g 80g") end the
+            // table: their figures are never this food's values (BUG-045)
+            if (foundTableOrNutrient && LabelRowFilters.isDailyValueFootnote(lower)) {
                 break
             }
             filteredRows.add(row)
@@ -571,8 +578,8 @@ class NutritionLabelParser {
             val actualCal = calories.value
             val diff = abs(expectedCal - actualCal)
             if (actualCal > 20.0 && diff > (actualCal * 0.45)) {
+                // The warning itself comes from the scan's final checks, once (BUG-042)
                 confidenceScore -= 20
-                warnings.add("Calculated macro calories (${expectedCal.roundToInt()}) differ from label calories (${actualCal.roundToInt()})")
             }
         }
 
@@ -1042,7 +1049,8 @@ class NutritionLabelParser {
 
         val kcalRows = rows.filter { row ->
             val text = row.text.lowercase(Locale.ROOT)
-            if (text.contains("calories from fat") || text.contains("cal from fat")) false
+            // The %DV footnote ("Calories: 2,000 2,500") is never the label's energy (BUG-045)
+            if (LabelRowFilters.isDailyValueFootnote(text)) false
             else if ((text.contains("kj") || text.contains("kilojoule")) && !text.contains("kcal") && !text.contains("cal")) false
             else true
         }
@@ -1111,6 +1119,9 @@ class NutritionLabelParser {
         for (row in rows) {
             val normalizedRowText = normalizeOcrMisreads(row.text)
             val textLower = normalizedRowText.lowercase(Locale.ROOT)
+            // A "... from ..." label such as "Energy from fat 72" is never the nutrient's own row.
+            // Keywords still match anywhere: "Includes 10g Added Sugars" names it after the number (BUG-045)
+            if (LabelRowFilters.hasFromLabel(textLower)) continue
             var matchedKeyword = ""
             for (kw in keywordPatterns) {
                 val regex = Regex("""\b$kw\b""")
@@ -1130,7 +1141,8 @@ class NutritionLabelParser {
             for ((index, element) in row.elements.withIndex()) {
                 // Commas stay as printed: "1,580mg" is 1580 mg, not 1.58 (BUG-022)
                 val normalizedText = normalizeOcrMisreads(element.text)
-                val isPercent = normalizedText.contains("%")
+                // "7 %" read as two words is a %DV figure too, never a value (BUG-041)
+                val isPercent = normalizedText.contains("%") || elementTexts.getOrNull(index + 1)?.trim()?.startsWith("%") == true
                 val isLess = normalizedText.contains("<")
                 val isGreater = normalizedText.contains(">")
                 if (isLess) pendingOp = ComparisonOperator.LESS_THAN
@@ -1228,30 +1240,23 @@ class NutritionLabelParser {
                     }
                 }
             } else if (valueCols.size == 1 && valueTokens.isNotEmpty()) {
+                // One value column: the header says what it holds, and a second number on the
+                // row (a %DV or %RI figure without its sign) is never the other basis (BUG-041)
                 val singleCol = valueCols[0]
+                // The number under the column's header, not just the leftmost one
+                val tok = valueTokens.minByOrNull { abs(it.centerX - singleCol.centerX) } ?: valueTokens[0]
                 if (singleCol.type == ColumnType.PER_100G) {
-                    per100g = valueTokens[0].value
-                    per100gOp = valueTokens[0].operator
-                    if (valueTokens.size >= 2) {
-                        perServing = valueTokens[1].value
-                        perServingOp = valueTokens[1].operator
-                    }
+                    per100g = tok.value
+                    per100gOp = tok.operator
                 } else {
-                    perServing = valueTokens[0].value
-                    perServingOp = valueTokens[0].operator
-                    if (valueTokens.size >= 2) {
-                        per100g = valueTokens[1].value
-                        per100gOp = valueTokens[1].operator
-                    }
+                    perServing = tok.value
+                    perServingOp = tok.operator
                 }
             } else {
                 if (basis == NutritionBasis.PER_SERVING) {
-                    if (valueTokens.size >= 2) {
-                        per100g = valueTokens[0].value
-                        per100gOp = valueTokens[0].operator
-                        perServing = valueTokens[1].value
-                        perServingOp = valueTokens[1].operator
-                    } else if (valueTokens.isNotEmpty()) {
+                    // A per-serving label prints the amount first; a second number is its %DV
+                    // (BUG-041). This used to read the amount as per 100 g.
+                    if (valueTokens.isNotEmpty()) {
                         perServing = valueTokens[0].value
                         perServingOp = valueTokens[0].operator
                     }
@@ -1259,7 +1264,9 @@ class NutritionLabelParser {
                     if (valueTokens.isNotEmpty()) {
                         per100g = valueTokens[0].value
                         per100gOp = valueTokens[0].operator
-                        if (valueTokens.size >= 2) {
+                        // Only a label that says "per 100 g" has a second, per-serving column; with
+                        // no basis at all a second number is more likely a %DV that lost its sign
+                        if (valueTokens.size >= 2 && basis != NutritionBasis.UNKNOWN) {
                             perServing = valueTokens[1].value
                             perServingOp = valueTokens[1].operator
                         }

@@ -20,7 +20,7 @@ This document serves as a living catalog of historical bugs, dangerous patterns,
 - **Symptoms**: Dietary fiber, sugar, and sodium values display as `0.0g` / `0.0mg` in the Daily Summary dialog and Nutrition Facts, even though the logged food has positive values.
 - **Root Cause**: `DiaryEntryEntity` in Room omitted columns for `loggedFiber`, `loggedSugar`, and `loggedSodium`. While `Food` and `Nutrition` supported secondary nutrients, writing an entry to Room dropped them, and reading back mapped them to `null` $\rightarrow$ `0.0`.
 - **Guardrail**:
-  - Database schema is at `USER_DATABASE_VERSION = 3`.
+  - Database schema is at `USER_DATABASE_VERSION = 4`.
   - Columns `loggedFiber`, `loggedSugar`, `loggedSodium`, `loggedSaturatedFat`, `loggedTransFat` and `loggedCholesterol` (`REAL`, nullable) are persisted in `diary_entries`. `null` means not stated; never coerce it to `0.0` (BUG-037).
   - `MIGRATION_2_3` safely migrates older databases without data loss.
   - When adding any new nutrient, you must update:
@@ -91,20 +91,34 @@ This document serves as a living catalog of historical bugs, dangerous patterns,
 - **Guardrail**:
   - MacroBase has a strict zero-cloud privacy guarantee.
   - The Android Manifest does not declare `android.permission.INTERNET`.
-  - All OCR adjudications run on-device via ML Kit and PaddleOCR.
+  - All OCR runs on-device via ML Kit.
 
 ---
 
 ### Pitfall 9: Unbounded File I/O & Zip Bomb Denial-of-Service
 - **Symptoms**: Out-of-memory crash or freeze when restoring a user backup.
-- **Root Cause**: Calling `readBytes()` on unbounded archive streams or failing to validate file extraction paths.
+- **Root Cause**: Calling `readBytes()` on unbounded archive streams or failing to validate file extraction paths. Before BUG-047, every file was also held as text and parsed into a full object tree, so memory grew at about 4 to 5 times the file size, and an `OutOfMemoryError` crashed the app.
 - **Guardrail**:
   - In `BackupArchiveManager.kt`:
-    - Maximum archive file size: 50 MB.
-    - Maximum single entry size: 50 MB.
-    - Maximum total extracted bytes: 100 MB.
-    - Maximum files allowed: 50.
+    - Data files are parsed record by record while they stream (`SimpleJsonParser.parseRecords`). Only `manifest.json`, `goals.json` and `preferences.json` (1 MB each at most) are read whole.
+    - Every record must be a flat JSON object:
+      - no nested objects or arrays;
+      - at most 64 fields;
+      - at most 16,384 characters of JSON, or 524,288 for a recipe;
+      - strings of at most 200,000 characters.
+    - String values the whole backup keeps are capped at 24 million characters.
+    - Records per file: diary 120,000, water 120,000, weight 40,000, custom foods 20,000, recipes 5,000.
+    - With these bounds, memory follows the record counts and the text budget, not the file size.
+    - Maximum archive file size: 50 MB compressed.
+    - Maximum single data file: 96 MB. Maximum total extracted bytes: 128 MB, unknown files included.
+    - The limits are sized from measurement: a diary entry is about 770 bytes, so five years at 30 entries a day is about 42 MB, 55,000 records and 5 million characters of text. The limits allow twice that.
+      - A unit test validates such a backup.
+      - Memory use on a real low-RAM device has not been measured.
+    - Maximum files allowed: 50. Files the app does not know are hashed and counted, never kept.
     - Strict zip path traversal checks (rejecting `..`, `/`, `\`, `:`).
+    - A backup past a limit gets "This backup is larger than MacroBase can restore."
+    - `OutOfMemoryError` is caught on validation and on the database step of the import, and becomes "This backup is too large to open on this device."
+    - Error messages never quote a string value from the file. They give a position, plus at most a 40-character field name or a 64-character number. `briefErrorText` (core/util) keeps any message to one line of printable ASCII, at most 200 characters.
 
 ---
 

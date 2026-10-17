@@ -26,8 +26,8 @@ android {
         applicationId = "com.macrobase.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.2.2"
+        versionCode = 16
+        versionName = "1.2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -69,6 +69,8 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig.VERSION_NAME: the drawer and every backup show the version set above
+        buildConfig = true
     }
 
     testOptions {
@@ -267,11 +269,11 @@ androidComponents {
 }
 
 dependencies {
-    implementation(project(":ppocr-sdk"))
     // AndroidX & Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     // Compose BOM & UI
@@ -303,6 +305,7 @@ dependencies {
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.camera.view)
 
     // Google ML Kit On-Device Text Recognition (Bundled offline model)

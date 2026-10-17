@@ -49,17 +49,17 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.domain.model.CalendarDaySummary
-import com.macrobase.app.domain.model.Goal
-import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.usecase.GetCalendarAdherenceUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import com.macrobase.app.core.util.DeviceClock
+import java.time.Clock
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -87,19 +87,15 @@ data class CalendarUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class CalendarViewModel(
     private val getCalendarAdherenceUseCase: GetCalendarAdherenceUseCase,
-    private val goalsRepository: GoalsRepository
+    private val clock: Clock = DeviceClock
 ) : ViewModel() {
 
-    private val _displayedYearMonth = MutableStateFlow(YearMonth.now())
+    private val _displayedYearMonth = MutableStateFlow(YearMonth.now(clock))
     val displayedYearMonth: StateFlow<YearMonth> = _displayedYearMonth.asStateFlow()
 
+    // Each summary carries the goal in force on its day, so a goal change never recolours history (BUG-049)
     val uiState: StateFlow<CalendarUiState> = _displayedYearMonth.flatMapLatest { ym ->
-        combine(
-            getCalendarAdherenceUseCase.observe(ym.year, ym.monthValue),
-            goalsRepository.observeGoals()
-        ) { summaries, goals ->
-            calculateMonthState(ym, summaries, goals)
-        }
+        getCalendarAdherenceUseCase.observe(ym.year, ym.monthValue).map { summaries -> calculateMonthState(ym, summaries) }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -120,12 +116,14 @@ class CalendarViewModel(
 
     private fun calculateMonthState(
         yearMonth: YearMonth,
-        summaries: List<CalendarDaySummary>,
-        goals: Goal
+        summaries: List<CalendarDaySummary>
     ): CalendarUiState {
         val summariesMap = summaries.associateBy { it.date.dayOfMonth }
+        // Days outside the month are padding and are never judged; they show the nearest day's goal
+        val firstGoal = summaries.firstOrNull()?.calorieGoal ?: 0.0
+        val lastGoal = summaries.lastOrNull()?.calorieGoal ?: 0.0
 
-        val today = LocalDate.now()
+        val today = LocalDate.now(clock)
         val totalDays = yearMonth.lengthOfMonth()
         val firstDayOfMonth = yearMonth.atDay(1)
 
@@ -149,7 +147,7 @@ class CalendarViewModel(
                     isToday = date == today,
                     isFuture = date.isAfter(today),
                     loggedCalories = 0.0,
-                    calorieGoal = goals.dailyCalorieGoal,
+                    calorieGoal = firstGoal,
                     performanceCategory = CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED
                 )
             )
@@ -162,11 +160,12 @@ class CalendarViewModel(
             val isFuture = date.isAfter(today)
             val summary = summariesMap[d]
             val loggedCal = summary?.loggedCalories ?: 0.0
+            val dayGoal = summary?.calorieGoal ?: 0.0
 
             val category = if (isFuture && loggedCal <= 0.0) {
                 CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED
             } else {
-                CalendarPerformanceConfig.evaluatePerformance(loggedCal, goals.dailyCalorieGoal)
+                CalendarPerformanceConfig.evaluatePerformance(loggedCal, dayGoal)
             }
 
             cellModels.add(
@@ -177,7 +176,7 @@ class CalendarViewModel(
                     isToday = isToday,
                     isFuture = isFuture,
                     loggedCalories = loggedCal,
-                    calorieGoal = goals.dailyCalorieGoal,
+                    calorieGoal = dayGoal,
                     performanceCategory = category
                 )
             )
@@ -197,16 +196,17 @@ class CalendarViewModel(
                     isToday = date == today,
                     isFuture = date.isAfter(today),
                     loggedCalories = 0.0,
-                    calorieGoal = goals.dailyCalorieGoal,
+                    calorieGoal = lastGoal,
                     performanceCategory = CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED
                 )
             )
         }
 
         // Metrics Calculation:
-        // Eligible days: past or today dates within the currently displayed month
+        // Eligible days: past days of the displayed month, and today once something is logged.
+        // Until then today is not a missed day, as in the rank and the heatmap (BUG-032, D7).
         val currentMonthCells = cellModels.filter { it.isCurrentMonth }
-        val eligiblePastOrTodayDays = currentMonthCells.filter { !it.date.isAfter(today) }
+        val eligiblePastOrTodayDays = currentMonthCells.filter { it.date.isBefore(today) || (it.isToday && it.loggedCalories > 0.0) }
 
         val daysMissed = eligiblePastOrTodayDays.count { it.loggedCalories <= 0.0 }
         val loggedDays = eligiblePastOrTodayDays.filter { it.loggedCalories > 0.0 }

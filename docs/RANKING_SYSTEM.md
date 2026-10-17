@@ -1,179 +1,181 @@
-# MacroBase Lifestyle Ranking System V2
+# MacroBase Ranking System (rules version 4)
 
-## Overview
-
-MacroBase includes a competitive-style lifestyle ranking system that measures overall nutrition and tracking consistency. The rank does not evaluate calories alone; instead, it synthesizes daily food logging consistency, calorie target adherence, macronutrient distribution, and weight trends using the health metrics MacroBase already tracks.
-
-Water consumption is strictly excluded from all ranking calculations (0% weight).
+The rank rewards days eaten inside the calorie zone of the user's strategy, with good food. The
+code is `core/config/RankScoringConfig.kt` (rules) and `data/repository/rank/RankRepositoryImpl.kt`
+(replay). Water and body weight do not affect the rank.
 
 ---
 
-## 1. Rank Ladder and Tiers
+## 1. Rank ladder (unchanged)
 
-The ranking ladder contains exactly 8 ranks. Each rank has exactly 3 tiers (`I`, `II`, `III`), forming 24 distinct progression milestones.
+| Rank | Rating | Tiers |
+| :--- | :--- | :--- |
+| Fat Bear | 0 – 299 | I, II, III |
+| Average | 300 – 599 | I, II, III |
+| Carb Merchant | 600 – 899 | I, II, III |
+| Protein Alchemist | 900 – 1199 | I, II, III |
+| Gym Cat | 1200 – 1499 | I, II, III |
+| Muscle Buster | 1500 – 1799 | I, II, III |
+| Fart Monster | 1800 – 2099 | I, II, III |
+| GigaChad | 2100 – 2399 | I, II, III |
 
-| Rank Index | Rank Name | Tiers | Rating Score Range |
+Each tier holds 100 RR. The rating stays between 0 and 2,399.
+
+---
+
+## 2. A day's score
+
+    day score = calorie credit (0 – 1) x food score (0 – 100)
+
+### 2.1 Calorie credit
+
+Judged against the **maintenance calories and strategy in force that day**. The daily calorie goal
+is not used: strategy and maintenance changes start the next day, so they cannot be edited to suit
+a day already eaten. Protein and the carb and fat goals do follow the targets saved for the day, as
+the dashboard does (BUG-024), so editing them late in a day changes that day's food score.
+
+| Strategy | Full credit | Credit fades (straight line) | No credit |
 | :--- | :--- | :--- | :--- |
-| 0 | Fat Bear | Fat Bear I, Fat Bear II, Fat Bear III | 0 – 299 |
-| 1 | Average | Average I, Average II, Average III | 300 – 599 |
-| 2 | Carb Merchant | Carb Merchant I, Carb Merchant II, Carb Merchant III | 600 – 899 |
-| 3 | Protein Alchemist | Protein Alchemist I, Protein Alchemist II, Protein Alchemist III | 900 – 1199 |
-| 4 | Gym Cat | Gym Cat I, Gym Cat II, Gym Cat III | 1200 – 1499 |
-| 5 | Muscle Buster | Muscle Buster I, Muscle Buster II, Muscle Buster III | 1500 – 1799 |
-| 6 | Fart Monster | Fart Monster I, Fart Monster II, Fart Monster III | 1800 – 2099 |
-| 7 | GigaChad | GigaChad I, GigaChad II, GigaChad III | 2100 – 2399 |
+| Cutting | 10 – 25% below maintenance | 5 – 10% and 25 – 35% below | within 5% of maintenance, above it, or more than 35% below |
+| Bulking | 10 – 20% above maintenance | 5 – 10% and 20 – 30% above | within 5% of maintenance, below it, or more than 30% above |
+| Maintaining | within 5% of maintenance | 5 – 10% away | more than 10% away |
 
-- **Minimum Rating Floor**: `0` (Fat Bear I, 0 RR)
-- **Maximum Rating Ceiling**: `2399` (GigaChad III, 99 RR)
-- **Total Progression Range**: `2400` points (0..2399)
+Example, cutting with 2,000 kcal maintenance: 1,500 – 1,800 kcal is full credit, 1,850 kcal half,
+1,900 kcal or more none, 1,300 kcal or less none.
 
----
+### 2.2 Food score
 
-## 2. RR (Rating Rank) Points and Tier Progression
+    food score = 40% protein + 45% food quality + 15% carb and fat balance
 
-- Each tier contains exactly **100 RR** (0 to 99 RR).
-- Each full rank contains **300 RR** (3 tiers x 100 RR).
-- Reaching 100 RR in a tier triggers immediate promotion to the next tier with point overflow carried over.
-- Dropping below 0 RR triggers demotion to the previous tier with underflow carried over.
-- At the floor (`0` RR in Fat Bear I), rating cannot become negative.
-- At the ceiling (`99` RR in GigaChad III), rating cannot exceed 2399.
-
-### Promotion Example:
-- Current: Fat Bear I, 95 RR
-- Daily RR Delta: +10 RR
-- Result: Fat Bear II, 5 RR (95 + 10 = 105 -> promoted with 5 RR carry-over)
-
-### Demotion Example:
-- Current: Average I, 4 RR
-- Daily RR Delta: -10 RR
-- Result: Fat Bear III, 94 RR (304 - 10 = 294 -> demoted to tier index 2 with 94 RR)
-
----
-
-## 3. Core Rating Model & Component Weights
-
-The composite Lifestyle Score (0 to 100) is evaluated as follows:
-
-$$\text{LifestyleScore} = (\text{Consistency} \times 0.35) + (\text{CaloriePerformance} \times 0.25) + (\text{MacroBalance} \times 0.25) + (\text{WeightTrend} \times 0.15)$$
-
-| Component | Weight | Source |
+| Part | Full marks | Zero |
 | :--- | :--- | :--- |
-| Consistency | 35% | Days logged vs eligible days in the 30-day window |
-| Calorie Performance | 25% | Daily average calorie intake vs target calorie goal |
-| Macro Balance | 25% | Protein (40%), Carbs (30%), Fat (30%) adherence |
-| Weight Trend | 15% | Body weight trajectory vs target weight |
-| Water Hydration | 0% | Completely excluded from rank calculation |
+| Protein | the protein goal up to 1.5x it (80 at 2x) | half the goal or less |
+| Carb and fat balance | each within 20% of its gram goal | 50% off |
+
+Food quality, from the Dietary Guidelines for Americans:
+
+| Measure | Share | Full marks | Zero |
+| :--- | :--- | :--- | :--- |
+| Fiber | 40% | 14 g or more per 1,000 kcal | 4 g or less per 1,000 kcal |
+| Saturated fat | 25% | 10% of calories or less (15% scores 40) | 20% or more |
+| Sodium | 20% | 2,300 mg a day or less | 4,000 mg or more (the known foods' sodium is scaled up to the whole day) |
+| Total sugar | 15% | 20% of calories or less | 35% or more |
+
+The diary stores total sugar, fruit and milk included, not the added sugar the guideline limits,
+so the sugar line is lenient.
+
+**Unknown values.** Each measure is judged on the entries that state it. The share of the day's
+calories from entries that do not counts as 50. A logged 0.0 is a real zero (AGENTS.md 2.4).
+Entries logged before the diary kept these nutrients borrow them from the built-in food they logged,
+scaled by the entry's calories, when the food's name still matches. Built-in food ids are large
+hashes; ids in the custom food and recipe ranges are never looked up. This is read only: diary
+entries are never changed.
+
+Known limits:
+- Custom foods state saturated fat from database version 5 on. A custom food saved earlier has it
+  unknown until the user edits the food. Entries already logged from it keep their snapshot, so
+  their saturated fat stays unknown, unless the user opens such an entry and saves it: Edit Mode
+  then fills unknown nutrients from the food as it is now (AGENTS.md 5.3).
+- A recipe stores the sum of what its ingredients state. When only some ingredients state a
+  nutrient, the recipe looks fully covered: fiber then reads low, and saturated fat, sodium and sugar
+  read better than they are. A recipe that mixes custom foods saved before and after version 5
+  often does this for saturated fat.
 
 ---
 
-## 4. Component Scoring Rules
+## 3. RR per day
 
-### A. Consistency (35%)
-- Evaluates the proportion of days logged over the rolling 30-day window.
-- Score = `(loggedDaysCount / eligibleDays) * 100`.
-- Sustainable regular logging is rewarded. A single missed day does not severely impact the rolling 30-day average, but high consistency alone cannot compensate for massive caloric overages.
+Each rating expects a day score, rising smoothly between these points:
 
-### B. Calorie Performance (25%)
-Calorie scoring penalizes both extreme caloric restriction and large caloric surpluses:
+| Rating | 0 | 300 | 600 | 900 | 1200 | 1500 | 1800 | 2100 | 2399 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Expected score | 40 | 50 | 58 | 65 | 72 | 79 | 85 | 90 | 94 |
 
-| Actual / Target Calorie Ratio | Score Range | Classification |
-| :--- | :--- | :--- |
-| 90% – 105% | 100.0 | Excellent adherence |
-| 80% – 90% | 90.0 – 100.0 | Very good adherence |
-| 105% – 115% | 75.0 – 90.0 | Good / moderate overage (e.g. 200 kcal over) |
-| 70% – 80% | 60.0 – 90.0 | Below target, moderate |
-| 115% – 125% | 50.0 – 75.0 | Moderate penalty |
-| 50% – 70% | 25.0 – 60.0 | Strong penalty (undereating) |
-| 125% – 150% | 15.0 – 50.0 | Strong penalty (surplus) |
-| 25% – 50% | 0.0 – 25.0 | Very strong penalty (crash dieting) |
-| 150% – 200% | 0.0 – 15.0 | Very strong penalty |
-| < 25% or > 200% | 0.0 | Floor (e.g. 6000 kcal against 2000 kcal goal) |
+    RR = round((day score - expected score) x 0.8), between -15 and +20
 
-### C. Macro Balance (25%)
-Evaluates protein, carbohydrate, and fat intake against user-configured targets:
-- $\text{MacroBalanceScore} = (\text{ProteinScore} \times 0.40) + (\text{CarbScore} \times 0.30) + (\text{FatScore} \times 0.30)$
-- **Protein Scoring**:
-  - 90% – 110% of target: 100.0
-  - 80% – 90% or 110% – 125%: 85.0
-  - 65% – 80% or 125% – 140%: 60.0
-  - 45% – 65% or 140% – 175%: 30.0
-  - 20% – 45% or 175% – 225%: 10.0
-  - < 20% or > 225%: 0.0
-- **Carbohydrates & Fat Scoring**:
-  - 85% – 115% of target: 100.0
-  - 70% – 85% or 115% – 130%: 75.0
-  - 50% – 70% or 130% – 160%: 40.0
-  - 25% – 50% or 160% – 200%: 15.0
-  - < 25% or > 200%: 0.0
+- A day with no calorie credit scores 0, so it always gives -15 RR.
+- A missed day gives **-20 RR**, more than any logged day can lose: logging an honest bad day
+  always beats skipping it.
+- Because the expectation rises with the rating, a steady day score settles inside a tier.
 
-### D. Weight Trend (15%)
-Evaluates progress toward the user's configured target weight:
-- **Loss Target** (`currentWeight > targetWeight + 0.5kg`):
-  - Trending down toward target: 100.0
-  - Stable: 70.0
-  - Trending away: 20.0
-- **Gain Target** (`currentWeight < targetWeight - 0.5kg`):
-  - Trending up toward target: 100.0
-  - Stable: 70.0
-  - Trending away: 20.0
-- **Maintain Target** (`|currentWeight - targetWeight| <= 0.5kg`):
-  - Stable (|delta| <= 0.5kg): 100.0
-  - Mild drift (|delta| <= 1.0kg): 70.0
-  - Large drift: 40.0
-- **Missing or Insufficient Data**:
-  - If fewer than 2 weight entries exist, the weight component defaults to a neutral `50.0` rather than 0.
+**Clean week.** Moving up into Fart Monster (1,800) or GigaChad (2,100) needs a clean week ending
+within the last 14 days: 7 days in a row with at most one off day. A day is off when it is not
+logged or has less than half the calorie credit, so skipping a bad day does not help here either.
+Without a clean week the rating stops at the top of the rank below; the Rank screen says so under
+the RR bar and on the days that were held.
 
 ---
 
-## 5. Evaluation Window & Provisional Period
+## 4. Replay and today
 
-1. **Rolling Window**: Primary evaluation spans the previous 30 calendar days.
-2. **Provisional Status** (`0 – 6 logged days`):
-   - User is marked as `PROVISIONAL`.
-   - RR movement is held at 0 so a user cannot jump to high ranks from 1 or 2 lucky days.
-   - Display shows: `"Keep logging for 7 days to establish your first rating."`
-3. **Reduced Movement** (`7 – 13 logged days`):
-   - RR movement is dampened by 50% (`factor = 0.5`).
-4. **Full Rating Movement** (`14+ logged days`):
-   - Full RR movement takes effect.
+- The rating is replayed from the first logged day over the whole diary (BUG-023), each day against
+  the goal in force that day (BUG-024). Nothing about the rank is stored, so a rules change
+  recalculates every rank; the Rank screen then shows a one-time notice (`RULES_VERSION`).
+- The rank counts only days from the first day with a saved goal
+  (`GoalsRepository.getGoalHistoryStart`): the earliest dated record in the goal history, not the
+  `2000-01-01` record that stands in for the days before the first change. Goal history began
+  with the 10 Oct 2026 code, so an earlier day's goal is only a guess and the day is left out.
+  A history with no saved day up to today, empty included, gets today's goal saved on the next
+  read, so the rank counts from that day. Left-out days stay in the diary and in Statistics. The
+  score card, the logged-day count, the provisional days and the clean week all start there too,
+  and the last history page names the day ("Your rank counts from Oct 10, the first day with a
+  saved goal."), with the year when it is not this year. If that left out every logged day, the
+  rank shows the one-time notice anyway. Backups carry the goal history, so a restore keeps the day; a backup without
+  history (before format 1.2.0, or an empty one) leaves the rank counting from the restore.
+- Nothing moves until 7 logged days have ended (provisional); then every day counts, the first ones
+  included.
+- **Seasons.** The rank starts again from Fat Bear I every year on the anniversary of the first
+  logged day (`RankSeason`): a first log on 29 Aug 2026 resets on 29 Aug 2027, then every 29 Aug.
+  A first log on 29 Feb resets on 28 Feb in other years. The date comes from the diary, so nothing
+  is stored and a restored backup keeps it. Each season is replayed on its own from its first
+  logged day, with 7 provisional days again, so the reset day shows that day's own RR and never a
+  drop from last season's rating. The rank screen history covers the current season only. The
+  rank counts from the later of the season start and the first day with a saved goal.
+- **Best rank.** The rank card shows the highest rank and tier of the current season and the first
+  day that rank and tier were reached ("Best this season: Gym Cat II • Sep 3"), once the rating
+  is established and above 0. After a reset a one-time "New season" notice names last season's
+  best, when that season had one; dismissing it stores the season's start
+  (`seen_rank_season_start`), so it returns only after the next reset. It is not in backups, so a
+  restore on another phone shows it once more.
+- **Rank History (Statistics).** A fifth Statistics tab draws the rating after each day that ended
+  (`RankProfile.ratingHistory`, every season, each replayed on its own) for 30 days, 90 days, this
+  season or all. The height covers only the ranks the line reaches, with a line where each rank
+  starts; a dashed "Reset" line marks the day a new season started; tapping the line names the
+  day ("Oct 12 • Fat Bear I • 83 RR", with the year for another year's day). A season is drawn
+  only once it has 7 logged days, so the first days after a reset are not a line at 0 RR. Below
+  it: this season's best rank and each past season with its best ("Aug 29, 2026 – Aug 28, 2027
+  • best Gym Cat II"); a year with nothing logged is not listed. Before the first rank is
+  established it says "Log 7 days to get your first rank." The tab builds the rank only while it
+  is on screen.
+- The season start follows the diary: food logged on a wrong old date (a year back) moves the reset
+  until that entry is deleted, and deleting the first logged days moves it later.
+- The rank ladder (the i button) says when the rank resets and how many days are left ("Resets on
+  Aug 29, 2027 • 319 days left"); before anything is logged it says the rank resets one year
+  after the first logged day.
+- Today is in progress (BUG-032): its RR is a preview and enters the rating after midnight. While
+  today's calories are below the zone and still earn no credit, the screen shows "In progress"
+  instead of the preview.
+- The score card covers the last 30 days that have ended, from the first counted day: protein, food
+  quality, balance and calorie credit are averaged over the logged days; the headline day score is
+  averaged over every day, a missed day counting 0. It judges the food, not the rank, so a new
+  season does not empty it.
+- The history lists every counted day, 30 to a page: the first page is today and the 29 days
+  before it, `>` shows the 30 days before those and `<` goes back. Each row names the day
+  ("Today", "Yesterday", "Oct 11"), the rank and RR after it, and the RR change. A third line says
+  why when the day lost RR, or would have at the bottom of the ladder: "Missed day", "Calories
+  outside your zone", or the part that cost the most points ("Calories off target", "Protein off
+  target", "Food quality low", "Carbs and fat off target"). A gain held for a clean week says "Next
+  rank needs a clean week". Today gets a reason only when its preview is a loss and its calories
+  are no longer below the zone. The `<  Sep 15 – Oct 14  >` row under the list names the page;
+  the screen opens on the first page.
 
 ---
 
-## 6. Daily RR Movement Mapping
+## 5. Sources
 
-- A lifestyle score of `60.0` represents neutral baseline (0 RR delta).
-- Scores above 60.0 generate positive RR up to `+25 RR` maximum per evaluation.
-- Scores below 60.0 generate negative RR down to `-25 RR` maximum per evaluation.
-- Mapping formula:
-
-$$\text{RR Delta} = \text{clamp}\left(\text{round}((\text{LifestyleScore} - 60) \times 0.6), -25, +25\right) \times \text{Dampening}$$
-
-### Examples:
-- LifestyleScore = 90: $\Delta \text{RR} = (90 - 60) \times 0.6 = +18$
-- LifestyleScore = 75: $\Delta \text{RR} = (75 - 60) \times 0.6 = +9$
-- LifestyleScore = 60: $\Delta \text{RR} = (60 - 60) \times 0.6 = 0$
-- LifestyleScore = 50: $\Delta \text{RR} = (50 - 60) \times 0.6 = -6$
-- LifestyleScore = 40: $\Delta \text{RR} = (40 - 60) \times 0.6 = -12$
-- LifestyleScore = 20: $\Delta \text{RR} = (20 - 60) \times 0.6 = -24$
-
----
-
-## 7. Water Hydration Exclusion Guarantee
-
-Water tracking data (`WaterRepository`, `WaterEntry`, hydration goals) is strictly isolated and never injected into the ranking domain or repository layer. Changes to water intake have zero effect on `LifestyleScore`, `RRDelta`, or `RankTier`.
-
----
-
-## 8. Scientific Evidence & Design Principles
-
-The MacroBase Lifestyle Ranking model is informed by published behavioral nutrition and digital health literature:
-1. **Consistency of Self-Monitoring**: Systematic reviews (Burke et al., 2011; Beleigoli et al., 2019; Berry et al., 2021) demonstrate that regular self-monitoring frequency is strongly correlated with dietary adherence and weight management success.
-2. **Calorie Adherence Range vs. Crash Dieting**: Evidence shows that sustainable caloric deficits (10–20%) lead to superior long-term adherence and fat loss compared to severe restriction (<50% of TDEE), which correlates with metabolic slowdown, binge-restrict cycles, and high dropout rates.
-3. **Calibrated Feedback Loops**: Clear, bidirectional feedback (earning RR for consistency/adherence, losing RR for significant overages) provides positive reinforcement without false praise for catastrophic surplus days.
-
-**Key Citations**:
-- Burke, L. E., Wang, J., & Sevick, M. A. (2011). *Self-monitoring in weight loss: a systematic review of the literature*. Journal of the American Dietetic Association, 111(1), 92–102.
-- Beleigoli, A. M., et al. (2019). *Web-Based Digital Health Interventions for Weight Loss and Lifestyle Habit Changes in Overweight and Obese Adults: Systematic Review and Meta-Analysis*. Journal of Medical Internet Research, 21(1), e11989.
-- Berry, R., et al. (2021). *Dietary self-monitoring and long-term weight management in digital health interventions: systematic review*. PMC8279441.
-- Patel, M. L., et al. (2021). *Evaluating adherence metrics in digital health weight-loss interventions*. Ann Behav Med, 55(11), 1083–1092.
-
+- Helms, Aragon & Fitschen (2014), *Evidence-based recommendations for natural bodybuilding contest
+  preparation*, JISSN 11:20: weight loss of about 0.5 – 1% of body weight a week.
+- Iraki, Fitschen, Espinar & Helms (2019), *Nutrition Recommendations for Bodybuilders in the
+  Off-Season*, Sports 7(7):154: a surplus of about 10 – 20% above maintenance.
+- Dietary Guidelines for Americans 2020 – 2025: added sugar and saturated fat under 10% of calories,
+  sodium under 2,300 mg a day. Dietary Guidelines 2010: fiber 14 g per 1,000 kcal.

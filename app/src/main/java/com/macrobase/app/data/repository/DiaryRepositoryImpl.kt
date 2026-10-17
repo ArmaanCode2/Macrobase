@@ -6,6 +6,7 @@ import com.macrobase.app.domain.model.CalendarDaySummary
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.Food
+import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.FoodSource
 import com.macrobase.app.domain.model.Meal
 import com.macrobase.app.domain.model.MealType
@@ -16,6 +17,7 @@ import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.repository.DailyMacroAggregation
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.GoalsRepository
+import com.macrobase.app.domain.repository.LoggedFoodNutrients
 import com.macrobase.app.domain.repository.PreferencesRepository
 import com.macrobase.app.feature.widget.MacroBaseWidgetProvider
 import android.content.Context
@@ -55,7 +57,8 @@ class DiaryRepositoryImpl(
         return combine(
             diaryDao.getEntriesForDate(epochDay),
             waterDao.getWaterIntakeForDate(epochDay),
-            goalsRepository.observeGoals(),
+            // The goal in force on that day, so a past day keeps the goal it was logged against (BUG-049)
+            goalsRepository.observeGoalsForDates(listOf(date)).map { it.single() },
             prefsFlow
         ) { entries, waterMl, goals, prefs ->
             val domainEntries = entries.map { it.toDomain() }
@@ -117,61 +120,57 @@ class DiaryRepositoryImpl(
         context?.let { MacroBaseWidgetProvider.updateAllWidgets(it) }
     }
 
+    // One statement, so a meal is deleted or moved whole and the screen redraws once
+    override suspend fun deleteEntries(entryIds: List<Long>) {
+        if (entryIds.isEmpty()) return
+        userDatabase.diaryDao().deleteEntries(entryIds)
+        context?.let { MacroBaseWidgetProvider.updateAllWidgets(it) }
+    }
+
+    override suspend fun moveEntries(entryIds: List<Long>, date: LocalDate, mealType: MealType) {
+        if (entryIds.isEmpty()) return
+        userDatabase.diaryDao().moveEntries(entryIds, date.toEpochDay(), mealType.name)
+        context?.let { MacroBaseWidgetProvider.updateAllWidgets(it) }
+    }
+
     override suspend fun getMonthlyAdherence(year: Int, month: Int): List<CalendarDaySummary> {
         val yearMonth = YearMonth.of(year, month)
         val startDate = yearMonth.atDay(1)
         val endDate = yearMonth.atEndOfMonth()
 
-        val goals = goalsRepository.getGoals()
         val summaries = userDatabase.diaryDao().getMonthlyCalorieSummaries(
             startDate.toEpochDay(),
             endDate.toEpochDay()
         ).associate { it.dateEpochDay to it.totalCal }
-
-        val result = mutableListOf<CalendarDaySummary>()
-        var curr = startDate
-        while (!curr.isAfter(endDate)) {
-            val ep = curr.toEpochDay()
-            val cal = summaries[ep] ?: 0.0
-            result.add(
-                CalendarDaySummary(
-                    date = curr,
-                    loggedCalories = cal,
-                    calorieGoal = goals.dailyCalorieGoal,
-                    hasLogs = cal > 0.0
-                )
-            )
-            curr = curr.plusDays(1)
-        }
-        return result
+        val days = daysOf(yearMonth)
+        return monthSummaries(days, summaries, goalsRepository.getGoalsForDates(days))
     }
+
+    private fun daysOf(month: YearMonth): List<LocalDate> = (1..month.lengthOfMonth()).map { month.atDay(it) }
+
+    /** One summary for every day, each judged against the goal in force that day (BUG-049). */
+    private fun monthSummaries(days: List<LocalDate>, caloriesByEpochDay: Map<Long, Double>, goals: List<Goal>) =
+        days.zip(goals) { day, goal ->
+            val cal = caloriesByEpochDay[day.toEpochDay()] ?: 0.0
+            CalendarDaySummary(
+                date = day,
+                loggedCalories = cal,
+                calorieGoal = goal.dailyCalorieGoal,
+                hasLogs = cal > 0.0
+            )
+        }
 
     override fun observeMonthlyAdherence(year: Int, month: Int): Flow<List<CalendarDaySummary>> {
         val yearMonth = YearMonth.of(year, month)
         val startDate = yearMonth.atDay(1)
         val endDate = yearMonth.atEndOfMonth()
 
+        val days = daysOf(yearMonth)
         return combine(
             userDatabase.diaryDao().observeMonthlyCalorieSummaries(startDate.toEpochDay(), endDate.toEpochDay()),
-            goalsRepository.observeGoals()
+            goalsRepository.observeGoalsForDates(days)
         ) { summariesList, goals ->
-            val summaries = summariesList.associate { it.dateEpochDay to it.totalCal }
-            val result = mutableListOf<CalendarDaySummary>()
-            var curr = startDate
-            while (!curr.isAfter(endDate)) {
-                val ep = curr.toEpochDay()
-                val cal = summaries[ep] ?: 0.0
-                result.add(
-                    CalendarDaySummary(
-                        date = curr,
-                        loggedCalories = cal,
-                        calorieGoal = goals.dailyCalorieGoal,
-                        hasLogs = cal > 0.0
-                    )
-                )
-                curr = curr.plusDays(1)
-            }
-            result
+            monthSummaries(days, summariesList.associate { it.dateEpochDay to it.totalCal }, goals)
         }
     }
 
@@ -191,6 +190,26 @@ class DiaryRepositoryImpl(
 
     override suspend fun getNutritionAggregations(startDate: LocalDate, endDate: LocalDate): List<DailyMacroAggregation> {
         return observeNutritionAggregations(startDate, endDate).first()
+    }
+
+    override fun observeLoggedFoodNutrients(startDate: LocalDate, endDate: LocalDate): Flow<List<LoggedFoodNutrients>> {
+        return userDatabase.diaryDao().observeEntryNutrients(startDate.toEpochDay(), endDate.toEpochDay()).map { rows ->
+            rows.map {
+                LoggedFoodNutrients(
+                    date = LocalDate.ofEpochDay(it.dateEpochDay),
+                    foodId = it.foodId,
+                    foodName = it.foodName,
+                    calories = it.loggedCalories,
+                    proteinGrams = it.loggedProtein,
+                    carbsGrams = it.loggedCarbs,
+                    fatGrams = it.loggedFat,
+                    fiberGrams = it.loggedFiber,
+                    sugarGrams = it.loggedSugar,
+                    saturatedFatGrams = it.loggedSaturatedFat,
+                    sodiumMg = it.loggedSodium
+                )
+            }
+        }
     }
 
     private fun DiaryEntry.toEntity() = DiaryEntryEntity(

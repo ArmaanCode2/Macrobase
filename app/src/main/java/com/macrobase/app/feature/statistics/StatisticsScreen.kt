@@ -56,10 +56,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.CalendarPerformanceConfig
 import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.core.designsystem.AppColors
+import com.macrobase.app.domain.model.rank.RankProfile
+import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
+import kotlinx.coroutines.flow.flowOf
 import com.macrobase.app.feature.calendar.CalendarViewModel
 import com.macrobase.app.feature.calendar.FoodLoggingCalendar
 import org.koin.androidx.compose.koinViewModel
@@ -73,10 +77,12 @@ import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.WeightStatistics
+import com.macrobase.app.domain.model.windowStart
 import com.macrobase.app.domain.repository.PreferencesRepository
 import com.macrobase.app.domain.usecase.GetStatisticsUseCase
 import com.macrobase.app.feature.weight.WeightLineGraph
 import com.macrobase.app.feature.weight.WeightTimeInterval
+import com.macrobase.app.feature.weight.dateRange
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -88,13 +94,25 @@ import kotlinx.coroutines.flow.stateIn
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 
-enum class ConsistencyInterval(val label: String, val days: Long) {
-    DAYS_30("30 Days", 30),
-    DAYS_90("90 Days", 90),
-    MONTHS_6("6 Months", 180),
-    YEAR_1("1 Year", 365)
+enum class ConsistencyInterval(val label: String) {
+    DAYS_30("30 Days"),
+    DAYS_90("90 Days"),
+    MONTHS_6("6 Months"),
+    YEAR_1("1 Year");
+
+    /**
+     * The first day of the window ending [today]. "6 Months" and "1 Year" are calendar months
+     * and years, the same span as on the weight tab, not 180 and 365 days.
+     */
+    fun startDate(today: LocalDate): LocalDate = when (this) {
+        DAYS_30 -> windowStart(today, 30)
+        DAYS_90 -> windowStart(today, 90)
+        MONTHS_6 -> WeightTimeInterval.LAST_6_MONTHS.dateRange(today, today, today).first
+        YEAR_1 -> WeightTimeInterval.ONE_YEAR.dateRange(today, today, today).first
+    }
 }
 
 enum class MacroInterval(val label: String, val days: Long) {
@@ -107,7 +125,7 @@ data class StatisticsUiState(
     val selectedTab: Int = 0,
     // Weight Section
     val weightInterval: WeightTimeInterval = WeightTimeInterval.LAST_30_DAYS,
-    val weightFromDate: LocalDate = LocalDate.now().minusDays(30),
+    val weightFromDate: LocalDate = windowStart(LocalDate.now(), 30),
     val weightToDate: LocalDate = LocalDate.now(),
     val weightStats: WeightStatistics? = null,
     val unitSystem: UnitSystem = UnitSystem.METRIC,
@@ -124,7 +142,9 @@ data class StatisticsUiState(
 class StatisticsViewModel(
     private val getStatisticsUseCase: GetStatisticsUseCase,
     private val preferencesRepository: PreferencesRepository,
-    private val clock: Clock = DeviceClock
+    private val clock: Clock = DeviceClock,
+    /** Null leaves the Rank History tab empty. */
+    getRankProfileUseCase: GetRankProfileUseCase? = null
 ) : ViewModel() {
 
     private val _selectedTab = MutableStateFlow(0)
@@ -133,7 +153,7 @@ class StatisticsViewModel(
     private val _weightInterval = MutableStateFlow(WeightTimeInterval.LAST_30_DAYS)
     val weightInterval: StateFlow<WeightTimeInterval> = _weightInterval.asStateFlow()
 
-    private val _weightCustomFrom = MutableStateFlow(LocalDate.now(clock).minusDays(30))
+    private val _weightCustomFrom = MutableStateFlow(windowStart(LocalDate.now(clock), 30))
     private val _weightCustomTo = MutableStateFlow(LocalDate.now(clock))
 
     private val _consistencyInterval = MutableStateFlow(ConsistencyInterval.DAYS_30)
@@ -148,10 +168,14 @@ class StatisticsViewModel(
     ) { (tab, wInt, wFrom), (wTo, cInt, mInt) ->
         val (weightFrom, weightTo) = calculateWeightDateRange(wInt, wFrom, wTo)
         val today = LocalDate.now(clock)
-        val cFrom = today.minusDays(cInt.days)
-        val mFrom = today.minusDays(mInt.days)
+        // "30 Days" is today and the 29 before it, not 31 days (BUG-033)
+        val cFrom = cInt.startDate(today)
+        // Averages cover the days that have ended, so a half-eaten today does not pull them
+        // down every morning
+        val lastEndedDay = today.minusDays(1)
+        val mFrom = windowStart(lastEndedDay, mInt.days)
 
-        StatsParams(tab, wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, today)
+        StatsParams(tab, wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
     }.flatMapLatest { p ->
         combine(
             getStatisticsUseCase.observeWeightStatistics(p.weightFrom, p.weightTo),
@@ -196,19 +220,31 @@ class StatisticsViewModel(
         interval: WeightTimeInterval,
         customFrom: LocalDate,
         customTo: LocalDate
-    ): Pair<LocalDate, LocalDate> {
-        val today = LocalDate.now(clock)
-        return when (interval) {
-            WeightTimeInterval.LAST_30_DAYS -> today.minusDays(30) to today
-            WeightTimeInterval.LAST_3_MONTHS -> today.minusMonths(3) to today
-            WeightTimeInterval.LAST_6_MONTHS -> today.minusMonths(6) to today
-            WeightTimeInterval.ONE_YEAR -> today.minusYears(1) to today
-            WeightTimeInterval.ALL_TIME -> LocalDate.of(2000, 1, 1) to today
-            WeightTimeInterval.CUSTOM -> {
-                val from = if (customFrom.isAfter(customTo)) customTo else customFrom
-                from to customTo
-            }
+    ): Pair<LocalDate, LocalDate> = interval.dateRange(LocalDate.now(clock), customFrom, customTo)
+
+    private val _rankInterval = MutableStateFlow(RankHistoryInterval.DAYS_30)
+
+    /**
+     * The Rank History tab. Building the rank replays the whole diary, so it runs only while the
+     * tab collects this.
+     */
+    val rankHistory: StateFlow<RankHistoryUiState> = combine(
+        getRankProfileUseCase?.invoke() ?: flowOf<RankProfile?>(null),
+        _rankInterval
+    ) { profile, interval ->
+        if (profile == null) {
+            RankHistoryUiState(interval = interval, isLoading = false)
+        } else {
+            rankHistoryState(profile, interval, LocalDate.now(clock))
         }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = RankHistoryUiState()
+    )
+
+    fun onSelectRankInterval(interval: RankHistoryInterval) {
+        _rankInterval.value = interval
     }
 
     fun onSelectTab(index: Int) {
@@ -241,9 +277,10 @@ fun StatisticsScreen(
     onDateClick: (LocalDate) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val calendarUiState by calendarViewModel.uiState.collectAsState()
-    val tabs = listOf("Calendar", "Weight Stats", "Nutrition Consistency", "Macro Averages")
+    // Collected only while visible, so coming back after midnight reads the new day (BUG-033)
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val calendarUiState by calendarViewModel.uiState.collectAsStateWithLifecycle()
+    val tabs = listOf("Calendar", "Weight Stats", "Nutrition Consistency", "Macro Averages", "Rank History")
 
     Column(
         modifier = modifier
@@ -291,6 +328,7 @@ fun StatisticsScreen(
             1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
             2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
             3 -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+            4 -> RankHistoryTabRoute(viewModel = viewModel)
         }
     }
 }
@@ -425,7 +463,7 @@ private fun WeightStatsTab(
                 val currentDisplay = formatWeightValue(stats?.latestWeightKg, isImperial)
                 val deltaVal = stats?.deltaWeightKg
                 val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
-                val percentDisplay = stats?.percentageChange?.let { "(${String.format("%.1f", abs(it))}%)" } ?: ""
+                val percentDisplay = stats?.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
 
                 val changeColor = if (deltaVal != null) {
                     if (deltaVal <= 0.0) Color(0xFF00C853) else AppColors.ProgressOver
@@ -537,7 +575,7 @@ private fun NutritionConsistencyTab(
         ) {
             Column(modifier = Modifier.padding(AppSpacing.lg)) {
                 Text(
-                    text = "${uiState.consistencyInterval.days}-Day Logging Consistency",
+                    text = "Logging Consistency (${uiState.consistencyInterval.label})",
                     style = AppTypography.Header2
                 )
                 Spacer(modifier = Modifier.height(AppSpacing.md))
@@ -580,7 +618,8 @@ private fun NutritionConsistencyTab(
                         ) {
                             week.cells.forEach { cell ->
                                 if (cell != null) {
-                                    val cellColor = if (cell.isFuture) {
+                                    // An unlogged today is not a missed day yet, so it looks like one to come
+                                    val cellColor = if (cell.isFuture || !cell.isEligible) {
                                         AppColors.SurfaceAlt
                                     } else {
                                         CalendarPerformanceConfig.getColorForCategory(cell.category)
@@ -660,6 +699,9 @@ private fun NutritionConsistencyTab(
                 Column {
                     if (cell.isFuture) {
                         Text("Future date (not yet logged)", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                    } else if (cell.caloriesLogged <= 0.0 && !cell.isEligible) {
+                        // Today, nothing logged yet: not counted as a missed day (BUG-032)
+                        Text("Nothing logged yet today.", style = AppTypography.Body2, color = AppColors.TextSecondary)
                     } else if (cell.caloriesLogged <= 0.0) {
                         Text("No food logged on this day.", style = AppTypography.Body2, color = AppColors.TextSecondary)
                         Spacer(modifier = Modifier.height(AppSpacing.xs))
@@ -731,7 +773,7 @@ private fun MacroAveragesTab(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Log meals in this period to see average macro distribution.",
+                        text = "Log meals in this period to see average macro distribution. Today counts once it ends.",
                         style = AppTypography.Body2,
                         color = AppColors.TextMuted
                     )
@@ -748,7 +790,7 @@ private fun MacroAveragesTab(
                     Text(text = "Daily Intake Averages", style = AppTypography.Header2)
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
-                        text = "Based on ${stats.loggedDaysCount} logged days",
+                        text = "Based on ${stats.loggedDaysCount} logged days; today counts once it ends",
                         style = AppTypography.Caption,
                         color = AppColors.TextSecondary
                     )
@@ -767,15 +809,15 @@ private fun MacroAveragesTab(
                             Text(text = "kcal / day", style = AppTypography.Caption, color = AppColors.TextSecondary)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format("%.1f", stats.averageProteinGrams)}g", style = AppTypography.Header2, color = AppColors.MacroProtein)
+                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageProteinGrams)}g", style = AppTypography.Header2, color = AppColors.MacroProtein)
                             Text(text = "Protein", style = AppTypography.Caption, color = AppColors.TextSecondary)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format("%.1f", stats.averageCarbsGrams)}g", style = AppTypography.Header2, color = AppColors.MacroCarbs)
+                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageCarbsGrams)}g", style = AppTypography.Header2, color = AppColors.MacroCarbs)
                             Text(text = "Carbs", style = AppTypography.Caption, color = AppColors.TextSecondary)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format("%.1f", stats.averageFatGrams)}g", style = AppTypography.Header2, color = AppColors.MacroFat)
+                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageFatGrams)}g", style = AppTypography.Header2, color = AppColors.MacroFat)
                             Text(text = "Fat", style = AppTypography.Caption, color = AppColors.TextSecondary)
                         }
                     }
@@ -892,7 +934,7 @@ private fun MacroComparisonRow(
             Text(text = name, style = AppTypography.Body2)
         }
         Text(
-            text = "${String.format("%.1f", actualPercent)}% (Target: ${String.format("%.0f", targetPercent)}%)",
+            text = "${String.format(Locale.US, "%.1f", actualPercent)}% (Target: ${String.format(Locale.US, "%.0f", targetPercent)}%)",
             style = AppTypography.Caption,
             color = AppColors.TextSecondary
         )
@@ -903,13 +945,13 @@ private fun formatWeightValue(kg: Double?, isImperial: Boolean): String {
     if (kg == null || kg <= 0.0) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(kg) else kg
     val unit = if (isImperial) "lb" else "kg"
-    return "${String.format("%.1f", v)} $unit"
+    return "${String.format(Locale.US, "%.1f", v)} $unit"
 }
 
 private fun formatWeightDelta(deltaKg: Double?, isImperial: Boolean): String {
     if (deltaKg == null) return "--"
     val v = if (isImperial) UnitConversions.kgToLbs(deltaKg) else deltaKg
     val unit = if (isImperial) "lb" else "kg"
-    val arrow = if (v < 0) "↓ " else if (v > 0) "↑ " else ""
-    return "$arrow${String.format("%.1f", abs(v))} $unit"
+    val arrow = if (v < 0) "\u2193 " else if (v > 0) "\u2191 " else ""
+    return "$arrow${String.format(Locale.US, "%.1f", abs(v))} $unit"
 }
