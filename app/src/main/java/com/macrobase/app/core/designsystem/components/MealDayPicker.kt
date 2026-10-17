@@ -125,44 +125,62 @@ fun MealAndDayPicker(
     }
 
     if (showDatePicker) {
-        val initialMillis = (selectedDate ?: today).atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        onDateSelected(Instant.ofEpochMilli(millis).atZone(ZoneId.of("UTC")).toLocalDate())
-                    }
-                    showDatePicker = false
-                }) { Text("OK", color = AppColors.Primary) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel", color = AppColors.Primary) }
-            },
-            shape = AppShapes.Dialog,
-            colors = DatePickerDefaults.colors(containerColor = AppColors.Surface)
-        ) {
-            DatePicker(
-                state = datePickerState,
-                colors = DatePickerDefaults.colors(
-                    containerColor = AppColors.Surface,
-                    titleContentColor = AppColors.TextPrimary,
-                    headlineContentColor = AppColors.TextPrimary,
-                    weekdayContentColor = AppColors.TextSecondary,
-                    subheadContentColor = AppColors.TextPrimary,
-                    yearContentColor = AppColors.TextPrimary,
-                    currentYearContentColor = AppColors.Primary,
-                    selectedYearContentColor = AppColors.OnPrimary,
-                    selectedYearContainerColor = AppColors.Primary,
-                    dayContentColor = AppColors.TextPrimary,
-                    selectedDayContentColor = AppColors.OnPrimary,
-                    selectedDayContainerColor = AppColors.Primary,
-                    todayDateBorderColor = AppColors.Primary,
-                    todayContentColor = AppColors.Primary
-                )
+        MbDatePickerDialog(
+            initialDate = selectedDate ?: today,
+            onDateSelected = onDateSelected,
+            onDismiss = { showDatePicker = false }
+        )
+    }
+}
+
+/**
+ * The app's date picker dialog in the design's colours. Any day can be picked, as before;
+ * [onDateSelected] gets the chosen day and the dialog closes.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MbDatePickerDialog(
+    initialDate: LocalDate,
+    onDateSelected: (LocalDate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val initialMillis = initialDate.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                datePickerState.selectedDateMillis?.let { millis ->
+                    onDateSelected(Instant.ofEpochMilli(millis).atZone(ZoneId.of("UTC")).toLocalDate())
+                }
+                onDismiss()
+            }) { Text("OK", color = AppColors.Primary) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = AppColors.Primary) }
+        },
+        shape = AppShapes.Dialog,
+        colors = DatePickerDefaults.colors(containerColor = AppColors.Surface)
+    ) {
+        DatePicker(
+            state = datePickerState,
+            colors = DatePickerDefaults.colors(
+                containerColor = AppColors.Surface,
+                titleContentColor = AppColors.TextPrimary,
+                headlineContentColor = AppColors.TextPrimary,
+                weekdayContentColor = AppColors.TextSecondary,
+                subheadContentColor = AppColors.TextPrimary,
+                yearContentColor = AppColors.TextPrimary,
+                currentYearContentColor = AppColors.Primary,
+                selectedYearContentColor = AppColors.OnPrimary,
+                selectedYearContainerColor = AppColors.Primary,
+                dayContentColor = AppColors.TextPrimary,
+                selectedDayContentColor = AppColors.OnPrimary,
+                selectedDayContainerColor = AppColors.Primary,
+                todayDateBorderColor = AppColors.Primary,
+                todayContentColor = AppColors.Primary
             )
-        }
+        )
     }
 }
 

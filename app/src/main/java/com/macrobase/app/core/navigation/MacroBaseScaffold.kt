@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.Composable
@@ -46,8 +44,6 @@ import com.macrobase.app.core.designsystem.components.MbAura
 import com.macrobase.app.core.designsystem.components.MbBasketButton
 import com.macrobase.app.core.designsystem.components.MbFab
 import com.macrobase.app.core.designsystem.components.MbHeader
-import com.macrobase.app.core.designsystem.components.MbScanButton
-import com.macrobase.app.core.designsystem.components.MbSearchPill
 import com.macrobase.app.core.designsystem.components.MbViewSwitch
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -87,7 +83,6 @@ fun MacroBaseScaffold(
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val dockInset = if (isTabRoot) Dimensions.ContentBottomPadding + navBarBottom else 0.dp
 
-    val openSearch: () -> Unit = { navController.navigate(Screen.Search.createRoute()) }
     val openScanner: () -> Unit = {
         // The scan fills a new custom food form: the form opens first, so the result lands in it
         navController.navigate(Screen.EditCustomFood.createRoute())
@@ -105,14 +100,8 @@ fun MacroBaseScaffold(
             Scaffold(
                 topBar = {
                     when {
-                        // Immersive scanner and Food Detail draw their own top
-                        isScanner || isFoodDetail -> Unit
-                        routeBase == Screen.Home.route.routeBase() -> HomeTopBar(
-                            basketCount = basketItems.size,
-                            onSearch = openSearch,
-                            onScan = openScanner,
-                            onBasket = openBasket
-                        )
+                        // Home, the immersive scanner and Food Detail draw their own top
+                        isScanner || isFoodDetail || routeBase == Screen.Home.route.routeBase() -> Unit
                         isTabRoot -> MbHeader(
                             title = tabTitle(Screen.bottomNavScreens[tabIndex]),
                             scrolled = chrome.contentScrolled
@@ -222,24 +211,6 @@ private fun BoxScope.Dock(
             selectedIndex = tabIndex,
             onSelect = onTab
         )
-    }
-}
-
-/** Home's top until Home draws its own header: the search bar with the scan button, and the basket. */
-@Composable
-private fun HomeTopBar(basketCount: Int, onSearch: () -> Unit, onScan: () -> Unit, onBasket: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        MbSearchPill(placeholder = "Search foods to log\u2026", onClick = onSearch, modifier = Modifier.weight(1f)) {
-            MbScanButton(onClick = onScan)
-        }
-        MbBasketButton(count = basketCount, onClick = onBasket)
     }
 }
 

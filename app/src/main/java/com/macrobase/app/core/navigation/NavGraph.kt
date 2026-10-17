@@ -86,8 +86,23 @@ fun NavGraph(
                 }
             }
 
+            val basketViewModel: com.macrobase.app.feature.basket.BasketViewModel = koinViewModel()
+            val basketItems by basketViewModel.items.collectAsState()
+
             HomeScreen(
                 viewModel = homeViewModel,
+                basketCount = basketItems.size,
+                onOpenSearch = { navController.navigate(Screen.Search.createRoute()) },
+                onScanLabel = {
+                    // The scan fills a new custom food form: the form opens first, so the result lands in it
+                    navController.navigate(Screen.EditCustomFood.createRoute())
+                    navController.navigate(Screen.NutritionLabelScanner.route)
+                },
+                onOpenBasket = { navController.navigate(Screen.Basket.route) },
+                onOpenProfile = { navController.navigateToTopLevel(Screen.Preferences, homeViewModel) },
+                onLogWeight = { dateEpochDay ->
+                    navController.navigate(Screen.Weight.createRoute(dateEpochDay, openLog = true))
+                },
                 onNavigateToSearch = { mealType, dateEpochDay ->
                     navController.navigate(Screen.Search.createRoute(mealType.name, dateEpochDay))
                 },

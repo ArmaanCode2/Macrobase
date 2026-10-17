@@ -55,7 +55,8 @@ fun Modifier.topEdgeBorder(color: Color, radius: Dp): Modifier = drawWithContent
 /**
  * C10 Bottom sheet: #0A0D0B with 28 dp top corners and an Edge-2 top line, a grab handle, the title
  * at the top left with a close "X" at the top right, the content, then an optional footer row of
- * actions. [onDismiss] runs after the sheet has slid away.
+ * actions. [onDismiss] runs after the sheet has slid away. [onClose] replaces what the close button
+ * does, for a sheet with steps that goes back a step instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +66,7 @@ fun MbSheet(
     title: String? = null,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     scrollable: Boolean = true,
+    onClose: (() -> Unit)? = null,
     footer: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -108,7 +110,7 @@ fun MbSheet(
                             color = AppColors.TextPrimary,
                             modifier = Modifier.weight(1f).semantics { heading() }
                         )
-                        MbIconButton(icon = Ph.X.light, contentDescription = "Close", onClick = close, tint = AppColors.TextSecondary)
+                        MbIconButton(icon = Ph.X.light, contentDescription = "Close", onClick = onClose ?: close, tint = AppColors.TextSecondary)
                     }
                 }
                 content()
