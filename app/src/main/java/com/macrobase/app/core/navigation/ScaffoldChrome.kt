@@ -6,46 +6,74 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavBackStackEntry
 
-/** The views a tab root shows in the dock's view switch. [owner] is the screen that declared them. */
+/**
+ * The views a tab root shows in the dock's view switch. [owner] is the screen that declared them and
+ * [screen] the id of its back stack entry (null outside navigation).
+ */
 class DockViews(
     val owner: Any,
     val items: List<String>,
     val selectedIndex: Int,
-    val onSelect: (Int) -> Unit
+    val onSelect: (Int) -> Unit,
+    val screen: String? = null
 )
 
 /**
- * What the screen on top tells the scaffold: whether its content has scrolled under the header (the
- * header then gets its band), and the views for the dock's switch. The screen owns its state; the
- * scaffold only shows it and forwards taps. Each value remembers its owner, so the screen leaving
- * during a transition never clears what the arriving screen set.
+ * What the screens tell the scaffold: whether their content has scrolled under the header (the header
+ * then gets its band), and the views for the dock's switch. The screen owns its state; the scaffold
+ * only shows it and forwards taps.
+ *
+ * Each screen writes only its own slot, so a screen still on its way out can neither overwrite nor
+ * clear what the arriving screen declared. Each slot carries its screen's back stack entry id, and
+ * the scaffold shows only the current entry's, so a leaving screen's switch and band go the moment
+ * the navigation starts. Ids, not entry objects: navigation copies an entry when a tab is tapped
+ * again or a screen is restored.
  */
 @Stable
 class ScaffoldChrome {
-    private var scrolledOwner by mutableStateOf<Any?>(null)
+    private val dockSlots = mutableStateMapOf<Any, DockViews>()
 
-    val contentScrolled: Boolean get() = scrolledOwner != null
+    /** The screens scrolled under the header, each with its entry id; a screen is here only while scrolled. */
+    private val scrolledSlots = mutableStateMapOf<Any, String?>()
 
-    var dockViews by mutableStateOf<DockViews?>(null)
-        internal set
+    /** Whether the screen of back stack entry [current] has scrolled under the header. */
+    fun isScrolled(current: String?): Boolean = scrolledSlots.values.any { it.isShownFor(current) }
 
-    internal fun setScrolled(owner: Any, scrolled: Boolean) {
-        if (scrolled) scrolledOwner = owner else if (scrolledOwner === owner) scrolledOwner = null
+    /** The dock views of the screen of back stack entry [current]. */
+    fun dockViewsFor(current: String?): DockViews? = dockSlots.values.firstOrNull { it.screen.isShownFor(current) }
+
+    internal fun setDockViews(views: DockViews) {
+        val now = dockSlots[views.owner]
+        if (now == null || now.items != views.items || now.selectedIndex != views.selectedIndex || now.screen != views.screen) {
+            dockSlots[views.owner] = views
+        }
+    }
+
+    internal fun setScrolled(owner: Any, screen: String?, scrolled: Boolean) {
+        if (!scrolled) {
+            scrolledSlots.remove(owner)
+        } else if (!scrolledSlots.containsKey(owner) || scrolledSlots[owner] != screen) {
+            scrolledSlots[owner] = screen
+        }
     }
 
     internal fun clear(owner: Any) {
-        if (scrolledOwner === owner) scrolledOwner = null
-        if (dockViews?.owner === owner) dockViews = null
+        dockSlots.remove(owner)
+        scrolledSlots.remove(owner)
     }
 }
+
+/** A value set from back stack entry [this] shows while that entry is the current one; outside navigation, always. */
+private fun String?.isShownFor(current: String?): Boolean = this == null || this == current
 
 val LocalScaffoldChrome = staticCompositionLocalOf { ScaffoldChrome() }
 
@@ -55,12 +83,17 @@ val LocalScaffoldChrome = staticCompositionLocalOf { ScaffoldChrome() }
  */
 val LocalDockInset = compositionLocalOf<Dp> { 0.dp }
 
+/** The back stack entry id of the screen this is called from, or null outside navigation. */
+@Composable
+private fun currentScreenId(): String? = (LocalLifecycleOwner.current as? NavBackStackEntry)?.id
+
 /** Tells the scaffold whether this screen's content has scrolled under the pinned header. */
 @Composable
 fun ReportContentScrolled(scrolled: Boolean) {
     val chrome = LocalScaffoldChrome.current
     val owner = remember { Any() }
-    SideEffect { chrome.setScrolled(owner, scrolled) }
+    val screen = currentScreenId()
+    SideEffect { chrome.setScrolled(owner, screen, scrolled) }
     DisposableEffect(chrome) { onDispose { chrome.clear(owner) } }
 }
 
@@ -69,13 +102,9 @@ fun ReportContentScrolled(scrolled: Boolean) {
 fun DeclareDockViews(items: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
     val chrome = LocalScaffoldChrome.current
     val owner = remember { Any() }
+    val screen = currentScreenId()
     val latestOnSelect by rememberUpdatedState(onSelect)
     val forward = remember { { index: Int -> latestOnSelect(index) } }
-    SideEffect {
-        val current = chrome.dockViews
-        if (current?.owner !== owner || current.items != items || current.selectedIndex != selectedIndex) {
-            chrome.dockViews = DockViews(owner, items, selectedIndex, forward)
-        }
-    }
+    SideEffect { chrome.setDockViews(DockViews(owner, items, selectedIndex, forward, screen)) }
     DisposableEffect(chrome) { onDispose { chrome.clear(owner) } }
 }

@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,13 +71,18 @@ fun MbBottomBar(
             val others = (tabs.size - 1).coerceAtLeast(1)
             val inactiveWidth = (maxWidth - Dimensions.NavActiveWidth - TabGap * others) / others
             val active = selectedIndex.coerceAtLeast(0)
-            val capsuleX by animateDpAsState(
+            val capsuleX = animateDpAsState(
                 targetValue = (inactiveWidth + TabGap) * active,
                 animationSpec = if (reducedMotion) snap() else tween(MbMotion.CapsuleMs, easing = MbMotion.Ease),
                 label = "barCapsule"
             )
             if (selectedIndex >= 0) {
-                DockCapsule(modifier = Modifier.width(Dimensions.NavActiveWidth).offset(x = capsuleX))
+                // Read while placing, so the slide moves the capsule without recomposing the bar
+                DockCapsule(
+                    modifier = Modifier
+                        .width(Dimensions.NavActiveWidth)
+                        .offset { IntOffset(capsuleX.value.roundToPx(), 0) }
+                )
             }
             Row(
                 modifier = Modifier.fillMaxSize().selectableGroup(),

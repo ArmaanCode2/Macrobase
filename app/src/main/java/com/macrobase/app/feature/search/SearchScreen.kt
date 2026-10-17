@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.search
 
+import androidx.compose.ui.draw.drawBehind
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbSearchPillFrame
 import androidx.compose.animation.core.tween
@@ -325,7 +326,8 @@ private fun SearchHeader(
     onClear: () -> Unit,
     onBack: () -> Unit
 ) {
-    val band by animateColorAsState(
+    // Read while drawing, so the band fades in without recomposing the search field
+    val band = animateColorAsState(
         targetValue = if (scrolled) AppColors.HeaderBand else Color.Transparent,
         animationSpec = tween(200),
         label = "searchBand"
@@ -333,7 +335,7 @@ private fun SearchHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(band)
+            .drawBehind { drawRect(band.value) }
             .padding(start = 10.dp, end = AppSpacing.screenMargin, top = 6.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)

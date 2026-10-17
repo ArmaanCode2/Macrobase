@@ -1,5 +1,6 @@
 package com.macrobase.app.core.designsystem.components
 
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -25,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,12 +104,12 @@ private fun HalvesSwitch(items: List<String>, selectedIndex: Int, onSelect: (Int
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val count = items.size.coerceAtLeast(1)
         val itemWidth = (maxWidth - ItemGap * (count - 1)) / count
-        val capsuleX by animateDpAsState(
+        val capsuleX = animateDpAsState(
             targetValue = (itemWidth + ItemGap) * selectedIndex,
             animationSpec = if (reducedMotion) snap() else tween(MbMotion.CapsuleMs, easing = MbMotion.Ease),
             label = "switchCapsule"
         )
-        DockCapsule(modifier = Modifier.width(itemWidth).offset(x = capsuleX))
+        DockCapsule(modifier = Modifier.width(itemWidth).offset { IntOffset(capsuleX.value.roundToPx(), 0) })
         Row(
             modifier = Modifier.fillMaxSize().selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(ItemGap)
@@ -143,7 +143,7 @@ private fun ScrollingSwitch(items: List<String>, selectedIndex: Int, onSelect: (
             else scrollState.animateScrollTo(target, tween(MbMotion.CapsuleMs, easing = MbMotion.Ease))
         }
 
-        val capsuleX by animateDpAsState(
+        val capsuleX = animateDpAsState(
             targetValue = (itemWidth + ItemGap) * selectedIndex,
             animationSpec = if (reducedMotion) snap() else tween(MbMotion.CapsuleMs, easing = MbMotion.Ease),
             label = "switchCapsule"
@@ -156,7 +156,7 @@ private fun ScrollingSwitch(items: List<String>, selectedIndex: Int, onSelect: (
                 .horizontalScroll(scrollState, flingBehavior = fling)
         ) {
             Box(modifier = Modifier.fillMaxHeight()) {
-                DockCapsule(modifier = Modifier.width(itemWidth).offset(x = capsuleX))
+                DockCapsule(modifier = Modifier.width(itemWidth).offset { IntOffset(capsuleX.value.roundToPx(), 0) })
                 Row(
                     modifier = Modifier.fillMaxHeight().selectableGroup(),
                     horizontalArrangement = Arrangement.spacedBy(ItemGap)

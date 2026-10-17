@@ -3,7 +3,6 @@ package com.macrobase.app.core.designsystem.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -51,12 +50,13 @@ fun MbHeader(
     applyStatusBarInset: Boolean = true,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    val band by animateColorAsState(
+    // Read while drawing, so the band fades in without recomposing the header
+    val band = animateColorAsState(
         targetValue = if (scrolled) AppColors.HeaderBand else Color.Transparent,
         animationSpec = tween(200),
         label = "headerBand"
     )
-    val line by animateColorAsState(
+    val line = animateColorAsState(
         targetValue = if (scrolled) AppColors.HeaderBandLine else Color.Transparent,
         animationSpec = tween(200),
         label = "headerLine"
@@ -64,10 +64,10 @@ fun MbHeader(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(band)
             .drawBehind {
+                drawRect(band.value)
                 val stroke = 1.dp.toPx()
-                drawLine(line, Offset(0f, size.height - stroke / 2f), Offset(size.width, size.height - stroke / 2f), stroke)
+                drawLine(line.value, Offset(0f, size.height - stroke / 2f), Offset(size.width, size.height - stroke / 2f), stroke)
             }
             .then(if (applyStatusBarInset) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
             .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 8.dp)

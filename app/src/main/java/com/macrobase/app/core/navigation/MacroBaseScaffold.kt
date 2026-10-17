@@ -55,6 +55,10 @@ import org.koin.androidx.compose.koinViewModel
 /** The route without its arguments, such as "home" for "home?dateEpochDay={dateEpochDay}". */
 private fun String.routeBase(): String = substringBefore("?").substringBefore("/")
 
+/** Whether [route] is one of the five tab roots, whatever its arguments. */
+internal fun isTabRootRoute(route: String?): Boolean =
+    route != null && Screen.bottomNavScreens.any { it.route.routeBase() == route.routeBase() }
+
 /**
  * The app's frame: the aura behind the top of every screen except the scanner, a pinned header,
  * and on the five tab roots the bottom dock (view switch and "+" button above the bar). Pushed
@@ -110,7 +114,7 @@ fun MacroBaseScaffold(
                             routeBase == Screen.Rank.route.routeBase() -> Unit
                         isTabRoot -> MbHeader(
                             title = tabTitle(Screen.bottomNavScreens[tabIndex]),
-                            scrolled = chrome.contentScrolled
+                            scrolled = chrome.isScrolled(navBackStackEntry?.id)
                         ) {
                             if (Screen.bottomNavScreens[tabIndex] == Screen.CustomFoods) {
                                 MbBasketButton(count = basketItems.size, onClick = openBasket)
@@ -119,7 +123,7 @@ fun MacroBaseScaffold(
                         else -> MbHeader(
                             title = getScreenTitle(currentRoute),
                             onBack = { navController.popBackStack() },
-                            scrolled = chrome.contentScrolled
+                            scrolled = chrome.isScrolled(navBackStackEntry?.id)
                         ) {
                             if (routeBase == Screen.Basket.route.routeBase() && basketItems.isNotEmpty()) {
                                 Text(
@@ -148,7 +152,7 @@ fun MacroBaseScaffold(
             if (isTabRoot && !imeVisible) {
                 Dock(
                     tabIndex = tabIndex,
-                    dockViews = chrome.dockViews,
+                    dockViews = chrome.dockViewsFor(navBackStackEntry?.id),
                     navBarBottom = navBarBottom,
                     showFab = homeViewModel != null,
                     onTab = { index -> navController.navigateToTopLevel(Screen.bottomNavScreens[index], homeViewModel) },
