@@ -21,6 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -35,7 +37,8 @@ import com.macrobase.app.domain.model.Food
 import kotlin.math.roundToInt
 
 /**
- * Standard Full Width Hero Button matching UI_UX_SPECIFICATION.md
+ * Standard full-width hero button: the design's primary gradient pill with dark ink. A different
+ * [backgroundColor] draws a solid pill in that colour instead.
  */
 @Composable
 fun PrimaryButton(
@@ -45,23 +48,25 @@ fun PrimaryButton(
     enabled: Boolean = true,
     backgroundColor: Color = AppColors.Primary
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(Dimensions.ButtonHeight),
-        enabled = enabled,
-        shape = AppShapes.Button,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = backgroundColor,
-            disabledContainerColor = AppColors.TextDisabled
-        )
-    ) {
-        Text(
-            text = text,
-            style = AppTypography.Button,
-            color = if (enabled) AppColors.OnPrimary else AppColors.TextSecondary
-        )
+    if (backgroundColor == AppColors.Primary) {
+        MbButton(text = text, onClick = onClick, modifier = modifier.fillMaxWidth(), enabled = enabled)
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(Dimensions.ButtonHeightMentor)
+                .alpha(if (enabled) 1f else 0.42f)
+                .mbClickable(enabled = enabled, onClick = onClick)
+                .clip(AppShapes.Button)
+                .background(backgroundColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = AppTypography.Button,
+                color = if (backgroundColor.luminance() > 0.4f) AppColors.OnPrimary else AppColors.TextPrimary
+            )
+        }
     }
 }
 
