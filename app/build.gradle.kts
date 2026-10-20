@@ -47,7 +47,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 removes unused code and resources and optimises the rest; the startup profile
+            // (src/main/baseline-prof.txt) is compiled in. Names are kept (proguard-rules.pro)
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -59,6 +62,19 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isDebuggable = true
+        }
+        // The release app's speed, for trying out how the app feels: R8 and the startup profile as in
+        // release, but signed with the debug key and installed next to the real app as "MacroBase Fast"
+        // (com.macrobase.app.fast), with its own data. Debug builds run slower than what users get.
+        create("fast") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".fast"
+            versionNameSuffix = "-fast"
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            // Lets Android Studio's profiler and frame tools read it, as they can a debug build
+            isProfileable = true
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -310,6 +326,9 @@ dependencies {
 
     // Google ML Kit On-Device Text Recognition (Bundled offline model)
     implementation(libs.mlkit.text.recognition)
+
+    // Installs the startup profile, so a release install starts precompiled
+    implementation(libs.androidx.profileinstaller)
 
     // Testing
     testImplementation(libs.junit)
