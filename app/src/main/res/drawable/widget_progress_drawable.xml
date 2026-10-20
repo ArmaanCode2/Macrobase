@@ -3,14 +3,20 @@
     <item android:id="@android:id/background">
         <shape>
             <corners android:radius="6dp" />
-            <solid android:color="#BDD9C1" />
+            <solid android:color="#14FFFFFF" />
         </shape>
     </item>
     <item android:id="@android:id/progress">
         <clip>
             <shape>
                 <corners android:radius="6dp" />
-                <solid android:color="#1B5E20" />
+                <!-- The brand gradient, as on the app's calorie bar -->
+                <gradient
+                    android:angle="0"
+                    android:centerColor="#7FDC48"
+                    android:endColor="#D3F444"
+                    android:startColor="#35CE4F"
+                    android:type="linear" />
             </shape>
         </clip>
     </item>

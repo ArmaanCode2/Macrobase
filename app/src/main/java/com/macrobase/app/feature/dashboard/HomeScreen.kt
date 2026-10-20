@@ -1,5 +1,49 @@
 package com.macrobase.app.feature.dashboard
 
+import kotlin.math.abs
+import com.macrobase.app.core.designsystem.components.rememberReducedMotion
+import com.macrobase.app.core.designsystem.components.mbDockPill
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.SideEffect
+import com.macrobase.app.core.designsystem.components.rememberMbHaptics
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyColumn
+import kotlinx.coroutines.delay
+import com.macrobase.app.core.designsystem.components.mealLabel
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.innerTopHighlight
+import com.macrobase.app.core.designsystem.components.MbSheet
+import com.macrobase.app.core.designsystem.components.MbSearchPill
+import com.macrobase.app.core.designsystem.components.MbScanButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbMotion
+import com.macrobase.app.core.designsystem.components.MbMacroRing
+import com.macrobase.app.core.designsystem.components.MbIconCircle
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
+import com.macrobase.app.core.designsystem.components.MbBasketButton
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.AppBrushes
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.border
 import android.app.DatePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,10 +57,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -54,6 +96,7 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.core.designsystem.components.MacroProgressStrip
+import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.Meal
@@ -62,11 +105,23 @@ import com.macrobase.app.domain.usecase.DeleteDiaryEntryUseCase
 import com.macrobase.app.domain.usecase.GetDailyDiaryUseCase
 import com.macrobase.app.domain.usecase.GetFoodDetailsUseCase
 import com.macrobase.app.domain.usecase.MoveDiaryEntriesUseCase
+import com.macrobase.app.domain.usecase.AddWaterEntryUseCase
+import com.macrobase.app.domain.usecase.GetGoalsUseCase
+import com.macrobase.app.domain.repository.PreferencesRepository
+import com.macrobase.app.domain.model.Goal
+import com.macrobase.app.domain.model.UnitConversions
+import com.macrobase.app.domain.model.UnitSystem
+import com.macrobase.app.domain.model.UserPreferences
+import com.macrobase.app.core.config.NutritionStandardConfig
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -76,13 +131,13 @@ import com.macrobase.app.domain.model.WeightEntry
 import com.macrobase.app.domain.usecase.GetWeightForDateUseCase
 import java.time.Clock
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.Locale
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
@@ -99,6 +154,39 @@ import kotlin.math.roundToInt
 import com.macrobase.app.domain.model.MealConfiguration
 import androidx.compose.foundation.layout.defaultMinSize
 
+/**
+ * The meal to log to at [time] on the device clock: before 11:00 Breakfast, before 16:00 Lunch,
+ * otherwise Dinner. The "+" sheet starts on it.
+ */
+internal fun mealForTime(time: LocalTime): MealType = when {
+    time.isBefore(LocalTime.of(11, 0)) -> MealType.BREAKFAST
+    time.isBefore(LocalTime.of(16, 0)) -> MealType.LUNCH
+    else -> MealType.DINNER
+}
+
+/** What Home shows from the profile and goals: the greeting's first name, units and macro split. */
+data class HomeProfile(
+    val firstName: String = "",
+    val unitSystem: UnitSystem = UnitSystem.METRIC,
+    val proteinPercentage: Double = 25.0,
+    val carbPercentage: Double = 50.0,
+    val fatPercentage: Double = 25.0
+)
+
+/** Grams of protein, carbs and fat that [calorieGoal] allows at the profile's split, as Goal works them out. */
+internal fun macroTargetGrams(calorieGoal: Double, profile: HomeProfile): Triple<Double, Double, Double> {
+    if (calorieGoal <= 0.0) return Triple(0.0, 0.0, 0.0)
+    return Triple(
+        calorieGoal * (profile.proteinPercentage / 100.0) / NutritionStandardConfig.CALORIES_PER_GRAM_PROTEIN,
+        calorieGoal * (profile.carbPercentage / 100.0) / NutritionStandardConfig.CALORIES_PER_GRAM_CARB,
+        calorieGoal * (profile.fatPercentage / 100.0) / NutritionStandardConfig.CALORIES_PER_GRAM_FAT
+    )
+}
+
+/** The water Home's quick add logs: 250 mL, or 8 fl oz with imperial units (the Water screen's first amounts). */
+internal fun quickAddWaterMl(unitSystem: UnitSystem): Double =
+    if (unitSystem == UnitSystem.IMPERIAL) UnitConversions.flOzToMl(8.0) else 250.0
+
 /** A day total of a nutrient that may be unknown: "12.5g", or "-" when no entry states it. */
 internal fun formatOptionalTotal(value: Double?, unit: String): String =
     value?.let { "${String.format(Locale.US, "%.1f", it)}$unit" } ?: "-"
@@ -111,7 +199,10 @@ class HomeViewModel(
     private val getFoodDetailsUseCase: GetFoodDetailsUseCase? = null,
     private val getWeightForDateUseCase: GetWeightForDateUseCase? = null,
     private val clock: Clock = DeviceClock,
-    private val moveDiaryEntriesUseCase: MoveDiaryEntriesUseCase? = null
+    private val moveDiaryEntriesUseCase: MoveDiaryEntriesUseCase? = null,
+    private val preferencesRepository: PreferencesRepository? = null,
+    private val getGoalsUseCase: GetGoalsUseCase? = null,
+    private val addWaterEntryUseCase: AddWaterEntryUseCase? = null
 ) : ViewModel() {
 
     private val _selectedDate = MutableStateFlow(LocalDate.now(clock))
@@ -135,6 +226,38 @@ class HomeViewModel(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = null
     )
+
+    /** The greeting's first name, the unit system and the macro split for the rings. */
+    val homeProfile: StateFlow<HomeProfile> = combine(
+        preferencesRepository?.observePreferences() ?: flowOf(UserPreferences()),
+        getGoalsUseCase?.invoke() ?: flowOf(Goal())
+    ) { prefs, goal ->
+        HomeProfile(
+            firstName = prefs.firstName.trim(),
+            unitSystem = prefs.unitSystem,
+            proteinPercentage = goal.proteinPercentage,
+            carbPercentage = goal.carbPercentage,
+            fatPercentage = goal.fatPercentage
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = HomeProfile()
+    )
+
+    /**
+     * Logs the quick-add amount of water to the day on screen, through the same use case as the
+     * Water screen. [onAdded] runs once it is saved.
+     */
+    fun quickAddWater(onAdded: () -> Unit = {}) {
+        val addWater = addWaterEntryUseCase ?: return
+        val date = _selectedDate.value
+        val amountMl = quickAddWaterMl(homeProfile.value.unitSystem)
+        viewModelScope.launch {
+            addWater(date, amountMl)
+            onAdded()
+        }
+    }
 
     /**
      * True while the dashboard shows the current day. It then moves to the new day when the app
@@ -211,6 +334,27 @@ class HomeViewModel(
         viewModelScope.launch { meal.entries.forEach { addToBasket(it) } }
     }
 
+    /** The meal to log to now, by this ViewModel's clock. */
+    fun currentMeal(): MealType = mealForTime(LocalTime.now(clock))
+
+    /** The diary of any [date], for the "+" sheet's copy from yesterday. */
+    fun summaryFor(date: LocalDate): Flow<DailyNutritionSummary> = getDailyDiaryUseCase(date)
+
+    /**
+     * Puts the foods of [meal] on [date] in the basket, in the meal's order, already set to today
+     * and [toMeal], so logging them never logs [date] again. Items already in the basket keep
+     * their own day and meal. [onDone] runs once every food is in.
+     */
+    fun copyMealFrom(date: LocalDate, meal: MealType, toMeal: MealType = meal, onDone: () -> Unit = {}) {
+        _revealedEntryId.value = null
+        viewModelScope.launch {
+            val entries = getDailyDiaryUseCase(date).first().meals.firstOrNull { it.type == meal }?.entries.orEmpty()
+            val today = today()
+            entries.forEach { addToBasket(it, date = today, mealType = toMeal) }
+            onDone()
+        }
+    }
+
     /** Moves every food of [meal] to [mealType] on [date]; what each food logged stays as it was. */
     fun moveMeal(meal: Meal, date: LocalDate, mealType: MealType) {
         val move = moveDiaryEntriesUseCase ?: return
@@ -228,7 +372,7 @@ class HomeViewModel(
         viewModelScope.launch { deleteDiaryEntryUseCase(entryIds) }
     }
 
-    private suspend fun addToBasket(entry: DiaryEntry) {
+    private suspend fun addToBasket(entry: DiaryEntry, date: LocalDate = entry.date, mealType: MealType = entry.mealType) {
         val fullFood = getFoodDetailsUseCase?.invoke(entry.food.id)
             ?.takeIf { it.isSameFoodAs(entry.food) && it.canScale(it.resolveLoggedServing(entry.serving)) }
             ?: entry.food
@@ -239,11 +383,21 @@ class HomeViewModel(
             serving = matchedServing,
             quantity = entry.quantity,
             calculatedNutrition = entry.calculatedNutrition,
-            date = entry.date,
-            mealType = entry.mealType
+            date = date,
+            mealType = mealType
         )
     }
 }
+
+/** "Today", "Yesterday" or the date, for Home's day row. */
+internal fun homeDayLabel(date: LocalDate, today: LocalDate): String = when (date) {
+    today -> "Today"
+    today.minusDays(1) -> "Yesterday"
+    else -> DashboardDateFormatter.formatDashboardDate(date, today)
+}
+
+/** Whole calories with a thousands separator, as "2,000". */
+internal fun formatKcal(value: Double): String = String.format(Locale.US, "%,d", value.roundToInt())
 
 @Composable
 fun HomeScreen(
@@ -253,223 +407,188 @@ fun HomeScreen(
     onNavigateToCalendar: () -> Unit,
     onNavigateToWater: (Long) -> Unit,
     onNavigateToWeight: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    basketCount: Int = 0,
+    onOpenSearch: () -> Unit = {},
+    onScanLabel: () -> Unit = {},
+    onOpenBasket: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
+    onLogWeight: (Long) -> Unit = {}
 ) {
-    val context = LocalContext.current
     val selectedDate by viewModel.selectedDate.collectAsState()
     val summary by viewModel.dailySummary.collectAsState()
+    val profile by viewModel.homeProfile.collectAsState()
+    val revealedEntryId by viewModel.revealedEntryId.collectAsState()
 
     var selectedMealForInfo by remember { mutableStateOf<Meal?>(null) }
-    var showDailySummaryDialog by remember { mutableStateOf(false) }
+    var showDailySummary by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AppColors.Background)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // 1. Date Selector Ribbon - Compact and centered
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(Dimensions.SectionHeaderHeight)
-                .background(AppColors.Background),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+    val visibleMeals = MealConfiguration.getVisibleMeals(summary.meals)
+    val dockInset = LocalDockInset.current
+    // The macro rings fill from empty when Home opens; a list item is rebuilt when it scrolls back
+    // into view, and the rings then start where they are
+    val ringsShown = remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val pageScrolled = remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        // A lazy list: only the rows on screen are built, so a full day opens as fast as an empty one
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = AppSpacing.screenMargin,
+                end = AppSpacing.screenMargin,
+                top = 10.dp,
+                // Clears the bottom dock
+                bottom = AppSpacing.xxl + dockInset
+            )
         ) {
-            IconButton(onClick = { viewModel.onPreviousDay() }, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Day", tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
+            // The basket button is pinned over the page (below), so the header leaves its place free
+            item(key = "header", contentType = "header") {
+                HomeHeader(firstName = profile.firstName, onOpenProfile = onOpenProfile)
             }
-            Spacer(modifier = Modifier.width(AppSpacing.md))
-            Text(
-                text = if (selectedDate == viewModel.today()) "Today" else DashboardDateFormatter.formatDashboardDate(selectedDate),
-                style = AppTypography.Body1,
-                color = AppColors.TextPrimary,
-                modifier = Modifier
-                    .clickable {
-                        val dialog = DatePickerDialog(
-                            context,
-                            { _, year, month, dayOfMonth ->
-                                viewModel.onSelectDate(LocalDate.of(year, month + 1, dayOfMonth))
-                            },
-                            selectedDate.year,
-                            selectedDate.monthValue - 1,
-                            selectedDate.dayOfMonth
+
+            item(key = "calories", contentType = "calories") {
+                CaloriesPanel(
+                    summary = summary,
+                    profile = profile,
+                    onDailySummary = { showDailySummary = true },
+                    onSearch = onOpenSearch,
+                    onScan = onScanLabel,
+                    ringsFillIn = !ringsShown.value,
+                    modifier = Modifier
+                        .padding(top = AppSpacing.sectionGap)
+                        // A sideways swipe steps a day, as a swipe on the calendar steps a month
+                        .pointerInput(viewModel) {
+                            val threshold = DaySwipeThreshold.toPx()
+                            var dragX = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { dragX = 0f },
+                                onDragCancel = { dragX = 0f },
+                                onDragEnd = {
+                                    when (daySwipeStep(dragX, threshold)) {
+                                        1 -> viewModel.onNextDay()
+                                        -1 -> viewModel.onPreviousDay()
+                                    }
+                                    dragX = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    dragX += dragAmount
+                                    // Taken from the page once the swipe is clearly sideways
+                                    if (abs(dragX) > 10f) change.consume()
+                                }
+                            )
+                        }
+                )
+                SideEffect { ringsShown.value = true }
+            }
+
+            // The day on screen, between its arrows: its name opens the date picker, the arrows step a day
+            item(key = "day", contentType = "day") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp)
+                        .heightIn(min = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MbIconButton(
+                        icon = Ph.CaretLeft.light,
+                        contentDescription = "Previous day",
+                        onClick = { viewModel.onPreviousDay() },
+                        size = 40.dp,
+                        iconSize = 18.dp
+                    )
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = homeDayLabel(selectedDate, viewModel.today()),
+                            style = AppTypography.Header1,
+                            color = AppColors.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .mbClickable(pressedScale = 0.97f, onClickLabel = "Choose a day") { showDatePicker = true }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
                         )
-                        dialog.show()
                     }
-                    .padding(horizontal = AppSpacing.sm)
-            )
-            Spacer(modifier = Modifier.width(AppSpacing.md))
-            IconButton(onClick = { viewModel.onNextDay() }, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.ChevronRight, contentDescription = "Next Day", tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-            }
-        }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        // 2. Calorie Target & Intake Summary (Flat, 3 Columns)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(AppColors.Background)
-                .padding(vertical = AppSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "${summary.totalCaloriesIntake.roundToInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
-                Text(text = "Intake", style = AppTypography.Caption, color = AppColors.TextSecondary)
-            }
-            Box(modifier = Modifier.size(width = 1.dp, height = 24.dp).background(AppColors.Divider))
-            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "${summary.totalCaloriesBurned.roundToInt()}", style = AppTypography.Header3, color = AppColors.TextPrimary)
-                Text(text = "Burned", style = AppTypography.Caption, color = AppColors.TextSecondary)
-            }
-            Box(modifier = Modifier.size(width = 1.dp, height = 24.dp).background(AppColors.Divider))
-            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                val balance = summary.displayedCalorieBalance
-                Text(
-                    text = "${kotlin.math.abs(balance)}",
-                    style = AppTypography.Header3,
-                    color = if (summary.isOverBudget) AppColors.ProgressOver else AppColors.CalorieText
-                )
-                Text(
-                    text = if (summary.isOverBudget) "Over" else "Remaining",
-                    style = AppTypography.Caption,
-                    color = AppColors.TextSecondary
-                )
-            }
-        }
-
-        // 3. Calorie Limit Progress Bar
-        val progress = if (summary.calorieGoal > 0) {
-            (summary.totalCaloriesIntake / summary.calorieGoal).toFloat().coerceIn(0f, 1f)
-        } else 0f
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(Dimensions.CalorieProgressHeight),
-            color = if (summary.isOverBudget) AppColors.ProgressOver else AppColors.CalorieText,
-            trackColor = AppColors.SurfaceAlt
-        )
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        // 4. Macronutrient 3-Column Strip
-        MacroProgressStrip(
-            proteinGrams = summary.totalProteinGrams,
-            carbsGrams = summary.totalCarbsGrams,
-            fatGrams = summary.totalFatGrams
-        )
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        val revealedEntryId by viewModel.revealedEntryId.collectAsState()
-
-        // 5. 5 Meal Diary Sections
-        MealConfiguration.getVisibleMeals(summary.meals).forEach { meal ->
-            DashboardMealSection(
-                meal = meal,
-                revealedEntryId = revealedEntryId,
-                onRevealEntry = { entryId -> viewModel.setRevealedEntry(entryId) },
-                onAddFoodClick = { onNavigateToSearch(meal.type, viewModel.dateForNewLog()?.toEpochDay()) },
-                onInfoClick = { selectedMealForInfo = meal },
-                onEntryClick = { entry ->
-                    viewModel.setRevealedEntry(null)
-                    onNavigateToDetail(entry.food.id, meal.type, selectedDate.toEpochDay(), entry.id)
-                },
-                onDeleteEntry = { entry ->
-                    viewModel.deleteEntry(entry.id)
-                },
-                onCopyEntry = { entry ->
-                    viewModel.copyEntry(entry)
+                    MbIconButton(
+                        icon = Ph.CaretRight.light,
+                        contentDescription = "Next day",
+                        onClick = { viewModel.onNextDay() },
+                        size = 40.dp,
+                        iconSize = 18.dp
+                    )
                 }
-            )
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-        }
+            }
 
-        // 6. View Daily Summary Action
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = AppSpacing.sm),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(Dimensions.ButtonHeight)
-                    .clickable { showDailySummaryDialog = true }
-                    .background(AppColors.Surface)
-                    .padding(horizontal = AppSpacing.lg),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PieChart,
-                    contentDescription = null,
-                    tint = AppColors.Primary,
-                    modifier = Modifier.size(Dimensions.IconSizeMedium)
-                )
-                Text(
-                    text = "View Daily Summary",
-                    style = AppTypography.Header3,
-                    modifier = Modifier.padding(start = AppSpacing.sm)
-                )
+            // One block per visible meal, its foods listed inline: the meal's header, then each food
+            visibleMeals.forEachIndexed { index, meal ->
+                item(key = "meal-${meal.type}", contentType = "mealHeader") {
+                    MealHeader(
+                        meal = meal,
+                        onAddFoodClick = { onNavigateToSearch(meal.type, viewModel.dateForNewLog()?.toEpochDay()) },
+                        onInfoClick = { selectedMealForInfo = meal },
+                        modifier = Modifier.padding(top = if (index == 0) 10.dp else 18.dp)
+                    )
+                }
+                if (meal.entries.isEmpty()) {
+                    item(key = "empty-${meal.type}", contentType = "emptyMeal") { EmptyMealTile() }
+                } else {
+                    itemsIndexed(meal.entries, key = { _, entry -> "entry-${entry.id}" }, contentType = { _, _ -> "entry" }) { position, entry ->
+                        DashboardFoodItemRow(
+                            entry = entry,
+                            isRevealed = revealedEntryId == entry.id,
+                            onRevealChange = { isRevealed -> viewModel.setRevealedEntry(if (isRevealed) entry.id else null) },
+                            onClick = {
+                                viewModel.setRevealedEntry(null)
+                                onNavigateToDetail(entry.food.id, meal.type, selectedDate.toEpochDay(), entry.id)
+                            },
+                            onDelete = { viewModel.deleteEntry(entry.id) },
+                            onCopy = { viewModel.copyEntry(entry) },
+                            modifier = Modifier.padding(top = if (position == 0) 0.dp else 8.dp)
+                        )
+                    }
+                }
+            }
+
+            // Water and weight: the tracker's icon, then its quick action
+            item(key = "trackers", contentType = "trackers") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = AppSpacing.sectionGap),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    WaterQuickCard(
+                        unitSystem = profile.unitSystem,
+                        onOpenWater = { onNavigateToWater(selectedDate.toEpochDay()) },
+                        onQuickAdd = { onAdded -> viewModel.quickAddWater(onAdded) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TrackerCard(
+                        icon = Ph.Scales,
+                        iconDescription = "Weight tracker",
+                        onIconClick = { onNavigateToWeight(selectedDate.toEpochDay()) },
+                        actionLabel = "Log weight",
+                        onAction = { onLogWeight(selectedDate.toEpochDay()) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        // 7. Supplementary Modules (Water & Weight)
-        // Flat style without Card container
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        Row(
+        // Where the header row centres it, and it stays there while the page scrolls
+        StickyBasketButton(
+            count = basketCount,
+            lifted = { pageScrolled.value },
+            onClick = onOpenBasket,
             modifier = Modifier
-                .fillMaxWidth()
-                .background(AppColors.Surface)
-                .clickable { onNavigateToWater(selectedDate.toEpochDay()) }
-                .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Opacity, contentDescription = null, tint = AppColors.WaterCyan, modifier = Modifier.size(Dimensions.IconSizeMedium))
-                Spacer(modifier = Modifier.size(AppSpacing.sm))
-                Text(text = "Water", style = AppTypography.Body1)
-            }
-            Text(
-                text = "${summary.totalWaterMl.roundToInt()} / ${summary.waterGoalMl.roundToInt()} mL",
-                style = AppTypography.Body2,
-                color = AppColors.WaterCyan
-            )
-        }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        
-        val selectedWeight by viewModel.selectedDateWeight.collectAsState()
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(AppColors.Surface)
-                .clickable { onNavigateToWeight(selectedDate.toEpochDay()) }
-                .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Scale, contentDescription = null, tint = AppColors.MacroProtein, modifier = Modifier.size(Dimensions.IconSizeMedium))
-                Spacer(modifier = Modifier.size(AppSpacing.sm))
-                Text(text = "Weight", style = AppTypography.Body1)
-            }
-            Text(
-                text = if (selectedWeight != null) "${selectedWeight?.weightKg} kg" else "Tap to log",
-                style = AppTypography.Body2,
-                color = if (selectedWeight != null) AppColors.TextPrimary else AppColors.TextSecondary
-            )
-        }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        Spacer(modifier = Modifier.height(AppSpacing.xl))
+                .align(Alignment.TopEnd)
+                .padding(top = 10.dp, end = AppSpacing.screenMargin)
+        )
     }
 
     // Meal card: totals, and Copy / Move / Delete for the whole meal
@@ -494,212 +613,292 @@ fun HomeScreen(
         )
     }
 
-    // Modal Daily Summary Dialog
-    if (showDailySummaryDialog) {
-        AlertDialog(
-            onDismissRequest = { showDailySummaryDialog = false },
-            title = { Text("Daily Nutrition", style = AppTypography.Header2) },
-            text = {
-                Column {
-                    Text(
-                        text = "Intake: ${summary.totalCaloriesIntake.roundToInt()} / ${summary.calorieGoal.roundToInt()} kcal",
-                        style = AppTypography.Header3
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
+    if (showDailySummary) {
+        DailySummarySheet(summary = summary, onDismiss = { showDailySummary = false })
+    }
 
-                    // Core Macros
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroProtein)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Protein: ${String.format(Locale.US, "%.1f", summary.totalProteinGrams)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroProtein
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroCarbs)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Carbohydrates: ${String.format(Locale.US, "%.1f", summary.totalCarbsGrams)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroCarbs
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = AppSpacing.xs)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AppColors.MacroFat)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(
-                            text = "Fat: ${String.format(Locale.US, "%.1f", summary.totalFatGrams)}g",
-                            style = AppTypography.Body1,
-                            color = AppColors.MacroFat
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    // Secondary Nutrients
-                    Text(
-                        text = "Dietary Fiber: ${formatOptionalTotal(summary.totalFiberGrams, "g")}",
-                        style = AppTypography.Body2,
-                        color = AppColors.TextSecondary,
-                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
-                    )
-                    Text(
-                        text = "Total Sugars: ${formatOptionalTotal(summary.totalSugarGrams, "g")}",
-                        style = AppTypography.Body2,
-                        color = AppColors.TextSecondary,
-                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
-                    )
-                    Text(
-                        text = "Sodium: ${formatOptionalTotal(summary.totalSodiumMg, "mg")}",
-                        style = AppTypography.Body2,
-                        color = AppColors.TextSecondary,
-                        modifier = Modifier.padding(vertical = AppSpacing.xxs)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showDailySummaryDialog = false }) {
-                    Text("Close", color = AppColors.Primary)
-                }
-            },
-            containerColor = AppColors.SurfaceAlt,
-            shape = AppShapes.Dialog
+    if (showDatePicker) {
+        MbDatePickerDialog(
+            initialDate = selectedDate,
+            onDateSelected = { viewModel.onSelectDate(it) },
+            onDismiss = { showDatePicker = false }
         )
     }
 }
 
+/** The avatar with the first name's initial, the greeting, and the basket. */
 @Composable
-fun DashboardMealSection(
-    meal: Meal,
-    revealedEntryId: Long?,
-    onRevealEntry: (Long?) -> Unit,
-    onAddFoodClick: () -> Unit,
-    onInfoClick: () -> Unit,
-    onEntryClick: (DiaryEntry) -> Unit,
-    onDeleteEntry: (DiaryEntry) -> Unit,
-    onCopyEntry: (DiaryEntry) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val sectionCalories = meal.totalCalories.roundToInt()
-
-    Column(modifier = modifier.fillMaxWidth()) {
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        // Header Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(Dimensions.SectionHeaderHeight)
-                .background(AppColors.Background)
-                .padding(horizontal = AppSpacing.sm),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = meal.type.displayName.uppercase(),
-                    style = AppTypography.Caption,
-                    color = AppColors.TextPrimary
-                )
-                Spacer(modifier = Modifier.width(AppSpacing.xs))
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(AppColors.Primary)
-                        .clickable(onClick = onAddFoodClick),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Food",
-                        tint = AppColors.TextPrimary,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onInfoClick,
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Meal Info",
-                    tint = AppColors.TextSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(AppSpacing.sm))
+private fun HomeHeader(firstName: String, onOpenProfile: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        AvatarRing(firstName = firstName, onClick = onOpenProfile)
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = sectionCalories.toString(),
-                style = AppTypography.Body1,
+                text = if (firstName.isBlank()) "Hello" else "Hello, $firstName",
+                style = AppTypography.Body1.copy(fontSize = 14.sp, lineHeight = 18.sp),
+                color = AppColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "What are you eating today?",
+                style = AppTypography.Header2.copy(lineHeight = 21.sp),
                 color = AppColors.TextPrimary
             )
         }
+        // The pinned basket button sits over this space (StickyBasketButton)
+        Spacer(modifier = Modifier.size(Dimensions.HeaderButton))
+    }
+}
 
-        if (meal.entries.isEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = Dimensions.FoodRowHeight)
-                    .background(AppColors.Background)
-                    .padding(horizontal = AppSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "No foods logged yet.",
-                    style = AppTypography.Body2,
-                    color = AppColors.TextSecondary
-                )
-            }
+/** The header row's height: the avatar's. */
+private val HeaderRowHeight = 48.dp
+
+/** How far a swipe on the calories panel must go to step a day: the calendar's month swipe distance. */
+private val DaySwipeThreshold = 48.dp
+
+/**
+ * A sideways swipe on the calories panel, as the calendar's month swipe: 1 shows the next day
+ * (swiped left), -1 the day before (swiped right), 0 when it is too short to count.
+ */
+internal fun daySwipeStep(dragX: Float, thresholdPx: Float): Int = when {
+    dragX < -thresholdPx -> 1
+    dragX > thresholdPx -> -1
+    else -> 0
+}
+
+/**
+ * The basket button, pinned at the top right while the page scrolls. At the top of the page it looks
+ * as it always has; once the page scrolls under it, it takes the dock's floating fill and shadow, as
+ * the "+" button has, so it stays clear over the cards.
+ */
+@Composable
+private fun StickyBasketButton(count: Int, lifted: () -> Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val reducedMotion = rememberReducedMotion()
+    val backing = animateFloatAsState(
+        targetValue = if (lifted()) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(200, easing = MbMotion.Ease),
+        label = "basketBacking"
+    )
+    Box(modifier = modifier.height(HeaderRowHeight), contentAlignment = Alignment.Center) {
+        // Faded by its layer, so the fade redraws only this circle
+        Box(
+            modifier = Modifier
+                .size(Dimensions.HeaderButton)
+                .graphicsLayer { alpha = backing.value }
+                .mbDockPill()
+        )
+        MbBasketButton(count = count, onClick = onClick)
+    }
+}
+
+/** A 48 dp gradient ring around the first name's initial; a person icon when there is no name. */
+@Composable
+private fun AvatarRing(firstName: String, onClick: () -> Unit) {
+    val initial = firstName.firstOrNull()?.uppercaseChar()
+    Box(
+        modifier = Modifier
+            .size(HeaderRowHeight)
+            .mbClickable(pressedScale = 0.94f, onClick = onClick)
+            .semantics { contentDescription = "Profile" }
+            .clip(CircleShape)
+            .drawBehind { rotate(110f) { drawCircle(AppBrushes.AvatarRing) } }
+            .padding(2.dp)
+            .clip(CircleShape)
+            .background(AppColors.AvatarFill),
+        contentAlignment = Alignment.Center
+    ) {
+        if (initial != null) {
+            Text(
+                text = initial.toString(),
+                style = AppTypography.Header1.copy(fontSize = 19.sp),
+                color = AppColors.AvatarInk,
+                modifier = Modifier.clearAndSetSemantics { }
+            )
         } else {
-            meal.entries.forEach { entry ->
-                androidx.compose.runtime.key(entry.id) {
-                    HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-                    DashboardFoodItemRow(
-                        entry = entry,
-                        isRevealed = revealedEntryId == entry.id,
-                        onRevealChange = { isRevealed ->
-                            onRevealEntry(if (isRevealed) entry.id else null)
-                        },
-                        onClick = { onEntryClick(entry) },
-                        onDelete = { onDeleteEntry(entry) },
-                        onCopy = { onCopyEntry(entry) }
+            MbIcon(icon = Ph.User.light, contentDescription = null, size = 20.dp, tint = AppColors.AvatarInk)
+        }
+    }
+}
+
+/**
+ * The calories panel: "eaten / target kcal", the calorie bar, the three macro rings, and the search
+ * bar with the scan button. The corner button opens the daily summary.
+ */
+@Composable
+private fun CaloriesPanel(
+    summary: DailyNutritionSummary,
+    profile: HomeProfile,
+    onDailySummary: () -> Unit,
+    onSearch: () -> Unit,
+    onScan: () -> Unit,
+    modifier: Modifier = Modifier,
+    ringsFillIn: Boolean = true
+) {
+    val (proteinTarget, carbTarget, fatTarget) = macroTargetGrams(summary.calorieGoal, profile)
+    MbPanel(modifier = modifier.fillMaxWidth()) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(end = 48.dp)) {
+                    Text(
+                        text = formatKcal(summary.totalCaloriesIntake),
+                        style = AppTypography.Hero,
+                        color = AppColors.TextPrimary,
+                        modifier = Modifier.alignByBaseline()
+                    )
+                    Text(
+                        text = "/ ${formatKcal(summary.calorieGoal)} kcal",
+                        style = AppTypography.HeroUnit,
+                        modifier = Modifier
+                            .alignByBaseline()
+                            .padding(start = 8.dp)
                     )
                 }
+                CalorieBar(
+                    eaten = summary.totalCaloriesIntake,
+                    goal = summary.calorieGoal,
+                    over = summary.isOverBudget,
+                    modifier = Modifier.padding(top = 14.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MbMacroRing(label = "Protein", eatenGrams = summary.totalProteinGrams, targetGrams = proteinTarget, color = AppColors.MacroProtein, modifier = Modifier.weight(1f), fillIn = ringsFillIn)
+                    MbMacroRing(label = "Carbs", eatenGrams = summary.totalCarbsGrams, targetGrams = carbTarget, color = AppColors.MacroCarbs, modifier = Modifier.weight(1f), fillIn = ringsFillIn)
+                    MbMacroRing(label = "Fat", eatenGrams = summary.totalFatGrams, targetGrams = fatTarget, color = AppColors.MacroFat, modifier = Modifier.weight(1f), fillIn = ringsFillIn)
+                }
+                MbSearchPill(
+                    placeholder = "Search foods to log\u2026",
+                    onClick = onSearch,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp)
+                ) {
+                    MbScanButton(onClick = onScan)
+                }
             }
+            MbIconButton(
+                icon = Ph.ArrowUpRight.light,
+                contentDescription = "Daily summary",
+                onClick = onDailySummary,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp),
+                size = 40.dp,
+                iconSize = 18.dp,
+                outlined = true
+            )
         }
+    }
+}
+
+/** The 6 dp calorie bar in the brand gradient; red and full once over the target. */
+@Composable
+private fun CalorieBar(eaten: Double, goal: Double, over: Boolean, modifier: Modifier = Modifier) {
+    val fraction = if (goal > 0.0) (eaten / goal).toFloat().coerceIn(0f, 1f) else 0f
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(shape)
+            .background(AppColors.BarTrack)
+    ) {
+        if (over) {
+            Box(modifier = Modifier.fillMaxSize().clip(shape).background(AppColors.ProgressOver))
+        } else if (fraction > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
+                    .clip(shape)
+                    .background(AppBrushes.BrandGradient)
+            )
+        }
+    }
+}
+
+/** How far a food row must be swiped for letting go to open it. */
+private const val SWIPE_OPEN_FRACTION = 0.4f
+
+/** A meal's name, its add and info buttons, and its total. */
+@Composable
+private fun MealHeader(meal: Meal, onAddFoodClick: () -> Unit, onInfoClick: () -> Unit, modifier: Modifier = Modifier) {
+    val name = mealLabel(meal.type)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = name, style = AppTypography.Header2, color = AppColors.TextPrimary)
+        AddToMealButton(onClick = onAddFoodClick, contentDescription = "Add food to $name")
+        Spacer(modifier = Modifier.weight(1f))
+        MbIconButton(
+            icon = Ph.Info.light,
+            contentDescription = "$name nutrition",
+            onClick = onInfoClick,
+            size = 40.dp,
+            iconSize = 19.dp
+        )
+        Text(text = "${meal.totalCalories.roundToInt()}", style = AppTypography.Body1, color = AppColors.TextPrimary)
+        Text(text = " kcal", style = AppTypography.Caption, color = AppColors.TextMuted)
+    }
+}
+
+/** The small filled "+" after a meal's name. */
+@Composable
+private fun AddToMealButton(onClick: () -> Unit, contentDescription: String) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .mbClickable(pressedScale = 0.92f, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(AppBrushes.PrimaryButtonGradient)
+                .innerTopHighlight(),
+            contentAlignment = Alignment.Center
+        ) {
+            MbIcon(icon = Ph.Plus.regular, contentDescription = null, size = 14.dp, tint = AppColors.OnPrimary)
+        }
+    }
+}
+
+/** A meal with nothing logged: a dashed outline. */
+@Composable
+private fun EmptyMealTile() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val stroke = 1.dp.toPx()
+                drawRoundRect(
+                    color = Color(0x1AFFFFFF),
+                    topLeft = androidx.compose.ui.geometry.Offset(stroke / 2f, stroke / 2f),
+                    size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+                    cornerRadius = CornerRadius(16.dp.toPx()),
+                    style = Stroke(width = stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())))
+                )
+            }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Text(
+            text = "No foods logged yet.",
+            style = AppTypography.Body2.copy(fontSize = 13.5.sp),
+            color = AppColors.TextSecondary
+        )
     }
 }
 
@@ -718,21 +917,33 @@ fun DashboardFoodItemRow(
     val actionWidthPx = with(density) { actionWidth.toPx() }
     val offsetX = remember(entry.id) { Animatable(if (isRevealed) -actionWidthPx else 0f) }
     val coroutineScope = rememberCoroutineScope()
+    val snapSpec = tween<Float>(durationMillis = MbMotion.SwipeMs, easing = MbMotion.Ease)
+    val isOpen by remember { derivedStateOf { offsetX.value < 0f } }
+    val rowInteraction = remember { MutableInteractionSource() }
+    val rowPressed by rowInteraction.collectIsPressedAsState()
+    val haptics = rememberMbHaptics()
+    // Whether letting go now would open the row, so the tick plays once as a swipe reaches that point
+    var swipePastOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(isRevealed) {
         val target = if (isRevealed) -actionWidthPx else 0f
         if (kotlin.math.abs(offsetX.value - target) > 0.5f) {
-            offsetX.animateTo(target, animationSpec = tween(durationMillis = 200))
+            offsetX.animateTo(target, animationSpec = snapSpec)
         }
     }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .background(AppColors.Background)
+            .clip(RoundedCornerShape(16.dp))
     ) {
-        // Revealed Action Buttons on the Right
+        // Delete and Copy under the row, shown only while it is open or being swiped. They take the
+        // row's own size, so the row is measured once (no intrinsic pass)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer { alpha = if (offsetX.value < 0f) 1f else 0f }
+        ) {
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -740,12 +951,11 @@ fun DashboardFoodItemRow(
                 .fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Delete Button (Bright Red)
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(Color(0xFFFF0000))
+                    .background(AppColors.DangerFill)
                     .clickable {
                         coroutineScope.launch {
                             offsetX.snapTo(0f)
@@ -755,19 +965,13 @@ fun DashboardFoodItemRow(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Delete",
-                    style = AppTypography.Body1.copy(fontWeight = FontWeight.Medium),
-                    color = Color.White
-                )
+                Text(text = "Delete", style = AppTypography.Body1.copy(fontSize = 13.5.sp), color = AppColors.OnCopy)
             }
-
-            // Copy Button (Brown / Dark Amber)
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(Color(0xFF8B3A00))
+                    .background(AppColors.CopyFill)
                     .clickable {
                         coroutineScope.launch {
                             offsetX.animateTo(0f, animationSpec = tween(150))
@@ -777,124 +981,238 @@ fun DashboardFoodItemRow(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Copy",
-                    style = AppTypography.Body1.copy(fontWeight = FontWeight.Medium),
-                    color = Color.White
-                )
+                Text(text = "Copy", style = AppTypography.Body1.copy(fontSize = 13.5.sp), color = AppColors.OnCopy)
             }
         }
+        }
 
-        // Foreground Content (Swipable)
+        // The food: an opaque row that slides left over its actions
+        val rowShape = if (isOpen) RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp) else RoundedCornerShape(16.dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .defaultMinSize(minHeight = Dimensions.FoodRowHeight)
-                .background(AppColors.Background)
+                .defaultMinSize(minHeight = 58.dp)
+                .clip(rowShape)
+                .background(if (rowPressed) Color(0xFF0E140F) else AppColors.RowTile)
+                .border(1.dp, AppColors.Edge, rowShape)
                 .pointerInput(entry.id) {
                     detectHorizontalDragGestures(
-                        onDragStart = { },
+                        onDragStart = { swipePastOpen = offsetX.value < -actionWidthPx * SWIPE_OPEN_FRACTION },
                         onDragEnd = {
                             coroutineScope.launch {
-                                if (offsetX.value < -actionWidthPx * 0.4f) {
-                                    offsetX.animateTo(-actionWidthPx, animationSpec = tween(200))
+                                if (offsetX.value < -actionWidthPx * SWIPE_OPEN_FRACTION) {
+                                    offsetX.animateTo(-actionWidthPx, animationSpec = snapSpec)
                                     onRevealChange(true)
                                 } else {
-                                    offsetX.animateTo(0f, animationSpec = tween(200))
+                                    offsetX.animateTo(0f, animationSpec = snapSpec)
                                     onRevealChange(false)
                                 }
                             }
                         },
                         onDragCancel = {
                             coroutineScope.launch {
-                                offsetX.animateTo(if (isRevealed) -actionWidthPx else 0f, animationSpec = tween(200))
+                                offsetX.animateTo(if (isRevealed) -actionWidthPx else 0f, animationSpec = snapSpec)
                             }
                         },
                         onHorizontalDrag = { _, dragAmount ->
                             coroutineScope.launch {
                                 val newOffset = (offsetX.value + dragAmount).coerceIn(-actionWidthPx, 0f)
                                 offsetX.snapTo(newOffset)
+                                val pastOpen = newOffset < -actionWidthPx * SWIPE_OPEN_FRACTION
+                                if (pastOpen && !swipePastOpen) haptics.reachedOpen()
+                                swipePastOpen = pastOpen
                             }
                         }
                     )
                 }
-                .clickable {
+                .clickable(interactionSource = rowInteraction, indication = null) {
                     if (isRevealed || offsetX.value < -10f) {
                         coroutineScope.launch {
-                            offsetX.animateTo(0f, animationSpec = tween(200))
+                            offsetX.animateTo(0f, animationSpec = snapSpec)
                             onRevealChange(false)
                         }
                     } else {
                         onClick()
                     }
                 }
-                .padding(horizontal = AppSpacing.sm, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 10.dp, end = 10.dp, top = 9.dp, bottom = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Thumbnail Box
-            Box(
-                modifier = Modifier
-                    .size(Dimensions.FoodThumbnailSize)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(AppColors.TextPrimary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Fastfood,
-                    contentDescription = null,
-                    tint = AppColors.Background,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Title and Subtitle
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = AppSpacing.sm)
-            ) {
+            MbIconCircle(icon = Ph.BowlFood.light, size = 34.dp, iconSize = 17.dp)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = entry.food.name,
-                    style = AppTypography.Body1,
+                    style = AppTypography.Header3,
+                    color = AppColors.TextPrimary,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = AppColors.TextPrimary
+                    overflow = TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = formatDiaryEntrySubtitle(entry),
-                    style = AppTypography.Caption,
+                    text = remember(entry) { formatDiaryEntrySubtitle(entry) },
+                    style = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 17.sp),
                     color = AppColors.TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-
-            // Calories
             Text(
                 text = "${entry.calculatedNutrition.calories.roundToInt()}",
                 style = AppTypography.Body1,
-                color = AppColors.CalorieText
+                color = AppColors.TextPrimary
             )
-
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = AppColors.TextSecondary,
-                modifier = Modifier.padding(start = AppSpacing.xs).size(16.dp)
-            )
+            MbIcon(icon = Ph.CaretRight.light, contentDescription = null, size = 15.dp, tint = AppColors.TextMuted)
         }
     }
 }
 
-private fun formatDiaryEntrySubtitle(entry: DiaryEntry): String {
+/** A compact tracker card: the tracker's icon, then a chip-style quick action filling the rest. */
+@Composable
+private fun TrackerCard(
+    icon: Ph,
+    iconDescription: String,
+    onIconClick: () -> Unit,
+    actionLabel: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+    actionDescription: String? = null
+) {
+    MbPanel(modifier = modifier, contentPadding = PaddingValues(7.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(Dimensions.IconCircleLarge)
+                    .mbClickable(pressedScale = 0.92f, onClick = onIconClick)
+                    .semantics { contentDescription = iconDescription }
+                    .clip(CircleShape)
+                    .background(AppColors.IconCircleFill)
+                    .border(1.dp, AppColors.Edge2, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                MbIcon(icon = icon.light, contentDescription = null, size = 20.dp, tint = AppColors.IconCircleInk)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .mbClickable(pressedScale = 0.95f, onClick = onAction)
+                    .then(if (actionDescription != null) Modifier.semantics { contentDescription = actionDescription } else Modifier)
+                    .clip(CircleShape)
+                    .border(1.dp, Color(0x735BD86A), CircleShape)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = actionLabel,
+                    style = AppTypography.Chip.copy(fontSize = 13.sp),
+                    color = Color(0xFFB9F3C0),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Water's card: "+250 mL" (or "+8 oz") adds that amount to the day on screen at once, and reads
+ * "Added" for a moment so the tap is visible.
+ */
+@Composable
+private fun WaterQuickCard(
+    unitSystem: UnitSystem,
+    onOpenWater: () -> Unit,
+    onQuickAdd: (onAdded: () -> Unit) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var justAdded by remember { mutableStateOf(false) }
+    LaunchedEffect(justAdded) {
+        if (justAdded) {
+            delay(1200)
+            justAdded = false
+        }
+    }
+    val amount = if (unitSystem == UnitSystem.IMPERIAL) "8 oz" else "250 mL"
+    TrackerCard(
+        icon = Ph.Drop,
+        iconDescription = "Water tracker",
+        onIconClick = onOpenWater,
+        actionLabel = if (justAdded) "Added" else "+$amount",
+        onAction = { onQuickAdd { justAdded = true } },
+        modifier = modifier,
+        actionDescription = "Add $amount of water"
+    )
+}
+
+/** The day's totals, opened from the calories panel's corner button. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DailySummarySheet(summary: DailyNutritionSummary, onDismiss: () -> Unit) {
+    MbSheet(onDismiss = onDismiss, title = "Daily nutrition") {
+        Text(
+            text = "Intake: ${summary.totalCaloriesIntake.roundToInt()} / ${summary.calorieGoal.roundToInt()} kcal",
+            style = AppTypography.Header3,
+            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+        )
+        SummaryMacroLine(label = "Protein", grams = summary.totalProteinGrams, color = AppColors.MacroProtein)
+        SummaryMacroLine(label = "Carbohydrates", grams = summary.totalCarbsGrams, color = AppColors.MacroCarbs)
+        SummaryMacroLine(label = "Fat", grams = summary.totalFatGrams, color = AppColors.MacroFat)
+        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
+        Text(
+            text = "Dietary Fiber: ${formatOptionalTotal(summary.totalFiberGrams, "g")}",
+            style = AppTypography.Body2,
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+        Text(
+            text = "Total Sugars: ${formatOptionalTotal(summary.totalSugarGrams, "g")}",
+            style = AppTypography.Body2,
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+        Text(
+            text = "Sodium: ${formatOptionalTotal(summary.totalSodiumMg, "mg")}",
+            style = AppTypography.Body2,
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun SummaryMacroLine(label: String, grams: Double, color: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Spacer(modifier = Modifier.width(AppSpacing.sm))
+        Text(
+            text = "$label: ${String.format(Locale.US, "%.1f", grams)}g",
+            style = AppTypography.Body1,
+            color = color
+        )
+    }
+}
+
+/** A serving description's leading amount and its unit: "2 chapati", "100 g". */
+private val ServingAmount = Regex("""^(\d+(?:\.\d+)?)\s*(.*)$""")
+
+/** "2 chapati", "1.5 bowl": the amount logged in the serving's own words. */
+internal fun formatDiaryEntrySubtitle(entry: DiaryEntry): String {
     val qty = entry.quantity
     val qtyStr = if (qty % 1.0 == 0.0) qty.toInt().toString() else String.format(java.util.Locale.US, "%.1f", qty)
     val desc = entry.serving.description.trim()
 
-    val regex = Regex("""^(\d+(?:\.\d+)?)\s*(.*)$""")
-    val match = regex.find(desc)
+    val match = ServingAmount.find(desc)
     return if (match != null) {
         val baseQty = match.groupValues[1].toDoubleOrNull() ?: 1.0
         val unit = match.groupValues[2].trim()

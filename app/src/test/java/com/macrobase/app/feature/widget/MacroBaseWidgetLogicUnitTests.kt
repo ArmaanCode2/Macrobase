@@ -39,25 +39,9 @@ class MacroBaseWidgetLogicUnitTests {
         } else 0
     }
 
-    private fun calculateCalorieStatus(intake: Double, targetCal: Double): Pair<String, Int> {
-        val diff = targetCal - intake
-        return when {
-            targetCal <= 0.0 -> {
-                "${intake.roundToInt()} kcal" to 0xFF121212.toInt()
-            }
-            intake > targetCal + 25.0 -> {
-                val overAmount = (intake - targetCal).roundToInt()
-                "$overAmount kcal over" to 0xFFB71C1C.toInt()
-            }
-            kotlin.math.abs(diff) <= 50.0 && intake > 0.0 -> {
-                "Target Hit \u2713" to 0xFF1B5E20.toInt()
-            }
-            else -> {
-                val remaining = diff.coerceAtLeast(0.0).roundToInt()
-                "$remaining kcal remaining" to 0xFF121212.toInt()
-            }
-        }
-    }
+    // The provider's own status, so these tests check what the widget shows
+    private fun calculateCalorieStatus(intake: Double, targetCal: Double): Pair<String, Int> =
+        widgetCalorieStatus(intake, targetCal)
 
     private fun formatMacrosWithProteinGoal(
         proteinIntake: Double, proteinGoal: Double,
@@ -95,39 +79,39 @@ class MacroBaseWidgetLogicUnitTests {
     }
 
     @Test
-    fun widget_dynamicCalorieStatus_overBudget_showsOverAmountInCrimson() {
+    fun widget_dynamicCalorieStatus_overBudget_showsOverAmountInRed() {
         val (text, color) = calculateCalorieStatus(intake = 2150.0, targetCal = 2000.0)
         assertEquals("150 kcal over", text)
-        assertEquals(0xFFB71C1C.toInt(), color)
+        assertEquals(0xFFFF8A7E.toInt(), color)
     }
 
     @Test
-    fun widget_dynamicCalorieStatus_targetHit_showsTargetHitInForestGreen() {
+    fun widget_dynamicCalorieStatus_targetHit_showsTargetHitInGreen() {
         val (textUnder, colorUnder) = calculateCalorieStatus(intake = 1970.0, targetCal = 2000.0)
         assertEquals("Target Hit \u2713", textUnder)
-        assertEquals(0xFF1B5E20.toInt(), colorUnder)
+        assertEquals(0xFF6FE07C.toInt(), colorUnder)
 
         val (textExact, colorExact) = calculateCalorieStatus(intake = 2000.0, targetCal = 2000.0)
         assertEquals("Target Hit \u2713", textExact)
-        assertEquals(0xFF1B5E20.toInt(), colorExact)
+        assertEquals(0xFF6FE07C.toInt(), colorExact)
 
         val (textSlightOver, colorSlightOver) = calculateCalorieStatus(intake = 2020.0, targetCal = 2000.0)
         assertEquals("Target Hit \u2713", textSlightOver)
-        assertEquals(0xFF1B5E20.toInt(), colorSlightOver)
+        assertEquals(0xFF6FE07C.toInt(), colorSlightOver)
     }
 
     @Test
-    fun widget_dynamicCalorieStatus_underBudget_showsRemainingInCharcoal() {
+    fun widget_dynamicCalorieStatus_underBudget_showsRemainingInPlainText() {
         val (text, color) = calculateCalorieStatus(intake = 1500.0, targetCal = 2000.0)
         assertEquals("500 kcal remaining", text)
-        assertEquals(0xFF121212.toInt(), color)
+        assertEquals(0xFFEDF2EE.toInt(), color)
     }
 
     @Test
     fun widget_dynamicCalorieStatus_zeroGoal_showsIntakeOnly() {
         val (text, color) = calculateCalorieStatus(intake = 500.0, targetCal = 0.0)
         assertEquals("500 kcal", text)
-        assertEquals(0xFF121212.toInt(), color)
+        assertEquals(0xFFEDF2EE.toInt(), color)
     }
 
     @Test

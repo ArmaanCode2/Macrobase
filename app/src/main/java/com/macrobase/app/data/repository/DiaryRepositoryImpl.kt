@@ -1,5 +1,8 @@
 package com.macrobase.app.data.repository
 
+import com.macrobase.app.core.util.settledOnLane
+import kotlinx.coroutines.CoroutineDispatcher
+import com.macrobase.app.core.util.onLane
 import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.database.entity.DiaryEntryEntity
 import com.macrobase.app.domain.model.CalendarDaySummary
@@ -36,7 +39,9 @@ class DiaryRepositoryImpl(
     private val userDatabase: UserDatabase,
     private val goalsRepository: GoalsRepository,
     private val preferencesRepository: PreferencesRepository? = null,
-    private val context: Context? = null
+    private val context: Context? = null,
+    /** Where the totals are worked out; null works them out where collected (tests). */
+    private val calculationDispatcher: CoroutineDispatcher? = null
 ) : DiaryRepository {
 
     override suspend fun getDiaryForDate(date: LocalDate): DailyNutritionSummary {
@@ -47,7 +52,11 @@ class DiaryRepositoryImpl(
         return userDatabase.diaryDao().getEntryById(entryId)?.toDomain()
     }
 
-    override fun observeDiaryForDate(date: LocalDate): Flow<DailyNutritionSummary> {
+    /** The day's meals and totals, worked out on the calculation lane. */
+    override fun observeDiaryForDate(date: LocalDate): Flow<DailyNutritionSummary> =
+        observeDiaryForDateFlow(date).onLane(calculationDispatcher)
+
+    private fun observeDiaryForDateFlow(date: LocalDate): Flow<DailyNutritionSummary> {
         val epochDay = date.toEpochDay()
         val diaryDao = userDatabase.diaryDao()
         val waterDao = userDatabase.waterDao()
@@ -160,21 +169,30 @@ class DiaryRepositoryImpl(
             )
         }
 
-    override fun observeMonthlyAdherence(year: Int, month: Int): Flow<List<CalendarDaySummary>> {
+    /** A calendar month's day colours, worked out on the calculation lane. */
+    override fun observeMonthlyAdherence(year: Int, month: Int): Flow<List<CalendarDaySummary>> =
+        observeMonthlyAdherenceFlow(year, month).onLane(calculationDispatcher)
+
+    private fun observeMonthlyAdherenceFlow(year: Int, month: Int): Flow<List<CalendarDaySummary>> {
         val yearMonth = YearMonth.of(year, month)
         val startDate = yearMonth.atDay(1)
         val endDate = yearMonth.atEndOfMonth()
 
         val days = daysOf(yearMonth)
         return combine(
-            userDatabase.diaryDao().observeMonthlyCalorieSummaries(startDate.toEpochDay(), endDate.toEpochDay()),
+            userDatabase.diaryDao().observeMonthlyCalorieSummaries(startDate.toEpochDay(), endDate.toEpochDay())
+                .settledOnLane(calculationDispatcher),
             goalsRepository.observeGoalsForDates(days)
         ) { summariesList, goals ->
             monthSummaries(days, summariesList.associate { it.dateEpochDay to it.totalCal }, goals)
         }
     }
 
-    override fun observeNutritionAggregations(startDate: LocalDate, endDate: LocalDate): Flow<List<DailyMacroAggregation>> {
+    /** Daily nutrient totals for a range, worked out on the calculation lane. */
+    override fun observeNutritionAggregations(startDate: LocalDate, endDate: LocalDate): Flow<List<DailyMacroAggregation>> =
+        observeNutritionAggregationsFlow(startDate, endDate).onLane(calculationDispatcher)
+
+    private fun observeNutritionAggregationsFlow(startDate: LocalDate, endDate: LocalDate): Flow<List<DailyMacroAggregation>> {
         return userDatabase.diaryDao().observeDateNutritionSummaries(startDate.toEpochDay(), endDate.toEpochDay()).map { list ->
             list.map {
                 DailyMacroAggregation(

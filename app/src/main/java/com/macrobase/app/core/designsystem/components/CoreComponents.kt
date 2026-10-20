@@ -1,5 +1,8 @@
 package com.macrobase.app.core.designsystem.components
 
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +24,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -35,7 +40,8 @@ import com.macrobase.app.domain.model.Food
 import kotlin.math.roundToInt
 
 /**
- * Standard Full Width Hero Button matching UI_UX_SPECIFICATION.md
+ * Standard full-width hero button: the design's primary gradient pill with dark ink. A different
+ * [backgroundColor] draws a solid pill in that colour instead.
  */
 @Composable
 fun PrimaryButton(
@@ -45,28 +51,30 @@ fun PrimaryButton(
     enabled: Boolean = true,
     backgroundColor: Color = AppColors.Primary
 ) {
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(Dimensions.ButtonHeight),
-        enabled = enabled,
-        shape = AppShapes.Button,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = backgroundColor,
-            disabledContainerColor = AppColors.TextDisabled
-        )
-    ) {
-        Text(
-            text = text,
-            style = AppTypography.Button,
-            color = if (enabled) AppColors.TextPrimary else AppColors.TextSecondary
-        )
+    if (backgroundColor == AppColors.Primary) {
+        MbButton(text = text, onClick = onClick, modifier = modifier.fillMaxWidth(), enabled = enabled)
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(Dimensions.ButtonHeightMentor)
+                .alpha(if (enabled) 1f else 0.42f)
+                .mbClickable(enabled = enabled, onClick = onClick)
+                .clip(AppShapes.Button)
+                .background(backgroundColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = AppTypography.Button,
+                color = if (backgroundColor.luminance() > 0.4f) AppColors.OnPrimary else AppColors.TextPrimary
+            )
+        }
     }
 }
 
 /**
- * Standard Empty State Card matching UI_UX_SPECIFICATION.md
+ * Empty or error state: an icon circle, a title, a line of help and an optional primary action.
  */
 @Composable
 fun EmptyStateCard(
@@ -84,28 +92,39 @@ fun EmptyStateCard(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = AppColors.TextSecondary,
-            modifier = Modifier.size(48.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(AppColors.IconCircleFill)
+                .border(1.dp, AppColors.Edge2, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = AppColors.IconCircleInk,
+                modifier = Modifier.size(26.dp)
+            )
+        }
         Text(
             text = title,
             style = AppTypography.Header2,
-            modifier = Modifier.padding(top = AppSpacing.md)
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = AppSpacing.lg)
         )
         Text(
             text = subtitle,
             style = AppTypography.Body2,
             color = AppColors.TextSecondary,
-            modifier = Modifier.padding(top = AppSpacing.xs)
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = AppSpacing.sm)
         )
         if (actionButtonText != null && onActionClick != null) {
             PrimaryButton(
                 text = actionButtonText,
                 onClick = onActionClick,
-                modifier = Modifier.padding(top = AppSpacing.lg)
+                modifier = Modifier.padding(top = AppSpacing.xl)
             )
         }
     }
@@ -161,7 +180,8 @@ fun MacroProgressStrip(
 }
 
 /**
- * 64dp Standard Food Result Row in Search / Recents List
+ * A food in search and recent lists: the row tile with the food's name, what its calories are for,
+ * and the calories. The calorie number on the right is per that basis (BUG-036).
  */
 @Composable
 fun FoodResultItem(
@@ -169,69 +189,12 @@ fun FoodResultItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    MbRowTile(
+        title = food.name,
+        subtitle = food.listSubtitle,
+        icon = com.macrobase.app.core.designsystem.Ph.BowlFood.light,
+        value = "${food.nutrition.calories.roundToInt()}",
+        onClick = onClick,
         modifier = modifier
-            .fillMaxWidth()
-            .height(Dimensions.FoodRowHeight)
-            .background(AppColors.Background)
-            .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.lg),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Thumbnail Icon Container
-        Box(
-            modifier = Modifier
-                .size(Dimensions.FoodThumbnailSize)
-                .clip(AppShapes.CardSmall)
-                .background(AppColors.Background),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Fastfood,
-                contentDescription = null,
-                tint = AppColors.TextSecondary,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-
-        // Title and Subtitle
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = AppSpacing.md)
-        ) {
-            Text(
-                text = food.name,
-                style = AppTypography.Body2,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            // The calorie number on the right is per this basis (BUG-036)
-            Text(
-                text = food.listSubtitle,
-                style = AppTypography.Caption,
-                color = AppColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // Calories & Chevron
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
-        ) {
-            Text(
-                text = "${food.nutrition.calories.roundToInt()}",
-                style = AppTypography.Body1,
-                color = AppColors.CalorieText
-            )
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = AppColors.TextSecondary,
-                modifier = Modifier.padding(start = AppSpacing.sm).size(Dimensions.IconSizeSmall)
-            )
-        }
-    }
+    )
 }

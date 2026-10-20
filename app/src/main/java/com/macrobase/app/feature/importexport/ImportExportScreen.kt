@@ -5,12 +5,15 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,22 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,8 +38,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.PortabilityConfig
@@ -57,7 +53,14 @@ import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.components.PrimaryButton
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbIconCircle
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.domain.model.BackupPreview
 import com.macrobase.app.domain.model.BackupRecordCountsDto
 import com.macrobase.app.domain.model.ImportMode
@@ -232,6 +235,10 @@ class ImportExportViewModel(
     }
 }
 
+/**
+ * Data & backup. The scaffold draws the pinned "Data & backup" header, so this screen starts with
+ * its lead line, then the status banners and the export and restore cards.
+ */
 @Composable
 fun ImportExportScreen(
     viewModel: ImportExportViewModel,
@@ -266,178 +273,116 @@ fun ImportExportScreen(
         }
     }
 
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.rememberIsScrolled())
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin)
     ) {
-        Text(text = "Data & Backup", style = AppTypography.Header1)
         Text(
             text = "Export and restore your offline MacroBase database. You own 100% of your personal nutrition data.",
-            style = AppTypography.Body2,
+            style = AppTypography.Body2.copy(fontSize = 14.5.sp, lineHeight = 21.sp),
             color = AppColors.TextSecondary,
-            modifier = Modifier.padding(top = AppSpacing.xs)
+            modifier = Modifier.padding(top = 4.dp)
         )
-
-        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
         // Status / Banner Feedback
         uiState.exportSuccessMessage?.let { msg ->
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.SuccessSurface),
-                modifier = Modifier.fillMaxWidth().padding(bottom = AppSpacing.md)
-            ) {
-                Row(modifier = Modifier.padding(AppSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppColors.Primary)
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    Text(text = msg, style = AppTypography.Body1, color = AppColors.TextPrimary)
-                }
-            }
+            StatusBanner(message = msg, isSuccess = true)
         }
 
         uiState.exportErrorMessage?.let { err ->
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.ErrorSurface),
-                modifier = Modifier.fillMaxWidth().padding(bottom = AppSpacing.md)
-            ) {
-                Row(modifier = Modifier.padding(AppSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Error, contentDescription = null, tint = AppColors.TextPrimary)
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    Text(text = err, style = AppTypography.Body1, color = AppColors.TextPrimary)
-                }
-            }
+            StatusBanner(message = err, isSuccess = false)
         }
 
         uiState.validationError?.let { err ->
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.ErrorSurface),
-                modifier = Modifier.fillMaxWidth().padding(bottom = AppSpacing.md)
-            ) {
-                Row(modifier = Modifier.padding(AppSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Error, contentDescription = null, tint = AppColors.TextPrimary)
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    // Bounded even if a message ever grows: it once held a whole backup file (BUG-047)
-                    Text(
-                        text = err,
-                        style = AppTypography.Body1,
-                        color = AppColors.TextPrimary,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            // Bounded even if a message ever grows: it once held a whole backup file (BUG-047)
+            StatusBanner(message = err, isSuccess = false, maxLines = 4)
         }
 
         // 1. Export User Data Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                Text(text = "Export User Data", style = AppTypography.Header2)
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-                Text(
-                    text = "Packages your food diary logs, custom foods, recipes, weight history, hydration records, and goals into a portable ZIP archive.",
-                    style = AppTypography.Body2,
-                    color = AppColors.TextSecondary
-                )
-                Spacer(modifier = Modifier.height(AppSpacing.sm))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = AppColors.WaterCyan, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(AppSpacing.xs))
+        BackupCard(
+            icon = Ph.UploadSimple.light,
+            title = "Export user data",
+            description = "Packages your food diary logs, custom foods, recipes, weight history, hydration records, and goals into a portable ZIP archive.",
+            modifier = Modifier.padding(top = 16.dp),
+            details = {
+                Row(verticalAlignment = Alignment.Top) {
+                    MbIcon(
+                        icon = Ph.Info.light,
+                        contentDescription = null,
+                        size = 15.dp,
+                        tint = AppColors.TextMuted,
+                        modifier = Modifier.padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Stored completely offline on your device. Never uploaded to the cloud.",
                         style = AppTypography.Caption,
                         color = AppColors.TextMuted
                     )
                 }
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
                 Text(
                     // Auto Backup excludes MacroBase data from Google's cloud (BUG-018)
                     text = "Android's Google cloud backup does not include MacroBase data. Export a backup file to keep a copy.",
                     style = AppTypography.Caption,
                     color = AppColors.TextMuted
                 )
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                if (uiState.isExporting) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(color = AppColors.Primary, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        Text(text = "Creating backup archive...", style = AppTypography.Body2)
-                    }
-                } else {
-                    PrimaryButton(
-                        text = "\uD83D\uDCE4 Export Backup File",
-                        onClick = {
-                            val defaultName = "${PortabilityConfig.BACKUP_ZIP_FILENAME_PREFIX}${LocalDate.now()}.zip"
-                            exportLauncher.launch(defaultName)
-                        }
-                    )
-                }
+            }
+        ) {
+            if (uiState.isExporting) {
+                BusyRow(label = "Creating backup archive...")
+            } else {
+                MbButton(
+                    text = "Export Backup File",
+                    icon = Ph.Export.regular,
+                    onClick = {
+                        val defaultName = "${PortabilityConfig.BACKUP_ZIP_FILENAME_PREFIX}${LocalDate.now()}.zip"
+                        exportLauncher.launch(defaultName)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
-
-        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
         // 2. Restore User Data Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
+        BackupCard(
+            icon = Ph.DownloadSimple.light,
+            title = "Restore user data",
+            description = "Restore your records from a previously exported backup archive. You can choose to merge missing entries or replace your existing database.",
+            modifier = Modifier.padding(top = 12.dp)
         ) {
-            Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                Text(text = "Restore User Data", style = AppTypography.Header2)
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-                Text(
-                    text = "Restore your records from a previously exported backup archive. You can choose to merge missing entries or replace your existing database.",
-                    style = AppTypography.Body2,
-                    color = AppColors.TextSecondary
+            if (uiState.isValidating || uiState.isImporting) {
+                val label = if (uiState.isValidating) "Validating backup archive..." else "Restoring database transactionally..."
+                BusyRow(label = label)
+            } else {
+                MbButton(
+                    text = "Select Backup File to Restore",
+                    kind = MbButtonKind.Secondary,
+                    icon = Ph.Database.light,
+                    onClick = {
+                        importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                if (uiState.isValidating || uiState.isImporting) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(color = AppColors.Primary, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(AppSpacing.sm))
-                        val label = if (uiState.isValidating) "Validating backup archive..." else "Restoring database transactionally..."
-                        Text(text = label, style = AppTypography.Body2)
-                    }
-                } else {
-                    PrimaryButton(
-                        text = "\uD83D\uDCE5 Select Backup File to Restore",
-                        onClick = {
-                            importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                        }
-                    )
-                }
             }
         }
-
-        Spacer(modifier = Modifier.height(AppSpacing.xl))
 
         // Schema & Compatibility Footer
         Text(
             text = "Backup Format: ${PortabilityConfig.BACKUP_FORMAT_NAME} (Schema v${PortabilityConfig.DATABASE_SCHEMA_VERSION})",
             style = AppTypography.Caption,
-            color = AppColors.TextMuted
+            color = AppColors.TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 26.dp)
         )
+
+        Spacer(modifier = Modifier.height(AppSpacing.xxl))
     }
 
     // ==========================================
@@ -448,54 +393,57 @@ fun ImportExportScreen(
     uiState.previewData?.let { preview ->
         AlertDialog(
             onDismissRequest = { viewModel.dismissPreview() },
-            title = { Text(text = "Backup Archive Preview", style = AppTypography.Header2) },
+            title = { Text(text = "Backup Archive Preview", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(text = "Created: ${preview.exportedAt}", style = AppTypography.Caption, color = AppColors.TextSecondary)
                     Text(text = "App Version: ${preview.appVersion} (Format v${preview.backupVersion})", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-                    Text(text = "Archive Contents:", style = AppTypography.Body1)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    Spacer(modifier = Modifier.height(AppSpacing.lg))
+                    Text(text = "Archive Contents:", style = AppTypography.Body1, color = AppColors.TextPrimary)
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    CountBadgeRow("Diary Entries", preview.counts.diaryEntries)
-                    CountBadgeRow("Custom Foods", preview.counts.customFoods)
-                    CountBadgeRow("Recipes", preview.counts.recipes)
-                    CountBadgeRow("Weight Entries", preview.counts.weightEntries)
-                    CountBadgeRow("Water Logs", preview.counts.waterEntries)
-                    CountBadgeRow("Goals Configuration", preview.counts.goals)
-                    CountBadgeRow("Profile Preferences", preview.counts.preferences)
+                    CountList(
+                        rows = listOf(
+                            "Diary Entries" to preview.counts.diaryEntries,
+                            "Custom Foods" to preview.counts.customFoods,
+                            "Recipes" to preview.counts.recipes,
+                            "Weight Entries" to preview.counts.weightEntries,
+                            "Water Logs" to preview.counts.waterEntries,
+                            "Goals Configuration" to preview.counts.goals,
+                            "Profile Preferences" to preview.counts.preferences
+                        )
+                    )
 
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-                    Text(text = "Select Restore Mode:", style = AppTypography.Body2)
+                    Spacer(modifier = Modifier.height(AppSpacing.lg))
+                    Text(text = "Select Restore Mode:", style = AppTypography.Body2, color = AppColors.TextSecondary)
                 }
             },
             confirmButton = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Button(
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                ) {
+                    MbButton(
+                        text = "Merge with Existing Data",
                         onClick = { viewModel.onSelectImportMode(ImportMode.MERGE) },
-                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("\u2795 Merge with Existing Data", color = AppColors.Background)
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    Button(
+                    )
+                    MbButton(
+                        text = "Overwrite Entire Database",
+                        kind = MbButtonKind.Danger,
                         onClick = { viewModel.onSelectImportMode(ImportMode.OVERWRITE) },
-                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.AlertRed),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("\u26A0\uFE0F Overwrite Entire Database", color = AppColors.TextPrimary)
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    OutlinedButton(
+                    )
+                    MbButton(
+                        text = "Cancel",
+                        kind = MbButtonKind.Secondary,
                         onClick = { viewModel.dismissPreview() },
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Cancel", color = AppColors.TextSecondary)
-                    }
+                    )
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 
@@ -503,42 +451,41 @@ fun ImportExportScreen(
     if (uiState.showOverwriteConfirmation) {
         AlertDialog(
             onDismissRequest = { viewModel.dismissOverwriteConfirmation() },
-            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = AppColors.AlertRed, modifier = Modifier.size(36.dp)) },
-            title = { Text(text = "Confirm Database Overwrite", style = AppTypography.Header2) },
+            icon = { MbIcon(icon = Ph.Warning.light, contentDescription = null, size = 36.dp, tint = AppColors.Error) },
+            title = { Text(text = "Confirm Database Overwrite", style = AppTypography.Header1) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                     Text(
                         text = "This action will completely REPLACE all your existing food diary entries, custom foods, recipes, weight history, and water logs with the backup data.",
-                        style = AppTypography.Body1
+                        style = AppTypography.Body1,
+                        color = AppColors.TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
                         text = "Note: Your built-in 50k food catalog will NOT be affected.",
                         style = AppTypography.Caption,
-                        color = AppColors.WaterCyan
+                        color = AppColors.AccentStrong
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
                         text = "This cannot be undone. Are you sure you want to overwrite?",
                         style = AppTypography.Body2,
-                        color = AppColors.AlertRedLight
+                        color = AppColors.Error
                     )
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = { viewModel.confirmOverwriteImport() },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.AlertRed)
-                ) {
-                    Text("Overwrite Database", color = AppColors.TextPrimary)
-                }
+                MbButton(
+                    text = "Overwrite Database",
+                    kind = MbButtonKind.Danger,
+                    onClick = { viewModel.confirmOverwriteImport() }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.dismissOverwriteConfirmation() }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 
@@ -547,52 +494,167 @@ fun ImportExportScreen(
         AlertDialog(
             onDismissRequest = { viewModel.dismissResult() },
             icon = {
-                val icon = if (result.isSuccess) Icons.Default.CheckCircle else Icons.Default.Error
-                val tint = if (result.isSuccess) AppColors.Primary else AppColors.AlertRed
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(36.dp))
+                val icon = if (result.isSuccess) Ph.CheckCircle.regular else Ph.WarningCircle.regular
+                val tint = if (result.isSuccess) AppColors.Success else AppColors.Error
+                MbIcon(icon = icon, contentDescription = null, size = 36.dp, tint = tint)
             },
             title = {
                 val title = if (result.isSuccess) "Restore Complete" else "Restore Failed"
-                Text(text = title, style = AppTypography.Header2)
+                Text(text = title, style = AppTypography.Header1)
             },
             text = {
                 Column {
-                    Text(text = result.message.ifBlank { result.errorMessage ?: "" }, style = AppTypography.Body1)
+                    Text(
+                        text = result.message.ifBlank { result.errorMessage ?: "" },
+                        style = AppTypography.Body1,
+                        color = AppColors.TextPrimary
+                    )
                     if (result.isSuccess) {
-                        Spacer(modifier = Modifier.height(AppSpacing.md))
-                        CountBadgeRow("Records Imported", result.recordsImported)
-                        CountBadgeRow("Records Updated", result.recordsUpdated)
-                        CountBadgeRow("Records Skipped", result.recordsSkipped)
-                        CountBadgeRow("Conflicts Resolved", result.conflictsResolved)
+                        Spacer(modifier = Modifier.height(AppSpacing.lg))
+                        CountList(
+                            rows = listOf(
+                                "Records Imported" to result.recordsImported,
+                                "Records Updated" to result.recordsUpdated,
+                                "Records Skipped" to result.recordsSkipped,
+                                "Conflicts Resolved" to result.conflictsResolved
+                            )
+                        )
                     }
                 }
             },
             confirmButton = {
-                PrimaryButton(
+                MbButton(
                     text = "Done",
                     onClick = { viewModel.dismissResult() }
                 )
             },
-            containerColor = AppColors.Surface
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 }
 
+/**
+ * A backup action card (the demo's bk-card): an icon circle beside the heading, the description and
+ * any [details], then the card's action ([action]: its button, or a spinner while it works).
+ */
 @Composable
-private fun CountBadgeRow(label: String, count: Int) {
+private fun BackupCard(
+    @DrawableRes icon: Int,
+    title: String,
+    description: String,
+    modifier: Modifier = Modifier,
+    details: (@Composable ColumnScope.() -> Unit)? = null,
+    action: @Composable ColumnScope.() -> Unit
+) {
+    MbPanel(modifier = modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            MbIconCircle(icon = icon, size = 44.dp, iconSize = 22.dp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+            ) {
+                Text(text = title, style = AppTypography.Header2, color = AppColors.TextPrimary)
+                Text(
+                    text = description,
+                    style = AppTypography.Body2.copy(fontSize = 13.sp),
+                    color = AppColors.TextSecondary
+                )
+                if (details != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    details()
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        action()
+    }
+}
+
+/** The spinner and its label, in the place of the card's button while the work runs. */
+@Composable
+private fun BusyRow(label: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        CircularProgressIndicator(
+            color = AppColors.Primary,
+            trackColor = AppColors.BarTrack,
+            strokeWidth = 2.5.dp,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
         Text(text = label, style = AppTypography.Body2, color = AppColors.TextSecondary)
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(AppColors.SurfaceAlt)
-                .padding(horizontal = AppSpacing.sm, vertical = 2.dp)
-        ) {
-            Text(text = "$count", style = AppTypography.Caption, color = AppColors.Primary)
+    }
+}
+
+/** A success or error message: a rounded panel tinted in the status colour, with its icon. */
+@Composable
+private fun StatusBanner(message: String, isSuccess: Boolean, maxLines: Int = Int.MAX_VALUE) {
+    val tint = if (isSuccess) AppColors.Success else AppColors.Error
+    val shape = AppShapes.CardSmall
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .clip(shape)
+            .background(tint.copy(alpha = 0.10f))
+            .border(1.dp, tint.copy(alpha = 0.35f), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIcon(
+            icon = if (isSuccess) Ph.CheckCircle.regular else Ph.WarningCircle.regular,
+            contentDescription = null,
+            size = 20.dp,
+            tint = tint
+        )
+        Text(
+            text = message,
+            style = AppTypography.Body1.copy(fontSize = 14.sp),
+            color = AppColors.TextPrimary,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** Label / value rows (the backup's counts), with a thin line between rows. */
+@Composable
+private fun CountList(rows: List<Pair<String, Int>>) {
+    val shape = AppShapes.InputBox
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(AppColors.RowFill)
+            .border(1.dp, AppColors.Edge, shape)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        rows.forEachIndexed { index, (label, count) ->
+            if (index > 0) HorizontalDivider(color = AppColors.Divider)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = label, style = AppTypography.Body2, color = AppColors.TextSecondary)
+                Text(
+                    text = "$count",
+                    style = AppTypography.Body1,
+                    color = AppColors.TextPrimary,
+                    textAlign = TextAlign.End
+                )
+            }
         }
     }
 }

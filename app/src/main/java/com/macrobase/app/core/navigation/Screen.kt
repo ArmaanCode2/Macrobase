@@ -62,8 +62,18 @@ sealed class Screen(
         }
     }
 
-    data object Weight : Screen("weight?dateEpochDay={dateEpochDay}", "Weight Tracker", Icons.Default.Scale, isDrawerItem = true) {
-        fun createRoute(dateEpochDay: Long? = null) = if (dateEpochDay != null) "weight?dateEpochDay=$dateEpochDay" else "weight"
+    data object Weight : Screen("weight?dateEpochDay={dateEpochDay}&openLog={openLog}", "Weight Tracker", Icons.Default.Scale, isDrawerItem = true) {
+        /** [openLog] opens the log dialog once, for the "+" sheet's and Home's "Log weight". */
+        fun createRoute(dateEpochDay: Long? = null, openLog: Boolean = false) = buildString {
+            append("weight")
+            val params = mutableListOf<String>()
+            if (dateEpochDay != null) params.add("dateEpochDay=$dateEpochDay")
+            if (openLog) params.add("openLog=true")
+            if (params.isNotEmpty()) {
+                append("?")
+                append(params.joinToString("&"))
+            }
+        }
     }
     data object Water : Screen("water?dateEpochDay={dateEpochDay}", "Water Tracker", Icons.Default.Opacity, isDrawerItem = true) {
         fun createRoute(dateEpochDay: Long? = null) = if (dateEpochDay != null) "water?dateEpochDay=$dateEpochDay" else "water"
@@ -86,10 +96,11 @@ sealed class Screen(
     data object Basket : Screen("basket", "Basket")
 
     companion object {
-        /** In bar order. Statistics is the raised button in the middle. */
+        /** In bar order: Home, Foods, Stats, Rank, Profile. */
         val bottomNavScreens: List<Screen>
             get() = listOf(Home, CustomFoods, Statistics, Rank, Preferences)
 
+        /** Every place the old side drawer linked to; each is reachable from a tab, the "+" sheet or Profile. */
         val drawerScreens: List<Screen>
             get() = listOf(Home, CustomFoods, Recipes, Weight, Water, ImportExport, Preferences)
     }

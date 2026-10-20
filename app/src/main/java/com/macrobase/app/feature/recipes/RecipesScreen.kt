@@ -1,5 +1,30 @@
 package com.macrobase.app.feature.recipes
 
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
+import com.macrobase.app.core.navigation.LocalDockInset
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.mealLabel
+import com.macrobase.app.core.designsystem.components.MealAndDayPicker
+import com.macrobase.app.core.designsystem.components.MbSheet
+import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbRowTile
+import com.macrobase.app.core.designsystem.components.MbIconCircle
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.Ph
+import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Snackbar
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,7 +115,6 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
-import androidx.compose.material3.CircularProgressIndicator
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -220,185 +244,192 @@ fun RecipesScreen(
     var recipeToLog by remember { mutableStateOf<Recipe?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    ReportContentScrolled(listState.rememberIsScrolled())
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onCreateClick,
-                containerColor = AppColors.Primary,
-                contentColor = AppColors.TextPrimary
+    Box(modifier = modifier.fillMaxSize()) {
+        if (uiState.isLoading) {
+            // A spinner only if the recipes take a while, so a quick load never flashes one
+            MbDelayedProgress(modifier = Modifier.fillMaxSize())
+        } else if (uiState.recipes.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.RestaurantMenu,
+                title = "My Recipes",
+                subtitle = "Build multi-ingredient recipes with automatic per-serving nutrition calculation.",
+                actionButtonText = "+ Create New Recipe",
+                onActionClick = onCreateClick,
+                modifier = Modifier.padding(top = AppSpacing.xl)
+            )
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = AppSpacing.screenMargin,
+                    end = AppSpacing.screenMargin,
+                    top = AppSpacing.sm,
+                    bottom = LocalDockInset.current + AppSpacing.md
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Create Recipe")
-            }
-        },
-        containerColor = AppColors.Background
-    ) { padding ->
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(AppColors.Background)
-        ) {
-            if (uiState.isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AppColors.Primary)
-                }
-            } else if (uiState.recipes.isEmpty()) {
-                EmptyStateCard(
-                    icon = Icons.Default.RestaurantMenu,
-                    title = "My Recipes",
-                    subtitle = "Build multi-ingredient recipes with automatic per-serving nutrition calculation.",
-                    actionButtonText = "+ Create New Recipe",
-                    onActionClick = onCreateClick,
-                    modifier = Modifier.padding(top = AppSpacing.xl)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Dimensions.SectionHeaderHeight)
-                        .background(AppColors.SurfaceAlt)
-                        .padding(horizontal = AppSpacing.lg),
-                    contentAlignment = Alignment.CenterStart
-                ) {
+                item(key = "count") {
                     Text(
-                        text = "SAVED RECIPES (${uiState.recipes.size})",
+                        text = "Saved recipes (${uiState.recipes.size})",
                         style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
+                        color = AppColors.TextMuted
                     )
                 }
-
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(uiState.recipes, key = { it.id }) { recipe ->
-                        RecipeCard(
-                            recipe = recipe,
-                            onLogClick = { recipeToLog = recipe },
-                            onEditClick = { onEditClick(recipe.id) },
-                            onDeleteClick = { viewModel.deleteRecipe(recipe.id) {} }
-                        )
-                        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-                    }
+                items(uiState.recipes, key = { it.id }) { recipe ->
+                    RecipeCard(
+                        recipe = recipe,
+                        onLogClick = { recipeToLog = recipe },
+                        onEditClick = { onEditClick(recipe.id) },
+                        onDeleteClick = { viewModel.deleteRecipe(recipe.id) {} }
+                    )
+                }
+                item(key = "create") {
+                    MbButton(
+                        text = "Create recipe",
+                        onClick = onCreateClick,
+                        icon = Ph.Plus.regular,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp)
+                    )
                 }
             }
         }
+
+        // Above the dock, so "added to basket" is never hidden behind it
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = LocalDockInset.current)
+        ) { data ->
+            Snackbar(
+                snackbarData = data,
+                containerColor = AppColors.ToastFill,
+                contentColor = AppColors.ToastInk,
+                shape = AppShapes.CardSmall
+            )
+        }
     }
 
-    // Log Recipe Modal Dialog
+    // Log Recipe sheet: one action at a time, so a second tap before it closes never logs twice (BUG-011)
     recipeToLog?.let { recipe ->
-        var selectedMeal by remember { mutableStateOf(MealType.LUNCH) }
-        var servingsCount by remember { mutableStateOf("1") }
-        // One action per dialog: a second tap before it closes must not log twice (BUG-011)
-        var submitted by remember { mutableStateOf(false) }
-        var logError by remember { mutableStateOf<String?>(null) }
-        val servings = parsePositiveQuantity(servingsCount)
-
-        AlertDialog(
-            // Stays open while logging, so a failure is shown here rather than lost
-            onDismissRequest = { if (!submitted) recipeToLog = null },
-            title = { Text("Log Recipe: ${recipe.name}", style = AppTypography.Header2) },
-            text = {
-                Column {
-                    Text("Choose meal slot and servings to log:", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    var mealExpanded by remember { mutableStateOf(false) }
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = selectedMeal.displayName,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Meal") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth().clickable { mealExpanded = true }
-                        )
-                        DropdownMenu(expanded = mealExpanded, onDismissRequest = { mealExpanded = false }) {
-                            MealType.entries.forEach { m ->
-                                DropdownMenuItem(
-                                    text = { Text(m.displayName) },
-                                    onClick = {
-                                        selectedMeal = m
-                                        mealExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                    OutlinedTextField(
-                        value = servingsCount,
-                        onValueChange = { servingsCount = it },
-                        label = { Text("Number of Servings") },
-                        isError = servings == null,
-                        supportingText = if (servings == null) {
-                            { Text(QUANTITY_INPUT_ERROR) }
-                        } else null,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    logError?.let { error ->
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(error, style = AppTypography.Body2, color = AppColors.AlertRed)
-                    }
-                }
+        LogRecipeSheet(
+            recipe = recipe,
+            viewModel = viewModel,
+            onDismiss = { recipeToLog = null },
+            onLogged = {
+                recipeToLog = null
+                onLogSuccess()
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val qty = servings
-                        if (submitted || qty == null) return@Button
-                        submitted = true
-                        logError = null
-                        viewModel.logRecipeToDiary(
-                            recipe = recipe,
-                            mealType = selectedMeal,
-                            date = LocalDate.now(),
-                            servingsToLog = qty,
-                            onComplete = {
-                                recipeToLog = null
-                                onLogSuccess()
-                            },
-                            onError = { message ->
-                                submitted = false
-                                logError = message
-                            }
-                        )
-                    },
-                    enabled = !submitted && servings != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
-                ) {
-                    Text("Log to Diary")
-                }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { recipeToLog = null }, enabled = !submitted) {
-                        Text("Cancel", color = AppColors.TextSecondary)
-                    }
-                    TextButton(
-                        onClick = {
-                            val qty = servings
-                            if (submitted || qty == null) return@TextButton
-                            submitted = true
-                            val recipeName = recipe.name
-                            viewModel.addRecipeToBasket(recipe, selectedMeal, LocalDate.now(), qty) {
-                                recipeToLog = null
-                                snackbarScope.launch { snackbarHostState.showSnackbar("$recipeName added to basket") }
-                            }
-                        },
-                        enabled = !submitted && servings != null
-                    ) {
-                        Text("Add to Basket", color = AppColors.Primary)
-                    }
-                }
-            },
-            containerColor = AppColors.SurfaceAlt
+            onAddedToBasket = { recipeName ->
+                recipeToLog = null
+                snackbarScope.launch { snackbarHostState.showSnackbar("$recipeName added to basket") }
+            }
         )
+    }
+}
+
+/**
+ * The recipe's log sheet: the meal (the log is always today), the number of servings, then "Add to
+ * basket" or "Log to diary". It stays open while logging, so a failure is shown here rather than lost.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LogRecipeSheet(
+    recipe: Recipe,
+    viewModel: RecipesViewModel,
+    onDismiss: () -> Unit,
+    onLogged: () -> Unit,
+    onAddedToBasket: (String) -> Unit
+) {
+    var selectedMeal by remember { mutableStateOf(MealType.LUNCH) }
+    var servingsCount by remember { mutableStateOf("1") }
+    var submitted by remember { mutableStateOf(false) }
+    var logError by remember { mutableStateOf<String?>(null) }
+    val servings = parsePositiveQuantity(servingsCount)
+    val today = LocalDate.now()
+    val submittedNow by rememberUpdatedState(submitted)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { value -> value != SheetValue.Hidden || !submittedNow }
+    )
+
+    MbSheet(
+        onDismiss = { if (!submitted) onDismiss() },
+        title = "Log recipe: ${recipe.name}",
+        sheetState = sheetState,
+        footer = {
+            MbButton(
+                text = "Add to basket",
+                kind = MbButtonKind.Secondary,
+                enabled = !submitted && servings != null,
+                onClick = {
+                    val qty = servings
+                    if (submitted || qty == null) return@MbButton
+                    submitted = true
+                    val recipeName = recipe.name
+                    viewModel.addRecipeToBasket(recipe, selectedMeal, LocalDate.now(), qty) {
+                        onAddedToBasket(recipeName)
+                    }
+                }
+            )
+            MbButton(
+                text = "Log to diary",
+                enabled = !submitted && servings != null,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val qty = servings
+                    if (submitted || qty == null) return@MbButton
+                    submitted = true
+                    logError = null
+                    viewModel.logRecipeToDiary(
+                        recipe = recipe,
+                        mealType = selectedMeal,
+                        date = LocalDate.now(),
+                        servingsToLog = qty,
+                        onComplete = onLogged,
+                        onError = { message ->
+                            submitted = false
+                            logError = message
+                        }
+                    )
+                }
+            )
+        }
+    ) {
+        Text(
+            "Choose meal slot and servings to log:",
+            style = AppTypography.Body2,
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+        )
+        MealAndDayPicker(
+            selectedMeal = selectedMeal,
+            selectedDate = today,
+            today = today,
+            onMealSelected = { selectedMeal = it },
+            onDateSelected = {},
+            header = "Log to ${mealLabel(selectedMeal)}, Today",
+            showDays = false
+        )
+        Spacer(modifier = Modifier.height(AppSpacing.lg))
+        MbTextField(
+            value = servingsCount,
+            onValueChange = { servingsCount = it },
+            label = "Number of Servings",
+            errorText = if (servings == null) QUANTITY_INPUT_ERROR else null,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth()
+        )
+        logError?.let { error ->
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
+            Text(error, style = AppTypography.Body2, color = AppColors.Error)
+        }
     }
 }
 
@@ -412,75 +443,61 @@ fun RecipeCard(
 ) {
     val perServing = recipe.nutritionPerServing
 
-    Card(
-        shape = AppShapes.Card,
-        colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
-    ) {
-        Column(modifier = Modifier.padding(AppSpacing.md)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = recipe.name,
-                        style = AppTypography.Header2,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${recipe.servingsProduced} servings \u2022 ${recipe.ingredients.size} ingredients",
-                        style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
-                    )
-                }
-
+    MbPanel(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            MbIconCircle(icon = Ph.CookingPot.light, size = 40.dp, iconSize = 20.dp)
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "${perServing.calories.roundToInt()} cal/srv",
-                    style = AppTypography.ValueMd,
-                    color = AppColors.CalorieText
+                    text = recipe.name,
+                    style = AppTypography.Header2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${recipe.servingsProduced} servings \u2022 ${recipe.ingredients.size} ingredients",
+                    style = AppTypography.Body2.copy(fontSize = 13.sp),
+                    color = AppColors.TextSecondary
                 )
             }
+        }
 
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
+        Text(
+            text = "${perServing.calories.roundToInt()} kcal per serving",
+            style = AppTypography.Header3,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.padding(top = 12.dp)
+        )
 
-            // Macro summary line
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
-            ) {
-                Text(text = "P: ${String.format(Locale.US, "%.1f", perServing.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
-                Text(text = "C: ${String.format(Locale.US, "%.1f", perServing.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
-                Text(text = "F: ${String.format(Locale.US, "%.1f", perServing.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
-            }
+        // Macro summary line
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
+        ) {
+            Text(text = "Protein ${String.format(Locale.US, "%.1f", perServing.proteinGrams)} g", style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.MacroProtein)
+            Text(text = "Carbs ${String.format(Locale.US, "%.1f", perServing.carbsGrams)} g", style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.MacroCarbs)
+            Text(text = "Fat ${String.format(Locale.US, "%.1f", perServing.fatGrams)} g", style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.MacroFat)
+        }
 
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onEditClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Recipe", tint = AppColors.TextSecondary, modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = onDeleteClick, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete Recipe", tint = AppColors.TextSecondary, modifier = Modifier.size(18.dp))
-                }
-                Spacer(modifier = Modifier.size(AppSpacing.sm))
-                Button(
-                    onClick = onLogClick,
-                    shape = AppShapes.PillButton,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                    modifier = Modifier.height(Dimensions.ButtonHeightSmall)
-                ) {
-                    Text("(+) Log Recipe", style = AppTypography.Caption, color = AppColors.TextPrimary)
-                }
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MbButton(
+                text = "Log recipe",
+                onClick = onLogClick,
+                kind = MbButtonKind.Secondary,
+                minHeight = 40.dp
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            MbIconButton(icon = Ph.PencilSimple.light, contentDescription = "Edit Recipe", onClick = onEditClick, size = 40.dp, iconSize = 18.dp)
+            MbIconButton(icon = Ph.Trash.light, contentDescription = "Delete Recipe", onClick = onDeleteClick, size = 40.dp, iconSize = 18.dp)
         }
     }
 }
@@ -525,64 +542,71 @@ fun EditRecipeScreen(
     val perServingNutr = tempRecipe.nutritionPerServing
     val isFormValid = name.isNotBlank() && servingsCount > 0 && ingredients.isNotEmpty()
 
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.rememberIsScrolled())
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
+            .padding(horizontal = AppSpacing.screenMargin, vertical = AppSpacing.sm)
     ) {
         Text(text = if (recipeId > 0L) "Edit Recipe" else "Create Recipe", style = AppTypography.Header1)
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
-        OutlinedTextField(
+        MbTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Recipe Name *") },
+            label = "Recipe Name *",
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
+        Spacer(modifier = Modifier.height(AppSpacing.md))
 
-        OutlinedTextField(
+        MbTextField(
             value = servingsProduced,
             onValueChange = { servingsProduced = it },
-            label = { Text("Servings Produced *") },
+            label = "Servings Produced *",
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
         // Running Live Nutrition Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                Text(text = "LIVE NUTRITION (PER SERVING)", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Calories", style = AppTypography.Header2)
-                    Text(text = "${perServingNutr.calories.roundToInt()} kcal", style = AppTypography.ValueLg, color = AppColors.CalorieText)
-                }
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = "Protein: ${String.format(Locale.US, "%.1f", perServingNutr.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
-                    Text(text = "Carbs: ${String.format(Locale.US, "%.1f", perServingNutr.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
-                    Text(text = "Fat: ${String.format(Locale.US, "%.1f", perServingNutr.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
-                }
+        MbPanel(modifier = Modifier.fillMaxWidth()) {
+            Text(text = "Live nutrition (per serving)", style = AppTypography.Caption, color = AppColors.TextSecondary)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+            ) {
+                Text(
+                    text = "${perServingNutr.calories.roundToInt()}",
+                    style = AppTypography.BigStat,
+                    color = AppColors.TextPrimary,
+                    modifier = Modifier.alignByBaseline()
+                )
+                Text(
+                    text = "kcal",
+                    style = AppTypography.HeroUnit,
+                    modifier = Modifier
+                        .alignByBaseline()
+                        .padding(start = 8.dp)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "Protein: ${String.format(Locale.US, "%.1f", perServingNutr.proteinGrams)}g", style = AppTypography.Body2, color = AppColors.MacroProtein)
+                Text(text = "Carbs: ${String.format(Locale.US, "%.1f", perServingNutr.carbsGrams)}g", style = AppTypography.Body2, color = AppColors.MacroCarbs)
+                Text(text = "Fat: ${String.format(Locale.US, "%.1f", perServingNutr.fatGrams)}g", style = AppTypography.Body2, color = AppColors.MacroFat)
             }
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        Spacer(modifier = Modifier.height(AppSpacing.lg))
 
         // Ingredients Section Header
         Row(
@@ -590,28 +614,18 @@ fun EditRecipeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "INGREDIENTS (${ingredients.size})", style = AppTypography.Header3)
-            Button(
+            Text(text = "Ingredients (${ingredients.size})", style = AppTypography.Header2)
+            MbButton(
+                text = "+ Add Ingredient",
                 onClick = { showAddIngredientDialog = true },
-                shape = AppShapes.PillButton,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                modifier = Modifier.height(Dimensions.ButtonHeightSmall)
-            ) {
-                Text("+ Add Ingredient", style = AppTypography.Caption)
-            }
+                minHeight = 40.dp
+            )
         }
 
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
+        Spacer(modifier = Modifier.height(AppSpacing.md))
 
         if (ingredients.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .background(AppColors.Surface, AppShapes.Card)
-                    .padding(AppSpacing.md),
-                contentAlignment = Alignment.Center
-            ) {
+            MbPanel(modifier = Modifier.fillMaxWidth()) {
                 val emptyText = if (existingRecipe?.ingredients?.isEmpty() == true) {
                     // Recipes saved by older versions kept only their per-serving totals
                     "This recipe's ingredient list was not saved by an older version, so it shows its stored totals. Add all of its ingredients again; saving replaces those totals."
@@ -621,24 +635,22 @@ fun EditRecipeScreen(
                 Text(text = emptyText, style = AppTypography.Body2, color = AppColors.TextSecondary)
             }
         } else {
-            ingredients.forEachIndexed { index, ing ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = AppSpacing.xs)
-                        .background(AppColors.Surface, AppShapes.Card)
-                        .padding(AppSpacing.md),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = ing.food.name, style = AppTypography.Body1, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(text = "${String.format(Locale.US, "%.1f", ing.quantity)} \u00D7 ${ing.serving.description}", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-                    Text(text = "${ing.nutrition.calories.roundToInt()} cal", style = AppTypography.Header3, color = AppColors.CalorieText)
-                    IconButton(onClick = {
-                        ingredients = ingredients.filterIndexed { i, _ -> i != index }
-                    }) {
-                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = AppColors.TextSecondary)
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)) {
+                ingredients.forEachIndexed { index, ing ->
+                    MbRowTile(
+                        title = ing.food.name,
+                        subtitle = "${String.format(Locale.US, "%.1f", ing.quantity)} \u00D7 ${ing.serving.description}",
+                        icon = Ph.ForkKnife.light,
+                        value = "${ing.nutrition.calories.roundToInt()} cal",
+                        showChevron = false
+                    ) {
+                        MbIconButton(
+                            icon = Ph.X.light,
+                            contentDescription = "Remove",
+                            onClick = { ingredients = ingredients.filterIndexed { i, _ -> i != index } },
+                            size = 40.dp,
+                            iconSize = 18.dp
+                        )
                     }
                 }
             }
@@ -653,6 +665,7 @@ fun EditRecipeScreen(
                 viewModel.saveRecipe(tempRecipe, onComplete = onSaveSuccess)
             }
         )
+        Spacer(modifier = Modifier.height(AppSpacing.xxl))
     }
 
     // Add Ingredient Dialog
@@ -665,11 +678,11 @@ fun EditRecipeScreen(
 
         AlertDialog(
             onDismissRequest = { showAddIngredientDialog = false },
-            title = { Text(text = "Add Ingredient", style = AppTypography.Header2) },
+            title = { Text(text = "Add Ingredient", style = AppTypography.Header1) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     if (selectedFood == null) {
-                        OutlinedTextField(
+                        MbTextField(
                             value = query,
                             onValueChange = {
                                 query = it
@@ -679,42 +692,40 @@ fun EditRecipeScreen(
                                     }
                                 }
                             },
-                            label = { Text("Search ingredient...") },
+                            placeholder = "Search ingredient...",
+                            leadingIcon = Ph.MagnifyingGlass.light,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-                        LazyColumn(modifier = Modifier.height(200.dp)) {
+                        LazyColumn(modifier = Modifier.height(220.dp)) {
                             items(searchResults) { food ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
+                                        .mbClickable(pressedScale = 0.98f) {
                                             selectedFood = food
                                             selectedServing = food.defaultServing ?: Serving(description = "100 g", gramWeight = 100.0)
                                         }
-                                        .padding(vertical = AppSpacing.xs),
+                                        .padding(vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = food.name, style = AppTypography.Body2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text(text = "${food.nutrition.calories.roundToInt()} cal ${food.nutritionBasisLabel}", style = AppTypography.Caption, color = AppColors.CalorieText)
+                                    Text(text = food.name, style = AppTypography.Body1, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(text = "${food.nutrition.calories.roundToInt()} cal ${food.nutritionBasisLabel}", style = AppTypography.Caption, color = AppColors.TextSecondary)
                                 }
                                 HorizontalDivider(color = AppColors.Divider)
                             }
                         }
                     } else {
                         Text(text = selectedFood!!.name, style = AppTypography.Header3)
-                        Spacer(modifier = Modifier.height(AppSpacing.sm))
+                        Spacer(modifier = Modifier.height(AppSpacing.md))
 
                         val ingredientQtyValid = parsePositiveQuantity(qtyInput) != null
-                        OutlinedTextField(
+                        MbTextField(
                             value = qtyInput,
                             onValueChange = { qtyInput = it },
-                            label = { Text("Quantity") },
-                            isError = !ingredientQtyValid,
-                            supportingText = if (!ingredientQtyValid) {
-                                { Text(QUANTITY_INPUT_ERROR) }
-                            } else null,
+                            label = "Quantity",
+                            errorText = if (!ingredientQtyValid) QUANTITY_INPUT_ERROR else null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -727,10 +738,11 @@ fun EditRecipeScreen(
             confirmButton = {
                 if (selectedFood != null) {
                     val ingredientQty = parsePositiveQuantity(qtyInput)
-                    Button(
+                    MbButton(
+                        text = "Add to Recipe",
                         enabled = ingredientQty != null,
                         onClick = {
-                            val q = ingredientQty ?: return@Button
+                            val q = ingredientQty ?: return@MbButton
                             val ing = RecipeIngredient(
                                 id = 0L,
                                 food = selectedFood!!,
@@ -740,9 +752,7 @@ fun EditRecipeScreen(
                             ingredients = ingredients + ing
                             showAddIngredientDialog = false
                         }
-                    ) {
-                        Text("Add to Recipe")
-                    }
+                    )
                 }
             },
             dismissButton = {
@@ -750,7 +760,8 @@ fun EditRecipeScreen(
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
-            containerColor = AppColors.SurfaceAlt
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
         )
     }
 }

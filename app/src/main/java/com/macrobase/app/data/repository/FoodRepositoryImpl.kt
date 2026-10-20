@@ -1,5 +1,7 @@
 package com.macrobase.app.data.repository
 
+import kotlinx.coroutines.CoroutineDispatcher
+import com.macrobase.app.core.util.onLane
 import com.macrobase.app.data.database.dao.CustomFoodDao
 import com.macrobase.app.data.database.dao.DiaryDao
 import com.macrobase.app.data.database.entity.CustomFoodEntity
@@ -22,7 +24,9 @@ class FoodRepositoryImpl(
     private val localDatabaseProvider: FoodDataProvider,
     private val customFoodDao: CustomFoodDao,
     /** The diary, for "Recently logged"; without it there are no recents. */
-    private val diaryDao: DiaryDao? = null
+    private val diaryDao: DiaryDao? = null,
+    /** Where the custom foods list is built; null builds it where collected (tests). */
+    private val calculationDispatcher: CoroutineDispatcher? = null
 ) : FoodRepository {
 
     companion object {
@@ -112,7 +116,7 @@ class FoodRepositoryImpl(
     override fun observeCustomFoods(): Flow<List<Food>> {
         return customFoodDao.observeAllCustomFoods().map { list ->
             list.map { it.toDomainFood() }
-        }
+        }.onLane(calculationDispatcher)
     }
 
     override suspend fun getCustomFoods(): List<Food> {

@@ -1,5 +1,36 @@
 package com.macrobase.app.feature.detail
 
+import com.macrobase.app.feature.basket.basketDateLabel
+import com.macrobase.app.core.designsystem.components.MealAndDayPicker
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.MbHeader
+import com.macrobase.app.core.designsystem.components.MbDangerGhostButton
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbChip
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbIconCircle
+import com.macrobase.app.domain.model.FoodSource
+import com.macrobase.app.domain.model.Food
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ColumnScope
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.mealLabel
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.Ph
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.map
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -138,11 +169,17 @@ class FoodDetailViewModel(
     private val updateDiaryEntryUseCase: UpdateDiaryEntryUseCase,
     private val deleteDiaryEntryUseCase: DeleteDiaryEntryUseCase,
     private val getDiaryEntryUseCase: com.macrobase.app.domain.usecase.GetDiaryEntryUseCase,
-    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
+    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock,
+    private val getGoalsUseCase: com.macrobase.app.domain.usecase.GetGoalsUseCase? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FoodDetailUiState())
     val uiState: StateFlow<FoodDetailUiState> = _uiState.asStateFlow()
+
+    /** The daily calorie target, for "% of your daily target"; 0 when it is not known. */
+    val dailyCalorieGoal: StateFlow<Double> = (
+        getGoalsUseCase?.invoke()?.map { it.dailyCalorieGoal } ?: kotlinx.coroutines.flow.flowOf(0.0)
+    ).stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), 0.0)
 
     private var editingEntryId: Long? = null
     private var editingBasketItemId: String? = null
@@ -578,6 +615,34 @@ class FoodDetailViewModel(
     fun isEditingBasket(): Boolean = editingBasketItemId != null
 }
 
+/** "Built-in", "Custom" or "Recipe": where a food comes from. */
+internal fun foodSourceLabel(food: Food): String = when {
+    food.source == FoodSource.RECIPE -> "Recipe"
+    food.isUserOwned || food.source == FoodSource.CUSTOM_USER -> "Custom"
+    else -> "Built-in"
+}
+
+/** The amount after a stepper tap: [delta] (0.5) added, never below 0, rounded to 2 decimals. */
+internal fun steppedQuantity(current: Double, delta: Double): Double =
+    (kotlin.math.round((current + delta) * 100.0) / 100.0).coerceAtLeast(0.0)
+
+/** Total grams of [quantity] of [serving], or null when the serving has no weight. */
+internal fun servingGrams(serving: Serving?, quantity: Double): Double? {
+    if (serving == null || serving.gramWeight <= 0.0 || serving.quantity <= 0.0) return null
+    return serving.gramWeight / serving.quantity * quantity
+}
+
+/** "150 g total", "37.5 g total". */
+internal fun gramsTotalLabel(grams: Double): String {
+    val rounded = kotlin.math.round(grams * 10.0) / 10.0
+    val text = if (rounded % 1.0 == 0.0) String.format(Locale.US, "%.0f", rounded) else String.format(Locale.US, "%.1f", rounded)
+    return "$text g total"
+}
+
+/** Whole-percent share of the daily calorie target, or null when there is no target. */
+internal fun percentOfDailyTarget(calories: Double, dailyGoal: Double): Int? =
+    if (dailyGoal > 0.0) ((calories / dailyGoal) * 100.0).roundToInt() else null
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FoodDetailScreen(
@@ -591,6 +656,7 @@ fun FoodDetailScreen(
 ) {
     val viewModel: FoodDetailViewModel = org.koin.androidx.compose.koinViewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val dailyCalorieGoal by viewModel.dailyCalorieGoal.collectAsState()
 
     BackHandler(onBack = onNavigateBack)
 
@@ -616,30 +682,8 @@ fun FoodDetailScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .background(AppColors.Background)
         ) {
-            // Top Header Bar matching reference
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .background(AppColors.Primary)
-                    .padding(horizontal = AppSpacing.xs),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.material3.IconButton(onClick = onNavigateBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = AppColors.TextPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(AppSpacing.xs))
-                Text(
-                    text = "Food Detail",
-                    style = AppTypography.Header2.copy(color = AppColors.TextPrimary)
-                )
-            }
+            MbHeader(title = "Food detail", onBack = onNavigateBack, applyStatusBarInset = false)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -650,12 +694,7 @@ fun FoodDetailScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Error",
-                        tint = AppColors.AlertRed,
-                        modifier = Modifier.size(48.dp)
-                    )
+                    MbIcon(icon = Ph.WarningCircle.light, contentDescription = "Error", size = 48.dp, tint = AppColors.Error)
                     Spacer(modifier = Modifier.height(AppSpacing.md))
                     Text(
                         text = uiState.errorMessage ?: "Food item not found",
@@ -674,527 +713,409 @@ fun FoodDetailScreen(
         return
     }
 
+    val isDiaryEdit = viewModel.isEditingDiary()
+    val isBasketEdit = viewModel.isEditingBasket()
+    val canSave = !uiState.isSaving && uiState.quantityError == null
+    val nutrition = uiState.calculatedNutrition
+    val today = LocalDate.now()
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
-        // Top Header Bar matching reference
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .background(AppColors.Primary)
-                .padding(horizontal = AppSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            androidx.compose.material3.IconButton(onClick = onNavigateBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = AppColors.TextPrimary
-                )
-            }
-            Spacer(modifier = Modifier.width(AppSpacing.xs))
-            Text(
-                text = if (viewModel.isEditingDiary()) "Edit Food" else "Food Detail",
-                style = AppTypography.Header2.copy(color = AppColors.TextPrimary)
-            )
-        }
+        MbHeader(
+            title = if (isDiaryEdit) "Edit entry" else "Food detail",
+            onBack = onNavigateBack,
+            scrolled = scrollState.rememberIsScrolled(),
+            applyStatusBarInset = false
+        )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-        ) {
-        // Food Header Section
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm),
-            verticalAlignment = Alignment.Top
-        ) {
-            // Icon
-            Box(
+        Box(modifier = Modifier.weight(1f)) {
+            Column(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = AppSpacing.screenMargin)
             ) {
-                Icon(Icons.Default.Fastfood, contentDescription = null, tint = AppColors.TextPrimary, modifier = Modifier.size(24.dp))
-            }
-            
-            Spacer(modifier = Modifier.width(AppSpacing.sm))
-            
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Qty Input
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = uiState.quantityInputText,
-                        onValueChange = { viewModel.onQuantityChange(it) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        textStyle = AppTypography.Body1.copy(color = AppColors.TextPrimary, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
-                        singleLine = true,
-                        decorationBox = { innerTextField ->
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 48.dp, height = 36.dp)
-                                    .border(1.dp, if (uiState.quantityError != null) AppColors.AlertRed else AppColors.Divider, RoundedCornerShape(2.dp))
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                innerTextField()
+                // Hero: the food, its calories and macros
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    MbIconCircle(icon = Ph.BowlFood.light, size = 56.dp, iconSize = 26.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = food.name, style = AppTypography.Header1.copy(fontSize = 20.sp, lineHeight = 26.sp), color = AppColors.TextPrimary)
+                        Text(text = foodSourceLabel(food), style = AppTypography.Body2, color = AppColors.TextSecondary)
+                    }
+                }
+                Row(modifier = Modifier.padding(top = 18.dp)) {
+                    Text(
+                        text = "${nutrition.calories.roundToInt()}",
+                        style = AppTypography.Hero,
+                        color = AppColors.TextPrimary,
+                        modifier = Modifier.alignByBaseline()
+                    )
+                    Text(
+                        text = "kcal",
+                        style = AppTypography.HeroUnit,
+                        modifier = Modifier
+                            .alignByBaseline()
+                            .padding(start = 8.dp)
+                    )
+                }
+                val percent = percentOfDailyTarget(nutrition.calories, dailyCalorieGoal)
+                if (percent != null && uiState.quantityError == null) {
+                    Text(
+                        text = "$percent% of your daily target",
+                        style = AppTypography.Body2.copy(fontSize = 13.sp),
+                        color = AppColors.TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                MacroTiles(
+                    protein = nutrition.proteinGrams,
+                    carbs = nutrition.carbsGrams,
+                    fat = nutrition.fatGrams,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+
+                // Amount: the stepper with a typed amount, then the serving
+                DetailSection("Amount") {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        QuantityStepper(
+                            text = uiState.quantityInputText,
+                            isError = uiState.quantityError != null,
+                            onTextChange = { viewModel.onQuantityChange(it) },
+                            onStep = { delta ->
+                                val current = parseQuantityInput(uiState.quantityInputText) ?: 0.0
+                                viewModel.onQuantityChange(formatQuantityForInput(steppedQuantity(current, delta)))
+                            }
+                        )
+                        if (uiState.quantityError == null) {
+                            servingGrams(uiState.selectedServing, uiState.enteredQuantity)?.let { grams ->
+                                Text(text = gramsTotalLabel(grams), style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.TextSecondary)
                             }
                         }
+                    }
+                    uiState.quantityError?.let { error ->
+                        Text(error, style = AppTypography.Body2.copy(fontSize = 13.sp), color = AppColors.Error, modifier = Modifier.padding(top = 6.dp))
+                    }
+                    ServingChoice(
+                        food = food,
+                        servings = uiState.availableServings,
+                        selected = uiState.selectedServing,
+                        onSelect = { viewModel.onServingSelected(it) },
+                        modifier = Modifier.padding(top = 12.dp)
                     )
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    
-                    // Serving Dropdown
-                    var dropdownExpanded by remember { mutableStateOf(false) }
-                    Box(modifier = Modifier.weight(1f).clickable { dropdownExpanded = true }) {
-                        Text(
-                            text = uiState.selectedServing?.let { food.servingLabel(it) } ?: "100 g",
-                            style = AppTypography.Body1,
-                            color = AppColors.TextPrimary
-                        )
-                        DropdownMenu(
-                            expanded = dropdownExpanded,
-                            onDismissRequest = { dropdownExpanded = false },
-                            modifier = Modifier.background(AppColors.SurfaceAlt)
-                        ) {
-                            uiState.availableServings.forEach { serving ->
-                                DropdownMenuItem(
-                                    text = { Text(food.servingLabel(serving), color = AppColors.TextPrimary) },
-                                    onClick = {
-                                        viewModel.onServingSelected(serving)
-                                        dropdownExpanded = false
+                }
+
+                // When: the meal and day it logs to
+                DetailSection("When") {
+                    MealAndDayPicker(
+                        selectedMeal = uiState.targetMealType,
+                        selectedDate = uiState.targetDate,
+                        today = today,
+                        onMealSelected = { viewModel.onMealTypeSelected(it) },
+                        onDateSelected = { viewModel.onDateSelected(it) },
+                        header = "Log to ${mealLabel(uiState.targetMealType)}, ${basketDateLabel(uiState.targetDate, today)}"
+                    )
+                }
+
+                DetailSection("Nutrition facts") {
+                    NutritionFactsPanel(nutrition)
+                    Text(
+                        text = "A dash means the food doesn't state that value.",
+                        style = AppTypography.Body2.copy(fontSize = 12.5.sp),
+                        color = AppColors.TextMuted,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                // Room for the pinned action bar
+                Spacer(modifier = Modifier.height(112.dp))
+            }
+
+            // The action bar, pinned at the bottom over a short fade
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(0f to Color.Transparent, 0.18f to AppColors.Background, 1f to AppColors.Background))
+                    .padding(start = AppSpacing.screenMargin, end = AppSpacing.screenMargin, top = 16.dp, bottom = 12.dp)
+            ) {
+                uiState.actionError?.let { error ->
+                    Text(
+                        error,
+                        style = AppTypography.Body2,
+                        color = AppColors.Error,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    when {
+                        isDiaryEdit -> {
+                            MbDangerGhostButton(
+                                onClick = { viewModel.deleteEntry { onNavigateBack() } },
+                                contentDescription = "Delete entry",
+                                enabled = !uiState.isSaving
+                            )
+                            MbButton(
+                                text = "Copy",
+                                kind = MbButtonKind.Secondary,
+                                icon = Ph.Copy.light,
+                                enabled = canSave,
+                                onClick = {
+                                    viewModel.copyEntry { copiedFoodId, copiedMealType, copiedDateEpochDay, newBasketItemId ->
+                                        viewModel.loadFood(
+                                            foodId = copiedFoodId,
+                                            mealType = copiedMealType,
+                                            date = LocalDate.ofEpochDay(copiedDateEpochDay),
+                                            entryId = 0L,
+                                            basketItemId = newBasketItemId
+                                        )
                                     }
+                                }
+                            )
+                            MbButton(
+                                text = "Save changes",
+                                onClick = { viewModel.logFood { onNavigateBack() } },
+                                enabled = canSave,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        else -> {
+                            if (isBasketEdit) {
+                                MbDangerGhostButton(
+                                    onClick = { viewModel.removeCurrentBasketItem { onNavigateBack() } },
+                                    contentDescription = "Remove from basket",
+                                    enabled = !uiState.isSaving
                                 )
                             }
+                            MbButton(
+                                text = "Keep in basket",
+                                kind = MbButtonKind.Secondary,
+                                enabled = canSave,
+                                onClick = { viewModel.keepInBasket { onNavigateBack() } }
+                            )
+                            MbButton(
+                                text = "Log 1 food",
+                                onClick = { viewModel.logFood { onNavigateBack() } },
+                                enabled = canSave,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
-                    
-                    // Right Info
-                    Icon(androidx.compose.material.icons.Icons.Default.Info, contentDescription = "Info", tint = AppColors.TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("${uiState.calculatedNutrition.calories.roundToInt()}", style = AppTypography.Header3, color = AppColors.CalorieText)
-                        Text("cal", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
                 }
-                
-                uiState.quantityError?.let { error ->
-                    Text(error, style = AppTypography.Caption, color = AppColors.AlertRed)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                // Food Name
-                Text(food.name, style = AppTypography.Body1, color = AppColors.TextPrimary)
             }
         }
-        
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
+    }
+}
 
-        // Calorie Section
-        Row(
-            modifier = Modifier.fillMaxWidth().background(AppColors.Surface).padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+/** A titled block of Food Detail ("Amount", "When", "Nutrition facts"). */
+@Composable
+private fun DetailSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = AppSpacing.sectionGap)) {
+        Text(
+            text = title,
+            style = AppTypography.Header2,
+            color = AppColors.TextPrimary,
+            modifier = Modifier
+                .padding(bottom = 10.dp)
+                .semantics { heading() }
+        )
+        content()
+    }
+}
+
+/** Protein, carbs and fat as three small tiles. */
+@Composable
+internal fun MacroTiles(protein: Double, carbs: Double, fat: Double, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MacroTile("Protein", protein, AppColors.MacroProtein, Modifier.weight(1f))
+        MacroTile("Carbs", carbs, AppColors.MacroCarbs, Modifier.weight(1f))
+        MacroTile("Fat", fat, AppColors.MacroFat, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun MacroTile(label: String, grams: Double, color: Color, modifier: Modifier) {
+    MbPanel(
+        modifier = modifier,
+        shape = AppShapes.CardSmall,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(color))
+            Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary)
+        }
+        Row(modifier = Modifier.padding(top = 4.dp)) {
+            Text(
+                text = String.format(Locale.US, "%.1f", grams),
+                style = AppTypography.Header2,
+                color = AppColors.TextPrimary,
+                modifier = Modifier.alignByBaseline()
+            )
+            Text(
+                text = " g",
+                style = AppTypography.Caption,
+                color = AppColors.TextSecondary,
+                modifier = Modifier.alignByBaseline()
+            )
+        }
+    }
+}
+
+/** The pill stepper: minus, the typed amount, plus. A step is 0.5. */
+@Composable
+internal fun QuantityStepper(
+    text: String,
+    isError: Boolean,
+    onTextChange: (String) -> Unit,
+    onStep: (Double) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = CircleShape
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(AppColors.FieldFill)
+            .border(1.dp, if (isError) AppColors.Error else AppColors.FieldBorder, shape)
+            .padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIconButton(
+            icon = Ph.Minus.light,
+            contentDescription = "Decrease amount",
+            onClick = { onStep(-0.5) },
+            tint = AppColors.TextPrimary
+        )
+        BasicTextField(
+            value = text,
+            onValueChange = onTextChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            textStyle = AppTypography.Header1.copy(color = AppColors.TextPrimary, textAlign = TextAlign.Center),
+            cursorBrush = SolidColor(AppColors.Primary),
+            modifier = Modifier
+                .width(60.dp)
+                .semantics { contentDescription = "Amount" }
+        )
+        MbIconButton(
+            icon = Ph.Plus.light,
+            contentDescription = "Increase amount",
+            onClick = { onStep(0.5) },
+            tint = AppColors.TextPrimary
+        )
+    }
+}
+
+/** The serving as chips when there are up to 6, otherwise a dropdown. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ServingChoice(
+    food: Food,
+    servings: List<Serving>,
+    selected: Serving?,
+    onSelect: (Serving) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (servings.size <= 6) {
+        FlowRow(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Total Calories", style = AppTypography.Header3, color = AppColors.TextPrimary)
-            Text("${uiState.calculatedNutrition.calories.roundToInt()}", style = AppTypography.Header3, color = AppColors.CalorieText)
-        }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        
-        // Macro Row
-        Row(
-            modifier = Modifier.fillMaxWidth().background(AppColors.Surface).padding(vertical = AppSpacing.xs),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MacroValue(label = "Protein", value = uiState.calculatedNutrition.proteinGrams, color = AppColors.MacroProtein)
-            Box(modifier = Modifier.size(width = 1.dp, height = 16.dp).background(AppColors.Divider))
-            MacroValue(label = "Carb", value = uiState.calculatedNutrition.carbsGrams, color = AppColors.MacroCarbs)
-            Box(modifier = Modifier.size(width = 1.dp, height = 16.dp).background(AppColors.Divider))
-            MacroValue(label = "Fat", value = uiState.calculatedNutrition.fatGrams, color = AppColors.MacroFat)
-        }
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // When Section
-        var isEditingWhen by remember { mutableStateOf(true) }
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { isEditingWhen = !isEditingWhen }.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, MM/dd/yyyy")
-            val today = LocalDate.now()
-            val yesterday = today.minusDays(1)
-            val dateLabel = when (uiState.targetDate) {
-                today -> "Today"
-                yesterday -> "Yesterday"
-                else -> uiState.targetDate.format(formatter)
-            }
-            Text("When: ${dateLabel}, ${uiState.targetMealType.displayName}", style = AppTypography.Header3, color = AppColors.TextPrimary)
-            Icon(Icons.Default.Edit, contentDescription = "Edit When", tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-        }
-
-        if (isEditingWhen) {
-            Column(
-                modifier = Modifier.fillMaxWidth().border(1.dp, AppColors.Divider)
-            ) {
-                val meals = MealType.entries
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    MealShortcutButton(meals[0], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                    Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                    MealShortcutButton(meals[1], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                    Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                    MealShortcutButton(meals[2], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                }
-                HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    MealShortcutButton(meals[3], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                    Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                    MealShortcutButton(meals[4], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                    Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                    MealShortcutButton(meals[5], uiState.targetMealType, Modifier.weight(1f)) { viewModel.onMealTypeSelected(it) }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-
-            Row(modifier = Modifier.fillMaxWidth().border(1.dp, AppColors.Divider)) {
-                val today = LocalDate.now()
-                val yesterday = today.minusDays(1)
-                
-                DateShortcutButton("Yesterday", yesterday, uiState.targetDate, Modifier.weight(1f)) { viewModel.onDateSelected(yesterday) }
-                Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                DateShortcutButton("Today", today, uiState.targetDate, Modifier.weight(1f)) { viewModel.onDateSelected(today) }
-                Box(modifier = Modifier.size(width = 1.dp, height = 48.dp).background(AppColors.Divider))
-                
-                var showDatePicker by remember { mutableStateOf(false) }
-                val isCustomDate = uiState.targetDate != today && uiState.targetDate != yesterday
-                
-                TextButton(
-                    onClick = { showDatePicker = true },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(0.dp),
-                    colors = ButtonDefaults.textButtonColors(containerColor = if (isCustomDate) AppColors.SurfaceAlt else AppColors.Surface)
-                ) {
-                    Text("Choose a day", style = AppTypography.Body2, color = if (isCustomDate) AppColors.Primary else AppColors.TextPrimary)
-                }
-                
-                if (showDatePicker) {
-                    val initialMillis = uiState.targetDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
-                    @OptIn(ExperimentalMaterial3Api::class)
-                    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-                    
-                    @OptIn(ExperimentalMaterial3Api::class)
-                    DatePickerDialog(
-                        onDismissRequest = { showDatePicker = false },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                datePickerState.selectedDateMillis?.let { millis ->
-                                    val selectedDate = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
-                                    viewModel.onDateSelected(selectedDate)
-                                }
-                                showDatePicker = false
-                            }) { Text("Confirm", color = AppColors.Primary) }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showDatePicker = false }) { Text("Cancel", color = AppColors.Primary) }
-                        },
-                        colors = DatePickerDefaults.colors(containerColor = AppColors.Surface)
-                    ) {
-                        DatePicker(
-                            state = datePickerState,
-                            colors = DatePickerDefaults.colors(
-                                titleContentColor = AppColors.TextPrimary,
-                                headlineContentColor = AppColors.TextPrimary,
-                                weekdayContentColor = AppColors.TextSecondary,
-                                subheadContentColor = AppColors.TextSecondary,
-                                yearContentColor = AppColors.TextPrimary,
-                                currentYearContentColor = AppColors.Primary,
-                                selectedYearContentColor = AppColors.TextPrimary,
-                                selectedYearContainerColor = AppColors.Primary,
-                                dayContentColor = AppColors.TextPrimary,
-                                disabledDayContentColor = AppColors.TextDisabled,
-                                selectedDayContentColor = AppColors.TextPrimary,
-                                selectedDayContainerColor = AppColors.Primary,
-                                todayDateBorderColor = AppColors.Primary,
-                                todayContentColor = AppColors.Primary
-                            )
-                        )
-                    }
-                }
+            servings.forEach { serving ->
+                MbChip(text = food.servingLabel(serving), selected = serving == selected, onClick = { onSelect(serving) })
             }
         }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        // Photo Row (Mocked / Unavailable but visually matched)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(androidx.compose.material.icons.Icons.Default.CameraAlt, contentDescription = null, tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Photo", style = AppTypography.Body1, color = AppColors.TextPrimary)
-                Icon(androidx.compose.material.icons.Icons.Default.ChevronRight, contentDescription = null, tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Add Photo:", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                Spacer(modifier = Modifier.width(AppSpacing.xs))
-                Icon(androidx.compose.material.icons.Icons.Default.CameraAlt, contentDescription = null, tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(androidx.compose.material.icons.Icons.Default.Image, contentDescription = null, tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
-            }
-        }
-        
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-        if (viewModel.isEditingDiary()) {
+    } else {
+        var expanded by remember { mutableStateOf(false) }
+        Box(modifier = modifier) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                    .heightIn(min = 48.dp)
+                    .clip(AppShapes.InputBox)
+                    .background(AppColors.FieldFill)
+                    .border(1.dp, AppColors.FieldBorder, AppShapes.InputBox)
+                    .mbClickable(pressedScale = 0.98f, onClickLabel = "Choose a serving") { expanded = true }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Copy Button
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(AppColors.SurfaceAlt)
-                        .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                        .clickable(enabled = !uiState.isSaving && uiState.quantityError == null) {
-                            viewModel.copyEntry { copiedFoodId, copiedMealType, copiedDateEpochDay, newBasketItemId ->
-                                viewModel.loadFood(
-                                    foodId = copiedFoodId,
-                                    mealType = copiedMealType,
-                                    date = LocalDate.ofEpochDay(copiedDateEpochDay),
-                                    entryId = 0L,
-                                    basketItemId = newBasketItemId
-                                )
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy",
-                            tint = AppColors.TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Copy",
-                            style = AppTypography.Body1.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, color = AppColors.TextPrimary)
-                        )
-                    }
-                }
-
-                // Delete Button
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(AppColors.SurfaceAlt)
-                        .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                        .clickable(enabled = !uiState.isSaving) {
-                            viewModel.deleteEntry { onNavigateBack() }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.Delete,
-                            contentDescription = "Delete",
-                            tint = AppColors.TextPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Delete",
-                            style = AppTypography.Body1.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, color = AppColors.TextPrimary)
-                        )
-                    }
+                Text(
+                    text = selected?.let { food.servingLabel(it) } ?: "100 g",
+                    style = AppTypography.Body1,
+                    color = AppColors.TextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                MbIcon(icon = Ph.CaretDown.light, contentDescription = null, size = 16.dp, tint = AppColors.TextSecondary)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.background(AppColors.SheetFill)
+            ) {
+                servings.forEach { serving ->
+                    DropdownMenuItem(
+                        text = { Text(food.servingLabel(serving), color = AppColors.TextPrimary) },
+                        onClick = {
+                            onSelect(serving)
+                            expanded = false
+                        }
+                    )
                 }
             }
-
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-        }
-
-        // Primary Action Button
-        val logLabel = if (viewModel.isEditingDiary()) "SAVE ENTRY" else "Log 1 Food"
-        val canSave = !uiState.isSaving && uiState.quantityError == null
-        uiState.actionError?.let { error ->
-            Text(
-                error,
-                style = AppTypography.Body2,
-                color = AppColors.AlertRed,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs)
-            )
-        }
-        Button(
-            onClick = { viewModel.logFood { onNavigateBack() } },
-            enabled = canSave,
-            modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = AppSpacing.xs),
-            shape = RoundedCornerShape(2.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary)
-        ) {
-            Text(logLabel, style = AppTypography.Header3, color = AppColors.TextPrimary)
-        }
-
-        if (!viewModel.isEditingDiary()) {
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-            Box(modifier = Modifier.fillMaxWidth().clickable(enabled = canSave) { viewModel.keepInBasket { onNavigateBack() } }, contentAlignment = Alignment.Center) {
-                Text("Keep in Basket", style = AppTypography.Body1, color = AppColors.TextSecondary)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-        // Lower Links
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Report a problem", style = AppTypography.Caption, color = AppColors.TextSecondary)
-            Text("Report nutrition discrepancy", style = AppTypography.Caption, color = AppColors.TextSecondary)
-        }
-        
-        Spacer(modifier = Modifier.height(AppSpacing.sm))
-        
-        if (viewModel.isEditingBasket()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = !uiState.isSaving) { viewModel.removeCurrentBasketItem { onNavigateBack() } }
-                    .padding(vertical = AppSpacing.sm),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Remove from Basket", style = AppTypography.Body1, color = Color(0xFFE53935))
-            }
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-        } else if (viewModel.isEditingDiary()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = !uiState.isSaving) { viewModel.deleteEntry { onNavigateBack() } }
-                    .padding(vertical = AppSpacing.sm),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Delete Entry", style = AppTypography.Body1, color = Color(0xFFE53935))
-            }
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-        }
-        
-        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-
-        // Nutrition Facts
-        Column(
-            modifier = Modifier.fillMaxWidth().background(AppColors.Surface).padding(AppSpacing.sm)
-        ) {
-            Text("Nutrition Facts", style = AppTypography.Header2, color = AppColors.TextPrimary)
-            Spacer(modifier = Modifier.height(AppSpacing.sm))
-            
-            NutritionRow("Calories", uiState.calculatedNutrition.calories, "kcal", true)
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-            NutritionRow("Total Fat", uiState.calculatedNutrition.fatGrams, "g", true)
-            NutritionRow("Saturated Fat", uiState.calculatedNutrition.saturatedFatGrams, "g", false)
-            NutritionRow("Trans Fat", uiState.calculatedNutrition.transFatGrams, "g", false)
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-            NutritionRow("Cholesterol", uiState.calculatedNutrition.cholesterolMg, "mg", true)
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-            NutritionRow("Sodium", uiState.calculatedNutrition.sodiumMg, "mg", true)
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-            NutritionRow("Total Carbohydrate", uiState.calculatedNutrition.carbsGrams, "g", true)
-            NutritionRow("Dietary Fiber", uiState.calculatedNutrition.fiberGrams, "g", false)
-            NutritionRow("Total Sugars", uiState.calculatedNutrition.sugarGrams, "g", false)
-            HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
-            NutritionRow("Protein", uiState.calculatedNutrition.proteinGrams, "g", true)
-        }
-        
-        Spacer(modifier = Modifier.height(AppSpacing.xxl))
         }
     }
 }
 
+/** The full nutrition list in a panel with hairline rows; a value the food doesn't state shows "-". */
 @Composable
-private fun MacroValue(label: String, value: Double, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("${value.roundToInt()}g", style = AppTypography.Body2, color = color)
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(label, style = AppTypography.Caption, color = AppColors.TextSecondary)
-    }
-}
-
-@Composable
-private fun MealShortcutButton(
-    meal: MealType,
-    selected: MealType,
-    modifier: Modifier = Modifier,
-    isPlaceholder: Boolean = false,
-    onClick: (MealType) -> Unit
-) {
-    if (isPlaceholder) {
-        Box(modifier = modifier.height(48.dp).background(AppColors.Surface))
-        return
-    }
-    val isSelected = meal == selected
-    TextButton(
-        onClick = { onClick(meal) },
-        modifier = modifier.height(48.dp),
-        shape = RoundedCornerShape(0.dp),
-        colors = ButtonDefaults.textButtonColors(containerColor = if (isSelected) AppColors.SurfaceAlt else AppColors.Surface)
+private fun NutritionFactsPanel(nutrition: Nutrition) {
+    MbPanel(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
     ) {
-        Text(meal.displayName, style = AppTypography.Body2, color = if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary)
+        NutritionRow("Calories", nutrition.calories, "kcal", true)
+        FactsDivider()
+        NutritionRow("Total Fat", nutrition.fatGrams, "g", true)
+        NutritionRow("Saturated Fat", nutrition.saturatedFatGrams, "g", false)
+        NutritionRow("Trans Fat", nutrition.transFatGrams, "g", false)
+        FactsDivider()
+        NutritionRow("Cholesterol", nutrition.cholesterolMg, "mg", true)
+        FactsDivider()
+        NutritionRow("Sodium", nutrition.sodiumMg, "mg", true)
+        FactsDivider()
+        NutritionRow("Total Carbohydrate", nutrition.carbsGrams, "g", true)
+        NutritionRow("Dietary Fiber", nutrition.fiberGrams, "g", false)
+        NutritionRow("Total Sugars", nutrition.sugarGrams, "g", false)
+        FactsDivider()
+        NutritionRow("Protein", nutrition.proteinGrams, "g", true)
     }
 }
 
 @Composable
-private fun DateShortcutButton(
-    label: String,
-    date: LocalDate,
-    selected: LocalDate,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val isSelected = date == selected
-    TextButton(
-        onClick = onClick,
-        modifier = modifier.height(48.dp),
-        shape = RoundedCornerShape(0.dp),
-        colors = ButtonDefaults.textButtonColors(containerColor = if (isSelected) AppColors.SurfaceAlt else AppColors.Surface)
-    ) {
-        Text(label, style = AppTypography.Body2, color = if (isSelected) AppColors.Primary else AppColors.TextSecondary)
-    }
+private fun FactsDivider() {
+    HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
 }
 
 @Composable
 private fun NutritionRow(label: String, value: Double?, unit: String, isMain: Boolean) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = AppSpacing.xs, horizontal = if (isMain) 0.dp else AppSpacing.md),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 9.dp).padding(start = if (isMain) 0.dp else AppSpacing.md),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, style = if (isMain) AppTypography.Body1 else AppTypography.Body2, color = AppColors.TextPrimary)
+        Text(label, style = if (isMain) AppTypography.Body1 else AppTypography.Body2, color = if (isMain) AppColors.TextPrimary else AppColors.TextSecondary)
         val valueStr = if (value != null) String.format(Locale.US, "%.1f %s", value, unit) else "-"
         Text(valueStr, style = AppTypography.Body1, color = AppColors.TextPrimary)
     }

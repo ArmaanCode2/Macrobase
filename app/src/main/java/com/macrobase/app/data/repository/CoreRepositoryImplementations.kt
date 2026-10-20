@@ -1,5 +1,7 @@
 package com.macrobase.app.data.repository
 
+import com.macrobase.app.core.util.settledOnLane
+import com.macrobase.app.core.util.onLane
 import kotlin.math.roundToInt
 import com.macrobase.app.data.database.UserDatabase
 import com.macrobase.app.data.database.entity.RecipeEntity
@@ -233,13 +235,19 @@ class StatisticsRepositoryImpl(
     private val diaryRepository: DiaryRepository,
     private val goalsRepository: GoalsRepository,
     private val weightRepository: WeightRepository,
-    private val clock: Clock = com.macrobase.app.core.util.DeviceClock
+    private val clock: Clock = com.macrobase.app.core.util.DeviceClock,
+    /** Where the figures are worked out; null works them out where collected (tests). */
+    private val calculationDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null
 ) : StatisticsRepository {
 
-    override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
+    /** Consistency for a range, worked out on the calculation lane. */
+    override fun observeNutritionConsistency(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> =
+        observeNutritionConsistencyFlow(startDate, endDate).onLane(calculationDispatcher)
+
+    private fun observeNutritionConsistencyFlow(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
         val days = daysBetween(startDate, endDate)
         return combine(
-            diaryRepository.observeNutritionAggregations(startDate, endDate),
+            diaryRepository.observeNutritionAggregations(startDate, endDate).settledOnLane(calculationDispatcher),
             // Each day is judged against the goal in force on it, not today's (BUG-049)
             goalsRepository.observeGoalsForDates(days)
         ) { aggregations, dayGoals ->
@@ -329,10 +337,14 @@ class StatisticsRepositoryImpl(
         return observeNutritionConsistency(startDate, endDate).first()
     }
 
-    override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
+    /** Macro averages for a range, worked out on the calculation lane. */
+    override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> =
+        observeMacroAveragesFlow(startDate, endDate).onLane(calculationDispatcher)
+
+    private fun observeMacroAveragesFlow(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
         val days = daysBetween(startDate, endDate)
         return combine(
-            diaryRepository.observeNutritionAggregations(startDate, endDate),
+            diaryRepository.observeNutritionAggregations(startDate, endDate).settledOnLane(calculationDispatcher),
             goalsRepository.observeGoalsForDates(days),
             goalsRepository.observeGoals()
         ) { aggregations, dayGoals, currentGoal ->
@@ -421,8 +433,12 @@ class StatisticsRepositoryImpl(
     private fun daysBetween(startDate: LocalDate, endDate: LocalDate): List<LocalDate> =
         generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
 
-    override fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
-        return weightRepository.observeWeightRange(startDate, endDate).map { entries ->
+    /** Weight figures for a range, worked out on the calculation lane. */
+    override fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> =
+        observeWeightStatisticsFlow(startDate, endDate).onLane(calculationDispatcher)
+
+    private fun observeWeightStatisticsFlow(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
+        return weightRepository.observeWeightRange(startDate, endDate).settledOnLane(calculationDispatcher).map { entries ->
             val sorted = entries.sortedBy { it.date }
             val weights = sorted.map { it.weightKg }
             val start = weights.firstOrNull()

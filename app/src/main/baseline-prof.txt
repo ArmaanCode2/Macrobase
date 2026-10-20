@@ -1,0 +1,9 @@
+# MacroBase's startup profile: Android compiles the code listed here when the app is installed,
+# instead of interpreting it the first times each screen opens. Release and fast builds only; a
+# debuggable build ignores it. Compose and the other libraries bring their own profiles.
+#
+# H hot, S used during startup, P used after startup. ** matches any package, class or method.
+# The app is small, so all of its own code is listed. This needs class names kept
+# (-dontobfuscate in proguard-rules.pro), or the rules would no longer match.
+HSPLcom/macrobase/app/**->**(**)**
+Lcom/macrobase/app/**;

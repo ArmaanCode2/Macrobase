@@ -1,15 +1,38 @@
 package com.macrobase.app.feature.statistics
 
-import kotlin.math.roundToInt
-import android.app.DatePickerDialog
+import com.macrobase.app.core.designsystem.components.rememberAccessibilityOn
+import kotlin.math.ceil
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import com.macrobase.app.core.designsystem.components.MbMotion
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.LaunchedEffect
+import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,70 +40,76 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Scale
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.CalendarPerformanceConfig
-import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.core.designsystem.AppColors
-import com.macrobase.app.domain.model.rank.RankProfile
-import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
-import kotlinx.coroutines.flow.flowOf
-import com.macrobase.app.feature.calendar.CalendarViewModel
-import com.macrobase.app.feature.calendar.FoodLoggingCalendar
-import org.koin.androidx.compose.koinViewModel
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
-import com.macrobase.app.core.designsystem.Dimensions
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbChip
+import com.macrobase.app.core.designsystem.components.MbChipRow
+import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbSheet
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.navigation.DeclareDockViews
+import com.macrobase.app.core.navigation.LocalDockInset
+import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.HeatmapCellData
 import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.UnitConversions
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.WeightStatistics
+import com.macrobase.app.domain.model.rank.RankProfile
 import com.macrobase.app.domain.model.windowStart
 import com.macrobase.app.domain.repository.PreferencesRepository
 import com.macrobase.app.domain.usecase.GetStatisticsUseCase
+import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
+import com.macrobase.app.feature.calendar.CalendarViewModel
+import com.macrobase.app.feature.calendar.FoodLoggingCalendar
+import com.macrobase.app.feature.weight.WeightGraphHelper
 import com.macrobase.app.feature.weight.WeightLineGraph
+import com.macrobase.app.feature.weight.weightIntervalChipLabel
 import com.macrobase.app.feature.weight.WeightTimeInterval
 import com.macrobase.app.feature.weight.dateRange
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -90,21 +119,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 enum class ConsistencyInterval(val label: String) {
-    DAYS_30("30 Days"),
-    DAYS_90("90 Days"),
-    MONTHS_6("6 Months"),
-    YEAR_1("1 Year");
+    DAYS_30("30 days"),
+    DAYS_90("90 days"),
+    MONTHS_6("6 months"),
+    YEAR_1("1 year");
 
     /**
-     * The first day of the window ending [today]. "6 Months" and "1 Year" are calendar months
+     * The first day of the window ending [today]. "6 months" and "1 year" are calendar months
      * and years, the same span as on the weight tab, not 180 and 365 days.
      */
     fun startDate(today: LocalDate): LocalDate = when (this) {
@@ -116,9 +149,9 @@ enum class ConsistencyInterval(val label: String) {
 }
 
 enum class MacroInterval(val label: String, val days: Long) {
-    DAYS_7("7-Day", 7),
-    DAYS_30("30-Day", 30),
-    DAYS_90("90-Day", 90)
+    DAYS_7("7-day", 7),
+    DAYS_30("30-day", 30),
+    DAYS_90("90-day", 90)
 }
 
 data class StatisticsUiState(
@@ -162,10 +195,14 @@ class StatisticsViewModel(
     private val _macroInterval = MutableStateFlow(MacroInterval.DAYS_30)
     val macroInterval: StateFlow<MacroInterval> = _macroInterval.asStateFlow()
 
-    val uiState: StateFlow<StatisticsUiState> = combine(
-        combine(_selectedTab, _weightInterval, _weightCustomFrom) { tab, wInt, wFrom -> Triple(tab, wInt, wFrom) },
-        combine(_weightCustomTo, _consistencyInterval, _macroInterval) { wTo, cInt, mInt -> Triple(wTo, cInt, mInt) }
-    ) { (tab, wInt, wFrom), (wTo, cInt, mInt) ->
+    /**
+     * The figures behind the Weight, Consistency and Averages views. The chosen view is not part of
+     * this, so switching views neither restarts these queries nor waits for them.
+     */
+    private val statsData: StateFlow<StatisticsUiState> = combine(
+        combine(_weightInterval, _weightCustomFrom, _weightCustomTo) { wInt, wFrom, wTo -> Triple(wInt, wFrom, wTo) },
+        combine(_consistencyInterval, _macroInterval) { cInt, mInt -> cInt to mInt }
+    ) { (wInt, wFrom, wTo), (cInt, mInt) ->
         val (weightFrom, weightTo) = calculateWeightDateRange(wInt, wFrom, wTo)
         val today = LocalDate.now(clock)
         // "30 Days" is today and the 29 before it, not 31 days (BUG-033)
@@ -175,7 +212,7 @@ class StatisticsViewModel(
         val lastEndedDay = today.minusDays(1)
         val mFrom = windowStart(lastEndedDay, mInt.days)
 
-        StatsParams(tab, wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
+        StatsParams(wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
     }.flatMapLatest { p ->
         combine(
             getStatisticsUseCase.observeWeightStatistics(p.weightFrom, p.weightTo),
@@ -184,7 +221,6 @@ class StatisticsViewModel(
             preferencesRepository.observePreferences()
         ) { weightStats, consistencyStats, macroStats, prefs ->
             StatisticsUiState(
-                selectedTab = p.tab,
                 weightInterval = p.wInt,
                 weightFromDate = p.weightFrom,
                 weightToDate = p.weightTo,
@@ -200,11 +236,18 @@ class StatisticsViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = StatisticsUiState()
+        initialValue = StatisticsUiState(isLoading = true)
     )
 
+    /** The figures with the chosen view: a view change shows at once, over the figures already loaded. */
+    val uiState: StateFlow<StatisticsUiState> = combine(statsData, _selectedTab) { data, tab -> data.copy(selectedTab = tab) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = StatisticsUiState(isLoading = true)
+        )
+
     private data class StatsParams(
-        val tab: Int,
         val wInt: WeightTimeInterval,
         val weightFrom: LocalDate,
         val weightTo: LocalDate,
@@ -270,6 +313,9 @@ class StatisticsViewModel(
     }
 }
 
+/** The five views in the dock's switch, in the app's order (design.txt C8). */
+internal val StatisticsViews = listOf("Calendar", "Weight", "Consistency", "Averages", "Rank history")
+
 @Composable
 fun StatisticsScreen(
     viewModel: StatisticsViewModel,
@@ -280,44 +326,19 @@ fun StatisticsScreen(
     // Collected only while visible, so coming back after midnight reads the new day (BUG-033)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val calendarUiState by calendarViewModel.uiState.collectAsStateWithLifecycle()
-    val tabs = listOf("Calendar", "Weight Stats", "Nutrition Consistency", "Macro Averages", "Rank History")
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AppColors.Background)
-    ) {
-        // Tab Navigation Header
-        ScrollableTabRow(
-            selectedTabIndex = uiState.selectedTab,
-            containerColor = AppColors.Surface,
-            contentColor = AppColors.TextPrimary,
-            edgePadding = AppSpacing.md,
-            indicator = { tabPositions ->
-                if (uiState.selectedTab < tabPositions.size) {
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(tabPositions[uiState.selectedTab]),
-                        color = AppColors.Primary
-                    )
-                }
-            }
-        ) {
-            tabs.forEachIndexed { index, title ->
-                Tab(
-                    selected = uiState.selectedTab == index,
-                    onClick = { viewModel.onSelectTab(index) },
-                    text = {
-                        Text(
-                            text = title,
-                            style = AppTypography.Header3,
-                            color = if (uiState.selectedTab == index) AppColors.Primary else AppColors.TextSecondary
-                        )
-                    }
-                )
-            }
-        }
+    // The views sit in the dock's switch; the chosen one stays in the ViewModel
+    DeclareDockViews(
+        items = StatisticsViews,
+        selectedIndex = uiState.selectedTab,
+        onSelect = { viewModel.onSelectTab(it) }
+    )
 
-        // Tab Content
+    // A kept Stats screen opened in a new month shows that month
+    LaunchedEffect(calendarViewModel) { calendarViewModel.onShown() }
+
+    // Each view scrolls on its own, under the header and behind the dock, and ends clear of the dock
+    Box(modifier = modifier.fillMaxSize()) {
         when (uiState.selectedTab) {
             0 -> FoodLoggingCalendar(
                 uiState = calendarUiState,
@@ -325,210 +346,293 @@ fun StatisticsScreen(
                 onNextMonth = { calendarViewModel.onNextMonth() },
                 onDateClick = onDateClick
             )
-            1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
-            2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
-            3 -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+            // Until the first figures arrive, a spinner (after a moment) instead of "no data"
+            1, 2, 3 -> if (uiState.isLoading) {
+                MbDelayedProgress(modifier = Modifier.fillMaxSize())
+            } else {
+                when (uiState.selectedTab) {
+                    1 -> WeightStatsTab(uiState = uiState, viewModel = viewModel)
+                    2 -> NutritionConsistencyTab(uiState = uiState, viewModel = viewModel)
+                    else -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
+                }
+            }
             4 -> RankHistoryTabRoute(viewModel = viewModel)
         }
     }
 }
 
 /**
- * Tab 1: Weight Statistics & Progress Graph
+ * One statistics view: its range chips in a row that scrolls sideways to the screen edges, then
+ * its sections at the 16 dp side margin. It reports its scroll to the header and leaves room at
+ * the end so the last section clears the dock.
+ */
+@Composable
+internal fun StatsPage(
+    chips: @Composable RowScope.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val scrollState = rememberScrollState()
+    ReportContentScrolled(scrollState.rememberIsScrolled())
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+    ) {
+        Spacer(modifier = Modifier.height(AppSpacing.sm))
+        MbChipRow(
+            modifier = Modifier.selectableGroup(),
+            contentPadding = PaddingValues(horizontal = AppSpacing.screenMargin),
+            content = chips
+        )
+        Spacer(modifier = Modifier.height(AppSpacing.sectionGap))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.screenMargin),
+            content = content
+        )
+        Spacer(modifier = Modifier.height(LocalDockInset.current + 16.dp))
+    }
+}
+
+/** A section heading: 17 sp, sentence case. */
+@Composable
+internal fun StatsSectionHeading(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = AppTypography.Header2,
+        color = AppColors.TextPrimary,
+        modifier = modifier.semantics { heading() }
+    )
+}
+
+/** The note under a section heading or a chart: 12.5 sp light, text secondary. */
+internal val StatsNoteStyle = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 18.sp)
+
+/** A panel holding only a short message, such as an empty or loading state. */
+@Composable
+internal fun StatsMessagePanel(text: String, modifier: Modifier = Modifier) {
+    MbPanel(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = text,
+            style = AppTypography.Body2,
+            color = AppColors.TextSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp)
+        )
+    }
+}
+
+/**
+ * Weight: the range chips, the From / To dates of the range (tapping one sets a custom range), the
+ * Start / Current / Change tiles and the graph, or its empty state.
  */
 @Composable
 private fun WeightStatsTab(
     uiState: StatisticsUiState,
     viewModel: StatisticsViewModel
 ) {
-    val context = LocalContext.current
     val isImperial = uiState.unitSystem == UnitSystem.IMPERIAL
     val shortDateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd") }
-    var showIntervalDropdown by remember { mutableStateOf(false) }
+    // true while picking the From date, false for the To date
+    var pickingFromDate by remember { mutableStateOf<Boolean?>(null) }
 
     val stats = uiState.weightStats
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
+    StatsPage(
+        chips = {
+            WeightTimeInterval.entries.forEach { interval ->
+                MbChip(
+                    text = weightIntervalChipLabel(interval),
+                    selected = uiState.weightInterval == interval,
+                    onClick = { viewModel.onSelectWeightInterval(interval) }
+                )
+            }
+        }
     ) {
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
+        StatsSectionHeading(text = "Weight graph")
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // From / To dates of the range
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
-            Column(modifier = Modifier.padding(AppSpacing.md)) {
-                // Header & Interval Controls
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            StatsDateButton(
+                text = "From ${uiState.weightFromDate.format(shortDateFormatter)}",
+                onClick = { pickingFromDate = true },
+                modifier = Modifier.weight(1f)
+            )
+            StatsDateButton(
+                text = "To ${uiState.weightToDate.format(shortDateFormatter)}",
+                onClick = { pickingFromDate = false },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Start / Current / Change tiles
+        val startDisplay = formatWeightValue(stats?.initialWeightKg, isImperial)
+        val currentDisplay = formatWeightValue(stats?.latestWeightKg, isImperial)
+        val deltaVal = stats?.deltaWeightKg
+        val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
+        val percentDisplay = stats?.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
+
+        val changeColor = if (deltaVal != null) {
+            if (deltaVal <= 0.0) AppColors.Success else AppColors.ProgressOver
+        } else AppColors.TextSecondary
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
+        ) {
+            WeightStatTile(
+                label = "Start",
+                value = startDisplay,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+            WeightStatTile(
+                label = "Current",
+                value = currentDisplay,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+            WeightStatTile(
+                label = "Change",
+                value = deltaDisplay,
+                valueColor = changeColor,
+                note = percentDisplay,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Graph or empty state
+        MbPanel(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 10.dp)
+        ) {
+            if (stats != null && stats.hasSufficientData) {
+                WeightLineGraph(
+                    entries = stats.entries,
+                    isImperial = isImperial,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "Weight Graph", style = AppTypography.Header2)
-
-                    Box {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(AppColors.SurfaceAlt)
-                                .clickable { showIntervalDropdown = true }
-                                .padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = uiState.weightInterval.label,
-                                style = AppTypography.Caption,
-                                color = AppColors.WaterCyan
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = AppColors.WaterCyan,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = showIntervalDropdown,
-                            onDismissRequest = { showIntervalDropdown = false },
-                            modifier = Modifier.background(AppColors.Surface)
-                        ) {
-                            WeightTimeInterval.entries.forEach { interval ->
-                                DropdownMenuItem(
-                                    text = { Text(interval.label, color = AppColors.TextPrimary) },
-                                    onClick = {
-                                        viewModel.onSelectWeightInterval(interval)
-                                        showIntervalDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-                // From / To Date Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable {
-                                val d = uiState.weightFromDate
-                                DatePickerDialog(context, { _, y, m, day ->
-                                    val newFrom = LocalDate.of(y, m + 1, day)
-                                    viewModel.onSetWeightCustomRange(newFrom, uiState.weightToDate)
-                                }, d.year, d.monthValue - 1, d.dayOfMonth).show()
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "From ${uiState.weightFromDate.format(shortDateFormatter)}", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable {
-                                val d = uiState.weightToDate
-                                DatePickerDialog(context, { _, y, m, day ->
-                                    val newTo = LocalDate.of(y, m + 1, day)
-                                    viewModel.onSetWeightCustomRange(uiState.weightFromDate, newTo)
-                                }, d.year, d.monthValue - 1, d.dayOfMonth).show()
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "To ${uiState.weightToDate.format(shortDateFormatter)}", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-                HorizontalDivider(color = AppColors.Divider)
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // 3-Column Metric Strip (START / CURRENT / CHANGE)
-                val startDisplay = formatWeightValue(stats?.initialWeightKg, isImperial)
-                val currentDisplay = formatWeightValue(stats?.latestWeightKg, isImperial)
-                val deltaVal = stats?.deltaWeightKg
-                val deltaDisplay = formatWeightDelta(deltaVal, isImperial)
-                val percentDisplay = stats?.percentageChange?.let { "(${String.format(Locale.US, "%.1f", abs(it))}%)" } ?: ""
-
-                val changeColor = if (deltaVal != null) {
-                    if (deltaVal <= 0.0) Color(0xFF00C853) else AppColors.ProgressOver
-                } else AppColors.TextSecondary
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(text = startDisplay, style = AppTypography.Header2)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "START", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-
-                    Box(modifier = Modifier.width(1.dp).height(36.dp).background(AppColors.Divider))
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(text = currentDisplay, style = AppTypography.Header2)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "CURRENT", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-
-                    Box(modifier = Modifier.width(1.dp).height(36.dp).background(AppColors.Divider))
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(text = deltaDisplay, style = AppTypography.Header2, color = changeColor)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "CHANGE $percentDisplay", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.lg))
-
-                // Graph or Empty State
-                if (stats != null && stats.hasSufficientData) {
-                    WeightLineGraph(
-                        entries = stats.entries,
-                        isImperial = isImperial,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
+                    Text(
+                        text = "Log at least 2 weight entries to generate progress graph",
+                        style = AppTypography.Body2,
+                        color = AppColors.TextSecondary,
+                        textAlign = TextAlign.Center
                     )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Log at least 2 weight entries to generate progress graph",
-                            style = AppTypography.Body2,
-                            color = AppColors.TextMuted
-                        )
-                    }
                 }
             }
         }
     }
+
+    pickingFromDate?.let { pickingFrom ->
+        MbDatePickerDialog(
+            initialDate = if (pickingFrom) uiState.weightFromDate else uiState.weightToDate,
+            onDateSelected = { picked ->
+                if (pickingFrom) {
+                    viewModel.onSetWeightCustomRange(picked, uiState.weightToDate)
+                } else {
+                    viewModel.onSetWeightCustomRange(uiState.weightFromDate, picked)
+                }
+            },
+            onDismiss = { pickingFromDate = null }
+        )
+    }
+}
+
+/** A From / To date of the weight range: a rounded field-like button with a calendar icon. */
+@Composable
+private fun StatsDateButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = AppShapes.InputBox
+    Row(
+        modifier = modifier
+            .defaultMinSize(minHeight = 44.dp)
+            .mbClickable(pressedScale = 0.97f, onClick = onClick)
+            .clip(shape)
+            .background(AppColors.FieldFill)
+            .border(1.dp, AppColors.FieldBorder, shape)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MbIcon(icon = Ph.CalendarBlank.light, contentDescription = null, size = 16.dp, tint = AppColors.TextSecondary)
+        Text(
+            text = text,
+            style = AppTypography.Body2.copy(fontSize = 13.5.sp),
+            color = AppColors.TextPrimary,
+            maxLines = 1
+        )
+    }
+}
+
+/** A Start / Current / Change tile: a small panel with the label over the value. */
+@Composable
+private fun WeightStatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = AppColors.TextPrimary,
+    note: String = ""
+) {
+    MbPanel(
+        modifier = modifier,
+        shape = AppShapes.CardSmall,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary, maxLines = 1)
+        Text(
+            text = value,
+            style = AppTypography.Header3.copy(fontSize = 16.sp),
+            color = valueColor,
+            maxLines = 1
+        )
+        if (note.isNotEmpty()) {
+            Text(
+                text = note,
+                style = AppTypography.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Light),
+                color = AppColors.TextMuted,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** The heatmap's cell size for a range: bigger cells when there are fewer weeks to show. */
+internal fun heatmapCellSize(interval: ConsistencyInterval): Dp = when (interval) {
+    ConsistencyInterval.DAYS_30 -> 24.dp
+    ConsistencyInterval.DAYS_90 -> 16.dp
+    ConsistencyInterval.MONTHS_6, ConsistencyInterval.YEAR_1 -> 12.dp
 }
 
 /**
- * Tab 2: Nutrition Consistency (GitHub-Style Weekly Matrix Heatmap)
+ * Consistency: the range chips, then the weekday-row heatmap (it scrolls sideways), the
+ * "Less ... More" legend and the score. Tapping a day opens its details in a sheet.
  */
 @Composable
 private fun NutritionConsistencyTab(
@@ -537,195 +641,336 @@ private fun NutritionConsistencyTab(
 ) {
     val stats = uiState.consistencyStats
     var selectedCellForDialog by remember { mutableStateOf<HeatmapCellData?>(null) }
-    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, MMM dd, yyyy") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Range Filter Chips
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-        ) {
+    StatsPage(
+        chips = {
             ConsistencyInterval.entries.forEach { interval ->
-                FilterChip(
+                MbChip(
+                    text = interval.label,
                     selected = uiState.consistencyInterval == interval,
-                    onClick = { viewModel.onSelectConsistencyInterval(interval) },
-                    label = { Text(interval.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AppColors.Primary,
-                        selectedLabelColor = AppColors.Background,
-                        containerColor = AppColors.SurfaceAlt,
-                        labelColor = AppColors.TextSecondary
-                    )
+                    onClick = { viewModel.onSelectConsistencyInterval(interval) }
                 )
             }
         }
+    ) {
+        StatsSectionHeading(text = "Logging consistency (${uiState.consistencyInterval.label})")
+        Spacer(modifier = Modifier.height(10.dp))
 
-        Spacer(modifier = Modifier.height(AppSpacing.md))
+        MbPanel(modifier = Modifier.fillMaxWidth()) {
+            ConsistencyHeatmap(
+                stats = stats,
+                cellSize = heatmapCellSize(uiState.consistencyInterval),
+                onCellClick = { selectedCellForDialog = it }
+            )
 
-        // Heatmap Card
-        Card(
-            shape = AppShapes.Card,
-            colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-            modifier = Modifier.fillMaxWidth()
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Legend: Less, the five colours, More
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Less", style = AppTypography.Caption, color = AppColors.TextSecondary)
+                Spacer(modifier = Modifier.width(6.dp))
+                listOf(
+                    CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED,
+                    CalendarPerformanceConfig.PerformanceCategory.UNDER_BUDGET,
+                    CalendarPerformanceConfig.PerformanceCategory.OPTIMAL_TARGET,
+                    CalendarPerformanceConfig.PerformanceCategory.MODERATE_OVER,
+                    CalendarPerformanceConfig.PerformanceCategory.HIGH_OVER_TARGET
+                ).forEach { cat ->
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(CalendarPerformanceConfig.getColorForCategory(cat))
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                }
+                Spacer(modifier = Modifier.width(3.dp))
+                Text(text = "More", style = AppTypography.Caption, color = AppColors.TextSecondary)
+            }
+
+            HorizontalDivider(color = AppColors.Divider, modifier = Modifier.padding(vertical = 14.dp))
+
+            // Consistency score
+            val score = stats?.consistencyScorePercentage ?: 0
+            val loggedCount = stats?.loggedDaysCount ?: 0
+            val totalEligible = stats?.totalEligibleDays ?: 0
+
+            Text(
+                text = "Consistency score: $score% ($loggedCount of $totalEligible days logged)",
+                style = AppTypography.Body1,
+                color = AppColors.AccentStrong
+            )
+        }
+    }
+
+    selectedCellForDialog?.let { cell ->
+        ConsistencyDaySheet(cell = cell, onDismiss = { selectedCellForDialog = null })
+    }
+}
+
+/** The heatmap's weekday rows. */
+private const val HEATMAP_DAYS = 7
+
+/** How long a touch must stay down before it shows as a press: Android's tap timeout. */
+private val TAP_TIMEOUT_MS = android.view.ViewConfiguration.getTapTimeout().toLong()
+
+/** The space between heatmap cells: more around the bigger cells. */
+internal fun heatmapGap(cellSize: Dp): Dp = if (cellSize >= 20.dp) 5.dp else 3.dp
+
+/**
+ * The week column and weekday row under a point of the heatmap picture, or null outside the grid.
+ * A tap in the gap between two cells goes to the nearer one.
+ */
+internal fun heatmapSlotAt(x: Float, y: Float, cellPx: Float, gapPx: Float, weekCount: Int): Pair<Int, Int>? {
+    if (x < 0f || y < 0f) return null
+    val pitch = cellPx + gapPx
+    // How many cells along the point is, each cell owning the half gap on either side of it.
+    // Whole cells are counted down, as a grid index is, so this is truncation on purpose
+    val cellsAcross = (x + gapPx / 2f) / pitch
+    val cellsDown = (y + gapPx / 2f) / pitch
+    val week = cellsAcross.toInt()
+    val day = cellsDown.toInt()
+    return if (week < weekCount && day < HEATMAP_DAYS) week to day else null
+}
+
+private val HeatmapDayFormat = DateTimeFormatter.ofPattern("EEEE, MMM d")
+
+/** What a screen reader says for a heatmap day: its date, then what was logged. */
+internal fun heatmapCellLabel(cell: HeatmapCellData): String {
+    val status = when {
+        cell.isFuture -> "still to come"
+        // Today, nothing logged yet: not counted as a missed day (BUG-032)
+        cell.caloriesLogged <= 0.0 && !cell.isEligible -> "nothing logged yet"
+        cell.caloriesLogged <= 0.0 -> "no food logged"
+        else -> "${cell.caloriesLogged.roundToInt()} kcal, ${cell.percentageOfGoal}% of goal"
+    }
+    return "${cell.date.format(HeatmapDayFormat)}: $status"
+}
+
+/**
+ * The days as weekday rows (Sun to Sat) and week columns, scrolling sideways. The cells are drawn
+ * as one picture: a year is 371 cells, and drawing them is far cheaper than laying out a box for
+ * each. Tapping a day opens it; the day shrinks a little while pressed, as a button does. While an
+ * accessibility service (TalkBack, Switch Access) is on, each day is also a labelled spot it can
+ * reach and open.
+ */
+@Composable
+private fun ConsistencyHeatmap(
+    stats: ConsistencyStatistics?,
+    cellSize: Dp,
+    onCellClick: (HeatmapCellData) -> Unit
+) {
+    val daysOfWeekLabels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    val gap = heatmapGap(cellSize)
+    val corner = if (cellSize >= 20.dp) 5.dp else 3.dp
+    val weeks = stats?.weeks.orEmpty()
+    val accessibilityOn = rememberAccessibilityOn()
+    val openCell by rememberUpdatedState(onCellClick)
+    val scope = rememberCoroutineScope()
+    // The day being pressed and its scale; read only while drawing, so a press redraws the picture alone
+    var pressedSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val pressScale = remember { Animatable(1f) }
+    // Whole pixels, as laid-out boxes have, so the cells line up with the weekday labels and the spots
+    val density = LocalDensity.current
+    val cellPx = with(density) { cellSize.roundToPx() }
+    val gapPx = with(density) { gap.roundToPx() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.Top
+    ) {
+        // Day of week column
+        Column(
+            verticalArrangement = Arrangement.spacedBy(gap),
+            modifier = Modifier.padding(end = 6.dp)
         ) {
-            Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                Text(
-                    text = "Logging Consistency (${uiState.consistencyInterval.label})",
-                    style = AppTypography.Header2
-                )
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // Weekly Heatmap Matrix
-                val daysOfWeekLabels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.Top
+            daysOfWeekLabels.forEach { label ->
+                Box(
+                    modifier = Modifier.size(width = 28.dp, height = cellSize),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    // Day of Week Column
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(Dimensions.HeatmapCellSpacing),
-                        modifier = Modifier.padding(end = AppSpacing.sm)
-                    ) {
-                        daysOfWeekLabels.forEach { label ->
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 28.dp, height = Dimensions.HeatmapCellSize),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = AppTypography.Caption,
-                                    color = AppColors.TextSecondary,
-                                    fontSize = 9.sp
+                    Text(
+                        text = label,
+                        style = AppTypography.Caption.copy(fontSize = 10.sp, lineHeight = 12.sp),
+                        color = AppColors.TextMuted,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        if (weeks.isEmpty()) return@Row
+        // Week columns, each followed by a gap
+        Box {
+            Canvas(
+                modifier = Modifier
+                    .size(
+                        width = with(density) { ((cellPx + gapPx) * weeks.size).toDp() },
+                        height = with(density) { (cellPx * HEATMAP_DAYS + gapPx * (HEATMAP_DAYS - 1)).toDp() }
+                    )
+                    .pointerInput(weeks, cellPx, gapPx) {
+                        fun slotAt(offset: Offset) = heatmapSlotAt(offset.x, offset.y, cellPx.toFloat(), gapPx.toFloat(), weeks.size)
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            val slot = slotAt(down.position) ?: return@awaitEachGesture
+                            val cell = weeks[slot.first].cells.getOrNull(slot.second) ?: return@awaitEachGesture
+                            // As a button in a scrolling list does, the press shows only once the touch
+                            // is not the start of a scroll. A lift before then is still a tap
+                            val quickLift = withTimeoutOrNull(TAP_TIMEOUT_MS) { listOf(waitForUpOrCancellation()) }
+                            val up = if (quickLift != null) {
+                                quickLift.first()
+                            } else {
+                                pressedSlot = slot
+                                scope.launch { pressScale.animateTo(0.9f, tween(MbMotion.PressMs, easing = MbMotion.Ease)) }
+                                waitForUpOrCancellation().also {
+                                    scope.launch { pressScale.animateTo(1f, tween(MbMotion.PressMs, easing = MbMotion.Ease)) }
+                                }
+                            }
+                            // Opened only when lifted on the day pressed, as each day's own button was
+                            if (up != null && slotAt(up.position) == slot) {
+                                up.consume()
+                                openCell(cell)
+                            }
+                        }
+                    }
+            ) {
+                val cell = cellPx.toFloat()
+                val pitch = (cellPx + gapPx).toFloat()
+                val radius = CornerRadius(corner.toPx())
+                // A border's width is rounded up to whole pixels
+                val strokePx = ceil(1.dp.toPx())
+                val pressed = pressedSlot
+                val factor = pressScale.value
+                weeks.forEachIndexed { week, column ->
+                    column.cells.forEachIndexed { day, data ->
+                        if (data == null) return@forEachIndexed
+                        val topLeft = Offset(week * pitch, day * pitch)
+                        // An unlogged today is not a missed day yet, so it looks like one to come
+                        val toCome = data.isFuture || !data.isEligible
+                        val drawCell: DrawScope.() -> Unit = {
+                            if (toCome) {
+                                // An outline inside the cell, as a 1 dp border is
+                                drawRoundRect(
+                                    color = AppColors.Divider,
+                                    topLeft = topLeft + Offset(strokePx / 2f, strokePx / 2f),
+                                    size = Size(cell - strokePx, cell - strokePx),
+                                    cornerRadius = CornerRadius(radius.x - strokePx / 2f),
+                                    style = Stroke(width = strokePx)
+                                )
+                            } else {
+                                drawRoundRect(
+                                    color = CalendarPerformanceConfig.getColorForCategory(data.category),
+                                    topLeft = topLeft,
+                                    size = Size(cell, cell),
+                                    cornerRadius = radius
+                                )
+                            }
+                        }
+                        if (factor != 1f && pressed == (week to day)) {
+                            scale(factor, pivot = topLeft + Offset(cell / 2f, cell / 2f)) { drawCell() }
+                        } else {
+                            drawCell()
+                        }
+                    }
+                }
+            }
+
+            if (accessibilityOn) {
+                // Built only while an accessibility service is on: one labelled spot per day, over the picture
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    weeks.forEach { week ->
+                        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                            week.cells.forEach { cell ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(cellSize)
+                                        .then(
+                                            if (cell == null) {
+                                                Modifier
+                                            } else {
+                                                Modifier.semantics {
+                                                    contentDescription = heatmapCellLabel(cell)
+                                                    role = Role.Button
+                                                    onClick { openCell(cell); true }
+                                                }
+                                            }
+                                        )
                                 )
                             }
                         }
                     }
-
-                    // Week Columns
-                    stats?.weeks?.forEach { week ->
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(Dimensions.HeatmapCellSpacing),
-                            modifier = Modifier.padding(end = Dimensions.HeatmapCellSpacing)
-                        ) {
-                            week.cells.forEach { cell ->
-                                if (cell != null) {
-                                    // An unlogged today is not a missed day yet, so it looks like one to come
-                                    val cellColor = if (cell.isFuture || !cell.isEligible) {
-                                        AppColors.SurfaceAlt
-                                    } else {
-                                        CalendarPerformanceConfig.getColorForCategory(cell.category)
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(Dimensions.HeatmapCellSize)
-                                            .clip(RoundedCornerShape(2.dp))
-                                            .background(cellColor)
-                                            .clickable { selectedCellForDialog = cell }
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(Dimensions.HeatmapCellSize)
-                                            .background(Color.Transparent)
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // Heatmap Legend: Less [ ■ ■ ■ ■ ■ ] More
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Less", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    listOf(
-                        CalendarPerformanceConfig.PerformanceCategory.EMPTY_MISSED,
-                        CalendarPerformanceConfig.PerformanceCategory.UNDER_BUDGET,
-                        CalendarPerformanceConfig.PerformanceCategory.OPTIMAL_TARGET,
-                        CalendarPerformanceConfig.PerformanceCategory.MODERATE_OVER,
-                        CalendarPerformanceConfig.PerformanceCategory.HIGH_OVER_TARGET
-                    ).forEach { cat ->
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(CalendarPerformanceConfig.getColorForCategory(cat))
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "More", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                }
-
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-                HorizontalDivider(color = AppColors.Divider)
-                Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                // Consistency Score Badge
-                val score = stats?.consistencyScorePercentage ?: 0
-                val loggedCount = stats?.loggedDaysCount ?: 0
-                val totalEligible = stats?.totalEligibleDays ?: 0
-
-                Text(
-                    text = "Consistency Score: $score% ($loggedCount of $totalEligible Days Logged)",
-                    style = AppTypography.Body1,
-                    color = AppColors.CalorieText
-                )
             }
         }
     }
+}
 
-    // Heatmap Cell Detail Dialog
-    selectedCellForDialog?.let { cell ->
-        AlertDialog(
-            onDismissRequest = { selectedCellForDialog = null },
-            title = { Text(cell.date.format(dateFormatter), style = AppTypography.Header2) },
-            text = {
-                Column {
-                    if (cell.isFuture) {
-                        Text("Future date (not yet logged)", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                    } else if (cell.caloriesLogged <= 0.0 && !cell.isEligible) {
-                        // Today, nothing logged yet: not counted as a missed day (BUG-032)
-                        Text("Nothing logged yet today.", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                    } else if (cell.caloriesLogged <= 0.0) {
-                        Text("No food logged on this day.", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text("Daily Goal: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Caption, color = AppColors.TextMuted)
-                    } else {
-                        Text("Calories Logged: ${cell.caloriesLogged.roundToInt()} kcal", style = AppTypography.Body1)
-                        Text("Daily Target: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Body2, color = AppColors.TextSecondary)
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text("Adherence: ${cell.percentageOfGoal}% of Goal", style = AppTypography.Body2, color = CalendarPerformanceConfig.getColorForCategory(cell.category))
-                    }
+/** A heatmap day's details, as a bottom sheet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConsistencyDaySheet(cell: HeatmapCellData, onDismiss: () -> Unit) {
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, MMM dd, yyyy") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    MbSheet(
+        onDismiss = onDismiss,
+        title = cell.date.format(dateFormatter),
+        sheetState = sheetState,
+        footer = {
+            MbButton(
+                text = "Close",
+                kind = MbButtonKind.Secondary,
+                onClick = {
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { if (!sheetState.isVisible) onDismiss() }
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier.padding(top = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (cell.isFuture) {
+                Text("Future date (not yet logged)", style = AppTypography.Body2, color = AppColors.TextSecondary)
+            } else if (cell.caloriesLogged <= 0.0 && !cell.isEligible) {
+                // Today, nothing logged yet: not counted as a missed day (BUG-032)
+                Text("Nothing logged yet today.", style = AppTypography.Body2, color = AppColors.TextSecondary)
+            } else if (cell.caloriesLogged <= 0.0) {
+                Text("No food logged on this day.", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                Text("Daily goal: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Caption, color = AppColors.TextMuted)
+            } else {
+                Text("Calories logged: ${cell.caloriesLogged.roundToInt()} kcal", style = AppTypography.Body1, color = AppColors.TextPrimary)
+                Text("Daily target: ${cell.dailyGoalCalories.roundToInt()} kcal", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // The day's heatmap colour, as a swatch: the darker colours are too dim for text
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(CalendarPerformanceConfig.getColorForCategory(cell.category))
+                    )
+                    Text("Adherence: ${cell.percentageOfGoal}% of goal", style = AppTypography.Body2, color = AppColors.TextPrimary)
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedCellForDialog = null }) {
-                    Text("Close", color = AppColors.Primary)
-                }
-            },
-            containerColor = AppColors.Surface
-        )
+            }
+        }
     }
 }
 
 /**
- * Tab 3: Average Macro Distribution (Actual vs Target Comparison)
+ * Averages: the range chips, then the daily intake averages and the macro distribution against
+ * the target, or the empty text.
  */
 @Composable
 private fun MacroAveragesTab(
@@ -734,146 +979,112 @@ private fun MacroAveragesTab(
 ) {
     val stats = uiState.macroStats
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(AppSpacing.lg)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Range Filter Chips
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-        ) {
+    StatsPage(
+        chips = {
             MacroInterval.entries.forEach { interval ->
-                FilterChip(
+                MbChip(
+                    text = interval.label,
                     selected = uiState.macroInterval == interval,
-                    onClick = { viewModel.onSelectMacroInterval(interval) },
-                    label = { Text(interval.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AppColors.Primary,
-                        selectedLabelColor = AppColors.Background,
-                        containerColor = AppColors.SurfaceAlt,
-                        labelColor = AppColors.TextSecondary
-                    )
+                    onClick = { viewModel.onSelectMacroInterval(interval) }
                 )
             }
         }
-
-        Spacer(modifier = Modifier.height(AppSpacing.md))
-
+    ) {
         if (stats == null || !stats.hasSufficientData) {
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(AppSpacing.xl),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Log meals in this period to see average macro distribution. Today counts once it ends.",
-                        style = AppTypography.Body2,
-                        color = AppColors.TextMuted
-                    )
-                }
-            }
+            StatsMessagePanel(text = "Log meals in this period to see average macro distribution. Today counts once it ends.")
         } else {
-            // 1. Average Daily Intake Card
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                    Text(text = "Daily Intake Averages", style = AppTypography.Header2)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+            // 1. Average daily intake
+            StatsSectionHeading(text = "Daily intake averages")
+            Text(
+                text = "Based on ${stats.loggedDaysCount} logged days; today counts once it ends",
+                style = StatsNoteStyle,
+                color = AppColors.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            MbPanel(modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Based on ${stats.loggedDaysCount} logged days; today counts once it ends",
-                        style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
+                        text = "${stats.averageCalories.roundToInt()}",
+                        style = AppTypography.BigStat,
+                        color = AppColors.TextPrimary,
+                        modifier = Modifier.alignByBaseline()
                     )
-
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-                    HorizontalDivider(color = AppColors.Divider)
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${stats.averageCalories.roundToInt()}", style = AppTypography.Header2, color = AppColors.CalorieText)
-                            Text(text = "kcal / day", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageProteinGrams)}g", style = AppTypography.Header2, color = AppColors.MacroProtein)
-                            Text(text = "Protein", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageCarbsGrams)}g", style = AppTypography.Header2, color = AppColors.MacroCarbs)
-                            Text(text = "Carbs", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(text = "${String.format(Locale.US, "%.1f", stats.averageFatGrams)}g", style = AppTypography.Header2, color = AppColors.MacroFat)
-                            Text(text = "Fat", style = AppTypography.Caption, color = AppColors.TextSecondary)
-                        }
-                    }
+                    Text(
+                        text = "kcal / day",
+                        style = AppTypography.HeroUnit,
+                        modifier = Modifier
+                            .alignByBaseline()
+                            .padding(start = 8.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                ) {
+                    MacroAverageValue(
+                        name = "Protein",
+                        value = "${String.format(Locale.US, "%.1f", stats.averageProteinGrams)}g",
+                        color = AppColors.MacroProtein,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MacroAverageValue(
+                        name = "Carbs",
+                        value = "${String.format(Locale.US, "%.1f", stats.averageCarbsGrams)}g",
+                        color = AppColors.MacroCarbs,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MacroAverageValue(
+                        name = "Fat",
+                        value = "${String.format(Locale.US, "%.1f", stats.averageFatGrams)}g",
+                        color = AppColors.MacroFat,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(AppSpacing.lg))
+            Spacer(modifier = Modifier.height(AppSpacing.sectionGap))
 
-            // 2. Target vs Actual Macro Distribution Comparison Card
-            Card(
-                shape = AppShapes.Card,
-                colors = CardDefaults.cardColors(containerColor = AppColors.Surface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(AppSpacing.lg)) {
-                    Text(text = "Macro Distribution (Actual vs Target)", style = AppTypography.Header2)
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
+            // 2. Actual against target macro distribution
+            StatsSectionHeading(text = "Macro distribution (actual vs target)")
+            Spacer(modifier = Modifier.height(10.dp))
 
-                    // Progress Split Bars
-                    // Actual Split
-                    Text(text = "Actual Consumed Ratio", style = AppTypography.Body2)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    MacroSplitBar(
-                        proteinPercent = stats.actualProteinPercent,
-                        carbsPercent = stats.actualCarbsPercent,
-                        fatPercent = stats.actualFatPercent
-                    )
+            MbPanel(modifier = Modifier.fillMaxWidth()) {
+                Text(text = "Actual consumed ratio", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                Spacer(modifier = Modifier.height(6.dp))
+                MacroSplitBar(
+                    proteinPercent = stats.actualProteinPercent,
+                    carbsPercent = stats.actualCarbsPercent,
+                    fatPercent = stats.actualFatPercent
+                )
 
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                    // Target Split
-                    Text(text = "Target Goal Ratio", style = AppTypography.Body2)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    MacroSplitBar(
-                        proteinPercent = stats.targetProteinPercent,
-                        carbsPercent = stats.targetCarbsPercent,
-                        fatPercent = stats.targetFatPercent
-                    )
+                Text(text = "Target goal ratio", style = AppTypography.Body2, color = AppColors.TextSecondary)
+                Spacer(modifier = Modifier.height(6.dp))
+                MacroSplitBar(
+                    proteinPercent = stats.targetProteinPercent,
+                    carbsPercent = stats.targetCarbsPercent,
+                    fatPercent = stats.targetFatPercent
+                )
 
-                    Spacer(modifier = Modifier.height(AppSpacing.lg))
+                HorizontalDivider(color = AppColors.Divider, modifier = Modifier.padding(vertical = 14.dp))
 
-                    // Breakdown Rows
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     MacroComparisonRow(
                         name = "Protein",
                         color = AppColors.MacroProtein,
                         actualPercent = stats.actualProteinPercent,
                         targetPercent = stats.targetProteinPercent
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
                     MacroComparisonRow(
                         name = "Carbohydrates",
                         color = AppColors.MacroCarbs,
                         actualPercent = stats.actualCarbsPercent,
                         targetPercent = stats.targetCarbsPercent
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
                     MacroComparisonRow(
                         name = "Fat",
                         color = AppColors.MacroFat,
@@ -883,6 +1094,26 @@ private fun MacroAveragesTab(
                 }
             }
         }
+    }
+}
+
+/** A macro's daily average: a colour dot and the name over the grams. */
+@Composable
+private fun MacroAverageValue(name: String, value: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+            Text(text = name, style = AppTypography.Caption, color = AppColors.TextSecondary, maxLines = 1)
+        }
+        Text(text = value, style = AppTypography.Header3.copy(fontSize = 16.sp), color = AppColors.TextPrimary, maxLines = 1)
     }
 }
 
@@ -900,9 +1131,9 @@ private fun MacroSplitBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(14.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(AppColors.SurfaceAlt)
+            .height(10.dp)
+            .clip(CircleShape)
+            .background(AppColors.BarTrack)
     ) {
         if (pWeight > 0f) {
             Box(modifier = Modifier.weight(pWeight).fillMaxSize().background(AppColors.MacroProtein))
@@ -929,16 +1160,61 @@ private fun MacroComparisonRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(color))
-            Spacer(modifier = Modifier.width(AppSpacing.sm))
-            Text(text = name, style = AppTypography.Body2)
+            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
+            Spacer(modifier = Modifier.width(AppSpacing.md))
+            Text(text = name, style = AppTypography.Body2, color = AppColors.TextPrimary)
         }
         Text(
-            text = "${String.format(Locale.US, "%.1f", actualPercent)}% (Target: ${String.format(Locale.US, "%.0f", targetPercent)}%)",
-            style = AppTypography.Caption,
+            text = "${String.format(Locale.US, "%.1f", actualPercent)}% (target: ${String.format(Locale.US, "%.0f", targetPercent)}%)",
+            style = AppTypography.Body2.copy(fontSize = 13.sp),
             color = AppColors.TextSecondary
         )
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Chart pieces of the rank chart (design.txt C18); the weight chart is WeightLineGraph
+// ---------------------------------------------------------------------------------------------
+
+/** Chart labels: 10 sp in text muted. */
+internal val ChartLabelStyle = AppTypography.Caption.copy(fontSize = 10.sp, lineHeight = 12.sp, color = AppColors.TextMuted)
+
+/** The tooltip's main line. */
+internal val ChartTooltipStyle = AppTypography.Caption.copy(fontSize = 12.sp, lineHeight = 16.sp, color = AppColors.ToastInk)
+
+/** The toast's border, rgba(91,216,106,0.35), around a chart tooltip. */
+private val ChartTooltipBorder = Color(0x595BD86A)
+
+/** The newest point: a dot in the line colour with a 3 dp canvas-coloured outline. */
+internal fun DrawScope.drawChartEndDot(center: Offset) {
+    drawCircle(AppColors.Background, radius = 6.5.dp.toPx(), center = center)
+    drawCircle(AppColors.ChartLine, radius = 3.5.dp.toPx(), center = center)
+}
+
+/** A tapped point: a hollow dot in the line colour. */
+internal fun DrawScope.drawChartHollowDot(center: Offset) {
+    drawCircle(AppColors.Background, radius = 4.dp.toPx(), center = center)
+    drawCircle(AppColors.ChartLine, radius = 4.dp.toPx(), center = center, style = Stroke(width = 2.5.dp.toPx()))
+}
+
+/** The dashed vertical line through a tapped point, from [top] to [bottom]. */
+internal fun DrawScope.drawChartGuide(x: Float, top: Float, bottom: Float) {
+    drawLine(
+        color = AppColors.ChartGrid,
+        start = Offset(x, top),
+        end = Offset(x, bottom),
+        strokeWidth = 1.dp.toPx(),
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx()))
+    )
+}
+
+/** A tooltip's box, in the toast's colours. */
+internal fun DrawScope.drawChartTooltipBox(bounds: WeightGraphHelper.TooltipBounds) {
+    val corner = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+    val topLeft = Offset(bounds.leftX, bounds.topY)
+    val boxSize = Size(bounds.width, bounds.height)
+    drawRoundRect(color = AppColors.ToastFill, topLeft = topLeft, size = boxSize, cornerRadius = corner)
+    drawRoundRect(color = ChartTooltipBorder, topLeft = topLeft, size = boxSize, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
 }
 
 private fun formatWeightValue(kg: Double?, isImperial: Boolean): String {

@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.scanner
 
+import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbButton
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -321,7 +323,7 @@ fun NutritionLabelScannerScreen(
         ) {
             Surface(
                 color = Color(0x99000000),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Text(
                     text = "Fill the box with the Nutrition Facts panel.",
@@ -506,13 +508,11 @@ fun NutritionLabelScannerScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.lg))
-                        Button(
+                        MbButton(
+                            text = "Retake Photo",
                             onClick = { viewModel.dismissQualityError() },
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Retake Photo", style = AppTypography.Button)
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -563,21 +563,18 @@ fun NutritionLabelScannerScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.lg))
-                        Button(
+                        MbButton(
+                            text = "Retake Photo",
                             onClick = { viewModel.retryCapture() },
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Retake Photo", style = AppTypography.Button)
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
-                        Button(
+                        MbButton(
+                            text = "Return to Manual Entry",
                             onClick = onNavigateBack,
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Return to Manual Entry", style = AppTypography.Button, color = AppColors.TextPrimary)
-                        }
+                            kind = MbButtonKind.Secondary,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -628,21 +625,18 @@ fun NutritionLabelScannerScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.lg))
-                        Button(
+                        MbButton(
+                            text = "Retake Photo",
                             onClick = { viewModel.retryCapture() },
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Retake Photo", style = AppTypography.Button)
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
-                        Button(
+                        MbButton(
+                            text = "Return to Manual Entry",
                             onClick = onNavigateBack,
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Return to Manual Entry", style = AppTypography.Button, color = AppColors.TextPrimary)
-                        }
+                            kind = MbButtonKind.Secondary,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -700,21 +694,18 @@ fun NutritionLabelScannerScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.lg))
-                        Button(
+                        MbButton(
+                            text = "Try Again",
                             onClick = { viewModel.retryCapture() },
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Try Again", style = AppTypography.Button)
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
-                        Button(
+                        MbButton(
+                            text = "Return to Manual Entry",
                             onClick = onNavigateBack,
-                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                            modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                        ) {
-                            Text("Return to Manual Entry", style = AppTypography.Button, color = AppColors.TextPrimary)
-                        }
+                            kind = MbButtonKind.Secondary,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -765,7 +756,7 @@ fun ScannerFramingOverlay(modifier: Modifier = Modifier) {
         )
 
         // Emerald corner brackets
-        val brandColor = Color(0xFF00C853)
+        val brandColor = AppColors.Primary
 
         // Top Left
         drawLine(brandColor, Offset(guideLeft, guideTop + cornerLength), Offset(guideLeft, guideTop), strokeWidth)
@@ -825,21 +816,18 @@ fun CameraPermissionDeniedContent(
 
             Spacer(modifier = Modifier.height(AppSpacing.sm))
 
-            Button(
+            MbButton(
+                text = "Grant Camera Permission",
                 onClick = onRequestPermission,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-            ) {
-                Text("Grant Camera Permission", style = AppTypography.Button)
-            }
+                modifier = Modifier.fillMaxWidth()
+            )
 
-            Button(
+            MbButton(
+                text = "Return to Manual Form",
                 onClick = onNavigateBack,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-            ) {
-                Text("Return to Manual Form", style = AppTypography.Button, color = AppColors.TextPrimary)
-            }
+                kind = MbButtonKind.Secondary,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
@@ -983,8 +971,8 @@ fun NutritionLabelReviewModal(
                 if (!draft.normalizationNote.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
-                        color = Color(0x1A00C853),
-                        shape = RoundedCornerShape(8.dp),
+                        color = AppColors.Success.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -994,7 +982,7 @@ fun NutritionLabelReviewModal(
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = null,
-                                tint = Color(0xFF00C853),
+                                tint = AppColors.Success,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.size(6.dp))
@@ -1018,7 +1006,7 @@ fun NutritionLabelReviewModal(
                         val isExpanded = expandedFieldKey == key
                         Surface(
                             color = AppColors.SurfaceAlt,
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
@@ -1050,8 +1038,8 @@ fun NutritionLabelReviewModal(
                                         if (parsed != null) {
                                             if (parsed.needsReview) {
                                                 Surface(
-                                                    color = Color(0x33FFB300),
-                                                    shape = RoundedCornerShape(4.dp)
+                                                    color = AppColors.Warning.copy(alpha = 0.2f),
+                                                    shape = RoundedCornerShape(10.dp)
                                                 ) {
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
@@ -1060,14 +1048,14 @@ fun NutritionLabelReviewModal(
                                                         Icon(
                                                             imageVector = Icons.Default.Warning,
                                                             contentDescription = null,
-                                                            tint = Color(0xFFFFB300),
+                                                            tint = AppColors.Warning,
                                                             modifier = Modifier.size(12.dp)
                                                         )
                                                         Spacer(modifier = Modifier.size(4.dp))
                                                         Text(
                                                             text = "Check",
                                                             style = AppTypography.Caption,
-                                                            color = Color(0xFFFFB300)
+                                                            color = AppColors.Warning
                                                         )
                                                     }
                                                 }
@@ -1075,7 +1063,7 @@ fun NutritionLabelReviewModal(
                                                 Icon(
                                                     imageVector = Icons.Default.CheckCircle,
                                                     contentDescription = null,
-                                                    tint = Color(0xFF00C853),
+                                                    tint = AppColors.Success,
                                                     modifier = Modifier.size(16.dp)
                                                 )
                                             }
@@ -1094,7 +1082,7 @@ fun NutritionLabelReviewModal(
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Surface(
                                         color = AppColors.Surface,
-                                        shape = RoundedCornerShape(6.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Column(modifier = Modifier.padding(8.dp)) {
@@ -1145,8 +1133,8 @@ fun NutritionLabelReviewModal(
                 if (shown.criticalWarnings.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Surface(
-                        color = Color(0x22E53935),
-                        shape = RoundedCornerShape(8.dp),
+                        color = AppColors.Error.copy(alpha = 0.13f),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(AppSpacing.sm)) {
@@ -1158,7 +1146,7 @@ fun NutritionLabelReviewModal(
                                     Icon(
                                         imageVector = Icons.Default.Error,
                                         contentDescription = "Check this value",
-                                        tint = Color(0xFFE53935),
+                                        tint = AppColors.Error,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.size(6.dp))
@@ -1177,8 +1165,8 @@ fun NutritionLabelReviewModal(
                     var showAllWarnings by remember(draft) { mutableStateOf(false) }
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Surface(
-                        color = Color(0x22FF9800),
-                        shape = RoundedCornerShape(8.dp),
+                        color = AppColors.Warning.copy(alpha = 0.13f),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(AppSpacing.sm)) {
@@ -1191,7 +1179,7 @@ fun NutritionLabelReviewModal(
                                     Icon(
                                         imageVector = Icons.Default.Info,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF9800),
+                                        tint = AppColors.Warning,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.size(6.dp))
@@ -1217,27 +1205,24 @@ fun NutritionLabelReviewModal(
 
                 Spacer(modifier = Modifier.height(AppSpacing.md))
 
-                Button(
+                MbButton(
+                    text = "Apply to Custom Food",
                     onClick = {
-                        val basis = selectedBasis ?: return@Button
+                        val basis = selectedBasis ?: return@MbButton
                         onApply(withRangeWarnings(draft.withOutputBasis(basis)))
                     },
                     enabled = selectedBasis != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Primary),
-                    modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                ) {
-                    Text("Apply to Custom Food", style = AppTypography.Button)
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(modifier = Modifier.height(AppSpacing.xs))
 
-                Button(
+                MbButton(
+                    text = "Retake Photo",
                     onClick = onRetake,
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.SurfaceAlt),
-                    modifier = Modifier.fillMaxWidth().height(Dimensions.ButtonHeight)
-                ) {
-                    Text("Retake Photo", style = AppTypography.Button, color = AppColors.TextPrimary)
-                }
+                    kind = MbButtonKind.Secondary,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -1301,7 +1286,7 @@ fun ScannerDebugOverlay(
         // 4. Floating Diagnostic Summary Card
         Surface(
             color = Color(0xDD1E1E1E),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .padding(top = 90.dp, start = 16.dp, end = 16.dp)
                 .fillMaxWidth()

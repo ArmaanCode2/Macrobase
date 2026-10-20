@@ -1,6 +1,5 @@
 package com.macrobase.app.feature.rank
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -14,23 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Flag
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -41,14 +29,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
+import com.macrobase.app.core.designsystem.Ph
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.components.MbPanel
+import com.macrobase.app.core.designsystem.components.MbSheet
 import com.macrobase.app.domain.model.rank.Rank
 import com.macrobase.app.domain.model.rank.RankTier
 import com.macrobase.app.domain.model.rank.Tier
@@ -76,6 +65,10 @@ internal fun rankResetText(nextReset: LocalDate?, today: LocalDate): String {
     return "$left. Your rank starts again from Fat Bear every year on the date you first logged food."
 }
 
+/**
+ * The rank ladder sheet: the progression and reset rules stay fixed at the top while only the list
+ * of 24 tiers scrolls. The list opens one row above the current tier.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RankLadderSheet(
@@ -104,120 +97,36 @@ fun RankLadderSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
+    MbSheet(
+        onDismiss = onDismissRequest,
+        title = "Rank ladder",
         sheetState = sheetState,
-        containerColor = AppColors.Surface,
-        dragHandle = null
+        scrollable = false
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.90f)
-                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
+                .fillMaxHeight(0.85f)
         ) {
-            // 1. Header Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Flag,
-                        contentDescription = null,
-                        tint = AppColors.Primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(AppSpacing.xs))
-                    Text(
-                        text = "RANK LADDER",
-                        style = AppTypography.Header2.copy(
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
-                        ),
-                        color = AppColors.TextPrimary
-                    )
-                }
-
-                IconButton(
-                    onClick = onDismissRequest,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = AppColors.TextSecondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-            // 2. Progression Info Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(AppColors.SurfaceAlt)
-                    .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                    .padding(horizontal = AppSpacing.sm, vertical = 8.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "PROGRESSION: I \u2192 II \u2192 III \u2192 NEXT RANK",
-                        style = AppTypography.Caption.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp,
-                            color = AppColors.Primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Each tier requires 100 RR (0\u201399 RR). You gain RR when a day scores above what your rank expects and lose RR when it falls short, so higher ranks need better days. Moving up into Fart Monster or GigaChad also needs a clean week: 7 days in a row in your calorie zone, with one day off or missed allowed.",
-                        style = AppTypography.Caption.copy(fontSize = 11.sp),
-                        color = AppColors.TextSecondary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
-
-            // 3. When the rank starts again
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(AppColors.SurfaceAlt)
-                    .border(1.dp, AppColors.Divider, RoundedCornerShape(4.dp))
-                    .padding(horizontal = AppSpacing.sm, vertical = 8.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "RANK RESET",
-                        style = AppTypography.Caption.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp,
-                            color = AppColors.Primary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = rankResetText(nextRankReset, LocalDate.now()),
-                        style = AppTypography.Caption.copy(fontSize = 11.sp),
-                        color = AppColors.TextSecondary
-                    )
-                }
-            }
-
+            // The rules, fixed above the list
+            RuleBox(
+                title = "Progression: I \u2192 II \u2192 III \u2192 next rank",
+                text = "Each tier requires 100 RR (0\u201399 RR). You gain RR when a day scores above what your rank expects and lose RR when it falls short, so higher ranks need better days. Moving up into Fart Monster or GigaChad also needs a clean week: 7 days in a row in your calorie zone, with one day off or missed allowed."
+            )
             Spacer(modifier = Modifier.height(AppSpacing.sm))
+            RuleBox(
+                title = "Rank reset",
+                text = rankResetText(nextRankReset, LocalDate.now())
+            )
+            Spacer(modifier = Modifier.height(AppSpacing.md))
 
-            // 4. Complete 24-Tier List
+            // The complete 24-tier list; only this part scrolls
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsIndexed(allTiers, key = { _, item -> item.displayName }) { index, item ->
                     val isCurrent = item == currentRankTier
@@ -232,20 +141,15 @@ fun RankLadderSheet(
                         isMax = isMax
                     )
 
-                    // Show progression connector between rank groups (after Tier III)
+                    // A small caret between rank groups (after Tier III)
                     if (item.tier == Tier.III && !isMax) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 2.dp),
+                                .padding(top = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowDownward,
-                                contentDescription = null,
-                                tint = AppColors.Primary.copy(alpha = 0.5f),
-                                modifier = Modifier.size(16.dp)
-                            )
+                            MbIcon(icon = Ph.CaretDown.light, contentDescription = null, size = 16.dp, tint = AppColors.TextMuted)
                         }
                     }
                 }
@@ -259,6 +163,23 @@ fun RankLadderSheet(
 }
 
 @Composable
+private fun RuleBox(title: String, text: String) {
+    MbPanel(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Text(text = title, style = AppTypography.Header3, color = AppColors.TextPrimary)
+        Text(
+            text = text,
+            style = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 18.sp),
+            color = AppColors.TextSecondary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
 private fun RankLadderItemRow(
     rankTier: RankTier,
     isCurrent: Boolean,
@@ -267,152 +188,82 @@ private fun RankLadderItemRow(
     isMax: Boolean
 ) {
     val drawableRes = remember(rankTier.rank) {
-        RankImageResolver.getRankDrawableRes(rankTier)
+        RankImageResolver.getRankThumbnailRes(rankTier.rank)
     }
+    val shape = RoundedCornerShape(18.dp)
 
-    val backgroundColor = if (isCurrent) {
-        AppColors.Primary.copy(alpha = 0.12f)
-    } else {
-        AppColors.Surface
-    }
-
-    val borderColor = if (isCurrent) {
-        AppColors.Primary
-    } else {
-        AppColors.Divider
-    }
-
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(4.dp))
-            .background(backgroundColor)
-            .border(if (isCurrent) 1.5.dp else 1.dp, borderColor, RoundedCornerShape(4.dp))
-            .padding(horizontal = AppSpacing.sm, vertical = 8.dp)
+            .clip(shape)
+            .background(if (isCurrent) AppColors.ChipOnFill else AppColors.RowFill)
+            .border(1.dp, if (isCurrent) AppColors.ChipOnBorder else AppColors.Edge, shape)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        // Rank image, 46 x 69
+        Box(
+            modifier = Modifier
+                .size(width = 46.dp, height = 69.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(AppColors.IconCircleFill)
+                .border(1.dp, AppColors.Edge, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            // Rank Image Thumbnail
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(AppColors.SurfaceAlt),
-                contentAlignment = Alignment.Center
-            ) {
-                if (drawableRes != 0) {
-                    Image(
-                        painter = painterResource(id = drawableRes),
-                        contentDescription = rankTier.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(2.dp)
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Flag,
-                        contentDescription = null,
-                        tint = AppColors.Primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(AppSpacing.sm))
-
-            // Rank Name & Status
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = rankTier.displayName.uppercase(),
-                        style = AppTypography.Body1.copy(
-                            fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold
-                        ),
-                        color = if (isCurrent) AppColors.Primary else AppColors.TextPrimary
-                    )
-
-                    if (isStarting) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(AppColors.SurfaceAlt)
-                                .border(0.5.dp, AppColors.TextSecondary, RoundedCornerShape(2.dp))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "STARTING RANK",
-                                style = AppTypography.Caption.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 9.sp
-                                ),
-                                color = AppColors.TextSecondary
-                            )
-                        }
-                    }
-
-                    if (isMax) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFFFFA000))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "MAX RANK",
-                                style = AppTypography.Caption.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 9.sp
-                                ),
-                                color = Color.Black
-                            )
-                        }
-                    }
-
-                    if (isCurrent) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(AppColors.Primary)
-                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "YOUR CURRENT RANK",
-                                style = AppTypography.Caption.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 9.sp
-                                ),
-                                color = Color.Black
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = if (isCurrent) "${currentTierRR} / 100 RR" else "0\u201399 RR",
-                    style = AppTypography.Caption.copy(
-                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 11.sp
-                    ),
-                    color = if (isCurrent) AppColors.CalorieText else AppColors.TextSecondary
+            if (drawableRes != 0) {
+                RankPicture(
+                    id = drawableRes,
+                    contentDescription = rankTier.displayName,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(2.dp)
                 )
-            }
-
-            if (isCurrent) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "Current Rank",
-                    tint = AppColors.Primary,
-                    modifier = Modifier.size(18.dp)
-                )
+            } else {
+                MbIcon(icon = Ph.Trophy.light, contentDescription = null, size = 22.dp, tint = AppColors.Primary)
             }
         }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = rankTier.displayName,
+                style = AppTypography.Header3,
+                color = if (isCurrent) AppColors.AccentStrong else AppColors.TextPrimary
+            )
+            Text(
+                text = if (isCurrent) "$currentTierRR / 100 RR" else "0\u201399 RR",
+                style = AppTypography.Body2.copy(fontSize = 12.5.sp),
+                color = if (isCurrent) AppColors.CalorieText else AppColors.TextSecondary
+            )
+            if (isStarting || isMax || isCurrent) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isStarting) LadderBadge(text = "Starting rank", fill = Color.Transparent, ink = AppColors.TextSecondary, border = AppColors.ChipBorder)
+                    if (isMax) LadderBadge(text = "Max rank", fill = AppColors.MaxRankBadge, ink = AppColors.MaxRankInk, border = null)
+                    if (isCurrent) LadderBadge(text = "Your current rank", fill = Color.Transparent, ink = AppColors.ChipOnInk, border = AppColors.ChipOnBorder, showCheck = true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LadderBadge(text: String, fill: Color, ink: Color, border: Color?, showCheck: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(fill)
+            .then(if (border != null) Modifier.border(1.dp, border, CircleShape) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (showCheck) {
+            MbIcon(icon = Ph.CheckCircleFill, contentDescription = null, size = 12.dp, tint = ink)
+        }
+        Text(text = text, style = AppTypography.Caption.copy(fontSize = 11.sp), color = ink)
     }
 }

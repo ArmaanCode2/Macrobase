@@ -1,5 +1,8 @@
 package com.macrobase.app.core.navigation
 
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.ComposeNavigator
@@ -36,14 +39,14 @@ class BottomBarNavigationTests {
 
     private val today = LocalDate.of(2026, 10, 13)
 
-    // MacroBaseScaffold draws the bar from this list, Statistics as the raised middle button
+    // MacroBaseScaffold draws the bar from this list; the active tab shows its label
     @Test
     fun theBarIsHomeCustomFoodsStatsRankSettingsAndEachTabOpensItsScreen() {
         assertEquals(
             listOf(Screen.Home, Screen.CustomFoods, Screen.Statistics, Screen.Rank, Screen.Preferences),
             Screen.bottomNavScreens
         )
-        assertEquals(listOf("Home", "Custom Foods", "Stats", "Rank", "Settings"), Screen.bottomNavScreens.map(::bottomTabLabel))
+        assertEquals(listOf("Home", "Foods", "Stats", "Rank", "Profile"), Screen.bottomNavScreens.map(::bottomTabLabel))
 
         val navController = navController()
         Screen.bottomNavScreens.reversed().forEach { screen ->
@@ -112,6 +115,57 @@ class BottomBarNavigationTests {
         navController.navigateToTopLevel(Screen.Home, homeViewModel())
 
         assertOnlyHome(navController)
+    }
+
+    // The Home tab keeps the tab it leaves, so Stats comes back with its ViewModel and figures
+    @Test
+    fun aTabLeftForHomeComesBackAsItWas() {
+        val navController = navController()
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel())
+        val stats = navController.currentBackStackEntry!!.id
+
+        navController.navigateToTopLevel(Screen.Home, homeViewModel())
+        assertOnlyHome(navController)
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel())
+
+        assertEquals(Screen.Statistics.route, navController.currentDestination?.route)
+        assertEquals(stats, navController.currentBackStackEntry!!.id)
+    }
+
+    // A widget tap does not keep the tab it closes: that tab opens fresh afterwards
+    @Test
+    fun aTabLeftForAWidgetTapOpensFresh() {
+        val homeViewModel = homeViewModel()
+        val navController = navController()
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel)
+        val stats = navController.currentBackStackEntry!!.id
+
+        navController.navigateToTodayDashboard(homeViewModel)
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel)
+
+        assertNotEquals(stats, navController.currentBackStackEntry!!.id)
+    }
+
+    // Foods is never restored, so it is never saved: a saved copy would only hold memory
+    @Test
+    fun theFoodsTabIsNeverSaved() {
+        assertFalse(savesTabLeft(listOf(null, Screen.Home.route, Screen.CustomFoods.route, Screen.EditCustomFood.route)))
+        assertTrue(savesTabLeft(listOf(null, Screen.Home.route, Screen.Statistics.route)))
+        assertTrue(savesTabLeft(listOf(null, Screen.Home.route, Screen.Preferences.route, Screen.ImportExport.route)))
+    }
+
+    // Back from a kept tab goes to Home as before, and the tab comes back as it was
+    @Test
+    fun backFromStatsKeepsItToComeBackTo() {
+        val navController = navController()
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel())
+        val stats = navController.currentBackStackEntry!!.id
+
+        navController.backToHomeKeepingTab()
+        assertOnlyHome(navController)
+        navController.navigateToTopLevel(Screen.Statistics, homeViewModel())
+
+        assertEquals(stats, navController.currentBackStackEntry!!.id)
     }
 
     @Test

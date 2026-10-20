@@ -1,5 +1,34 @@
 package com.macrobase.app.feature.search
 
+import androidx.compose.ui.draw.drawBehind
+import com.macrobase.app.core.designsystem.components.rememberIsScrolled
+import com.macrobase.app.core.designsystem.components.mbSearchPillFrame
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.macrobase.app.core.designsystem.components.mbClickable
+import com.macrobase.app.core.designsystem.components.mealLabel
+import com.macrobase.app.core.designsystem.components.MbIconButton
+import com.macrobase.app.core.designsystem.components.MbIcon
+import com.macrobase.app.core.designsystem.AppShapes
+import com.macrobase.app.core.designsystem.Ph
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -143,10 +172,13 @@ fun SearchScreen(
     /** The day is null when Search was opened without one: the food then logs to today (BUG-040). */
     onFoodClick: (Long, MealType, Long?) -> Unit,
     onCreateCustomFood: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateBack: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val date = if (dateEpochDay != null) LocalDate.ofEpochDay(dateEpochDay) else LocalDate.now()
+    val listState = rememberLazyListState()
+    val scrolled = listState.rememberIsScrolled()
 
     LaunchedEffect(mealType, dateEpochDay) {
         if (mealType != null) {
@@ -157,67 +189,17 @@ fun SearchScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AppColors.Background)
     ) {
-        // 1. Embedded Search Field
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(AppColors.Surface)
-                .padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm)
-        ) {
-            TextField(
-                value = uiState.searchQuery,
-                onValueChange = { viewModel.onQueryChange(it) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                placeholder = {
-                    Text(
-                        text = "Search foods for ${uiState.targetMealType.displayName}...",
-                        style = AppTypography.Body1,
-                        color = AppColors.TextSecondary
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = AppColors.TextSecondary
-                    )
-                },
-                trailingIcon = {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator(
-                            color = AppColors.Primary,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.padding(12.dp).fillMaxSize(0.5f)
-                        )
-                    } else if (uiState.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onClearQuery() }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = AppColors.TextSecondary
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Search
-                ),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = AppColors.SurfaceInput,
-                    unfocusedContainerColor = AppColors.SurfaceInput,
-                    focusedTextColor = AppColors.TextPrimary,
-                    unfocusedTextColor = AppColors.TextPrimary,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                )
-            )
-        }
+        // 1. The header: back, then the search field with its clear button
+        SearchHeader(
+            query = uiState.searchQuery,
+            placeholder = "Search foods for ${mealLabel(uiState.targetMealType)}\u2026",
+            isLoading = uiState.isLoading,
+            scrolled = scrolled,
+            onQueryChange = { viewModel.onQueryChange(it) },
+            onClear = { viewModel.onClearQuery() },
+            onBack = onNavigateBack
+        )
 
         // 2. Results / Empty / No-Results States driven by explicit SearchContentState
         when (uiState.contentState) {
@@ -231,30 +213,19 @@ fun SearchScreen(
             }
             com.macrobase.app.domain.model.state.SearchContentState.EMPTY_QUERY_WITH_CONTENT -> {
                 if (uiState.customFoods.isNotEmpty() || uiState.recentFoods.isNotEmpty()) {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = AppSpacing.screenMargin, end = AppSpacing.screenMargin, bottom = AppSpacing.xxl),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)
+                    ) {
                         if (uiState.customFoods.isNotEmpty()) {
-                            item(key = "header_custom_foods") {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(Dimensions.SectionHeaderHeight)
-                                        .background(AppColors.SurfaceAlt)
-                                        .padding(horizontal = AppSpacing.lg),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Text(
-                                        text = "CUSTOM FOODS",
-                                        style = AppTypography.Caption,
-                                        color = AppColors.TextSecondary
-                                    )
-                                }
-                            }
+                            item(key = "header_custom_foods") { SearchSectionHeading("Custom foods") }
                             items(uiState.customFoods, key = { "custom_${it.id}" }) { item ->
                                 FoodResultItem(
                                     food = item,
                                     onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                                 )
-                                HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                             }
                         }
 
@@ -262,80 +233,44 @@ fun SearchScreen(
                             uiState.customFoods.none { it.id == recent.id }
                         }
                         if (recentOnly.isNotEmpty()) {
-                            item(key = "header_recent_foods") {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(Dimensions.SectionHeaderHeight)
-                                        .background(AppColors.SurfaceAlt)
-                                        .padding(horizontal = AppSpacing.lg),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Text(
-                                        text = "RECENTLY LOGGED",
-                                        style = AppTypography.Caption,
-                                        color = AppColors.TextSecondary
-                                    )
-                                }
-                            }
+                            item(key = "header_recent_foods") { SearchSectionHeading("Recently logged") }
                             items(recentOnly, key = { "recent_${it.id}" }) { item ->
                                 FoodResultItem(
                                     food = item,
                                     onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                                 )
-                                HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                             }
                         }
                     }
                 } else {
                     // Intentional empty state when user has no custom foods yet
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(Dimensions.SectionHeaderHeight)
-                            .background(AppColors.SurfaceAlt)
-                            .padding(horizontal = AppSpacing.lg),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Text(
-                            text = "CUSTOM FOODS",
-                            style = AppTypography.Caption,
-                            color = AppColors.TextSecondary
+                    Column(modifier = Modifier.padding(horizontal = AppSpacing.screenMargin)) {
+                        SearchSectionHeading("Custom foods")
+                        EmptyStateCard(
+                            icon = Icons.Default.Search,
+                            title = "No Custom Foods",
+                            subtitle = "You haven't created any custom foods yet. Type above to search the offline database or create a new custom food.",
+                            actionButtonText = "+ Create Custom Food",
+                            onActionClick = onCreateCustomFood,
+                            modifier = Modifier.padding(top = AppSpacing.md)
                         )
                     }
-                    EmptyStateCard(
-                        icon = Icons.Default.Search,
-                        title = "No Custom Foods",
-                        subtitle = "You haven't created any custom foods yet. Type above to search the offline database or create a new custom food.",
-                        actionButtonText = "+ Create Custom Food",
-                        onActionClick = onCreateCustomFood,
-                        modifier = Modifier.padding(top = AppSpacing.xl)
-                    )
                 }
             }
             com.macrobase.app.domain.model.state.SearchContentState.SEARCHING,
             com.macrobase.app.domain.model.state.SearchContentState.SEARCH_RESULTS -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Dimensions.SectionHeaderHeight)
-                        .background(AppColors.SurfaceAlt)
-                        .padding(horizontal = AppSpacing.lg),
-                    contentAlignment = Alignment.CenterStart
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = AppSpacing.screenMargin, end = AppSpacing.screenMargin, bottom = AppSpacing.xxl),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.rowGap)
                 ) {
-                    Text(
-                        text = "SEARCH RESULTS (${uiState.searchResults.size})",
-                        style = AppTypography.Caption,
-                        color = AppColors.TextSecondary
-                    )
-                }
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    item(key = "header_results") { SearchSectionHeading("Search results (${uiState.searchResults.size})") }
                     items(uiState.searchResults, key = { it.id }) { item ->
                         FoodResultItem(
                             food = item,
                             onClick = { onFoodClick(item.id, uiState.targetMealType, dateEpochDay) }
                         )
-                        HorizontalDivider(color = AppColors.Divider, thickness = 1.dp)
                     }
                 }
             }
@@ -357,6 +292,115 @@ fun SearchScreen(
                     actionButtonText = "+ Create Custom Food",
                     onActionClick = onCreateCustomFood,
                     modifier = Modifier.padding(top = AppSpacing.xl)
+                )
+            }
+        }
+    }
+}
+
+/** A section title above a list of foods. */
+@Composable
+private fun SearchSectionHeading(text: String) {
+    Text(
+        text = text,
+        style = AppTypography.Header2,
+        color = AppColors.TextPrimary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = AppSpacing.lg, bottom = 2.dp)
+            .semantics { heading() }
+    )
+}
+
+/**
+ * Search's pinned header: the back circle, then the search field as a pill with a loading spinner
+ * or a clear button. It gets the header band once the list scrolls under it.
+ */
+@Composable
+private fun SearchHeader(
+    query: String,
+    placeholder: String,
+    isLoading: Boolean,
+    scrolled: Boolean,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    onBack: () -> Unit
+) {
+    // Read while drawing, so the band fades in without recomposing the search field
+    val band = animateColorAsState(
+        targetValue = if (scrolled) AppColors.HeaderBand else Color.Transparent,
+        animationSpec = tween(200),
+        label = "searchBand"
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind { drawRect(band.value) }
+            .padding(start = 10.dp, end = AppSpacing.screenMargin, top = 6.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MbIconButton(
+            icon = Ph.ArrowLeft.light,
+            contentDescription = "Back",
+            onClick = onBack,
+            size = Dimensions.HeaderButton,
+            outlined = true
+        )
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .mbSearchPillFrame(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MbIcon(
+                icon = Ph.MagnifyingGlass.light,
+                contentDescription = null,
+                size = 18.dp,
+                tint = AppColors.TextMuted,
+                modifier = Modifier.padding(start = 10.dp)
+            )
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = AppTypography.Body1.copy(color = AppColors.TextPrimary),
+                cursorBrush = SolidColor(AppColors.Primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+                    .semantics { contentDescription = "Search foods" },
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.heightIn(min = 38.dp), contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = placeholder,
+                                style = AppTypography.Body1.copy(fontSize = 14.5.sp, fontWeight = FontWeight.Light),
+                                color = AppColors.TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    color = AppColors.Primary,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier
+                        .padding(end = 10.dp)
+                        .size(20.dp)
+                )
+            } else if (query.isNotEmpty()) {
+                MbIconButton(
+                    icon = Ph.X.light,
+                    contentDescription = "Clear",
+                    onClick = onClear,
+                    size = 38.dp,
+                    iconSize = 16.dp
                 )
             }
         }
