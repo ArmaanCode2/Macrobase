@@ -22,7 +22,7 @@ object AppColors {
     val Primary = Color(0xFF5BD86A)         // Active states, links, ticks, focus
     val PrimaryDark = Color(0xFF2DB04C)     // Pressed states, start of the button gradient
     val OnPrimary = Color(0xFF050A06)       // Ink on Primary and the button gradient
-    val Background = Color(0xFF060706)      // Base Screen Canvas
+    val Background = Color(0xFF000000)      // Base Screen Canvas: pure black, so AMOLED pixels switch off
     val Surface = Color(0xFF0A0D0B)         // Sheets and dialogs
     val SurfaceAlt = Color(0xFF0D120F)      // Pills, bars, date headers
     val SurfaceInput = Color(0xFF0D110E)    // Form Text Fields, Search Inputs

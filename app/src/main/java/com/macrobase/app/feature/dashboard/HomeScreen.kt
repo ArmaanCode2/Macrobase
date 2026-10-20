@@ -1,5 +1,12 @@
 package com.macrobase.app.feature.dashboard
 
+import kotlin.math.abs
+import com.macrobase.app.core.designsystem.components.rememberReducedMotion
+import com.macrobase.app.core.designsystem.components.mbDockPill
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.SideEffect
 import com.macrobase.app.core.designsystem.components.rememberMbHaptics
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -422,132 +429,166 @@ fun HomeScreen(
     // The macro rings fill from empty when Home opens; a list item is rebuilt when it scrolls back
     // into view, and the rings then start where they are
     val ringsShown = remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val pageScrolled = remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
 
-    // A lazy list: only the rows on screen are built, so a full day opens as fast as an empty one
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = AppSpacing.screenMargin,
-            end = AppSpacing.screenMargin,
-            top = 10.dp,
-            // Clears the bottom dock
-            bottom = AppSpacing.xxl + dockInset
-        )
-    ) {
-        item(key = "header", contentType = "header") {
-            HomeHeader(
-                firstName = profile.firstName,
-                basketCount = basketCount,
-                onOpenProfile = onOpenProfile,
-                onOpenBasket = onOpenBasket
+    Box(modifier = modifier.fillMaxSize()) {
+        // A lazy list: only the rows on screen are built, so a full day opens as fast as an empty one
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(
+                start = AppSpacing.screenMargin,
+                end = AppSpacing.screenMargin,
+                top = 10.dp,
+                // Clears the bottom dock
+                bottom = AppSpacing.xxl + dockInset
             )
-        }
+        ) {
+            // The basket button is pinned over the page (below), so the header leaves its place free
+            item(key = "header", contentType = "header") {
+                HomeHeader(firstName = profile.firstName, onOpenProfile = onOpenProfile)
+            }
 
-        // The day on screen: its name opens the date picker, the chevrons step a day
-        item(key = "day", contentType = "day") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = AppSpacing.sectionGap)
-                    .heightIn(min = 40.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = homeDayLabel(selectedDate, viewModel.today()),
-                    style = AppTypography.Header1,
-                    color = AppColors.TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            item(key = "calories", contentType = "calories") {
+                CaloriesPanel(
+                    summary = summary,
+                    profile = profile,
+                    onDailySummary = { showDailySummary = true },
+                    onSearch = onOpenSearch,
+                    onScan = onScanLabel,
+                    ringsFillIn = !ringsShown.value,
                     modifier = Modifier
-                        .weight(1f, fill = false)
-                        .mbClickable(pressedScale = 0.97f, onClickLabel = "Choose a day") { showDatePicker = true }
-                        .padding(vertical = 6.dp)
+                        .padding(top = AppSpacing.sectionGap)
+                        // A sideways swipe steps a day, as a swipe on the calendar steps a month
+                        .pointerInput(viewModel) {
+                            val threshold = DaySwipeThreshold.toPx()
+                            var dragX = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { dragX = 0f },
+                                onDragCancel = { dragX = 0f },
+                                onDragEnd = {
+                                    when (daySwipeStep(dragX, threshold)) {
+                                        1 -> viewModel.onNextDay()
+                                        -1 -> viewModel.onPreviousDay()
+                                    }
+                                    dragX = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    dragX += dragAmount
+                                    // Taken from the page once the swipe is clearly sideways
+                                    if (abs(dragX) > 10f) change.consume()
+                                }
+                            )
+                        }
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                MbIconButton(
-                    icon = Ph.CaretLeft.light,
-                    contentDescription = "Previous day",
-                    onClick = { viewModel.onPreviousDay() },
-                    size = 40.dp,
-                    iconSize = 18.dp
-                )
-                MbIconButton(
-                    icon = Ph.CaretRight.light,
-                    contentDescription = "Next day",
-                    onClick = { viewModel.onNextDay() },
-                    size = 40.dp,
-                    iconSize = 18.dp
-                )
+                SideEffect { ringsShown.value = true }
             }
-        }
 
-        item(key = "calories", contentType = "calories") {
-            CaloriesPanel(
-                summary = summary,
-                profile = profile,
-                onDailySummary = { showDailySummary = true },
-                onSearch = onOpenSearch,
-                onScan = onScanLabel,
-                ringsFillIn = !ringsShown.value,
-                modifier = Modifier.padding(top = 10.dp)
-            )
-            SideEffect { ringsShown.value = true }
-        }
-
-        // One block per visible meal, its foods listed inline: the meal's header, then each food
-        visibleMeals.forEachIndexed { index, meal ->
-            item(key = "meal-${meal.type}", contentType = "mealHeader") {
-                MealHeader(
-                    meal = meal,
-                    onAddFoodClick = { onNavigateToSearch(meal.type, viewModel.dateForNewLog()?.toEpochDay()) },
-                    onInfoClick = { selectedMealForInfo = meal },
-                    modifier = Modifier.padding(top = if (index == 0) AppSpacing.sectionGap else 18.dp)
-                )
+            // The day on screen, between its arrows: its name opens the date picker, the arrows step a day
+            item(key = "day", contentType = "day") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp)
+                        .heightIn(min = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MbIconButton(
+                        icon = Ph.CaretLeft.light,
+                        contentDescription = "Previous day",
+                        onClick = { viewModel.onPreviousDay() },
+                        size = 40.dp,
+                        iconSize = 18.dp
+                    )
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = homeDayLabel(selectedDate, viewModel.today()),
+                            style = AppTypography.Header1,
+                            color = AppColors.TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .mbClickable(pressedScale = 0.97f, onClickLabel = "Choose a day") { showDatePicker = true }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                    MbIconButton(
+                        icon = Ph.CaretRight.light,
+                        contentDescription = "Next day",
+                        onClick = { viewModel.onNextDay() },
+                        size = 40.dp,
+                        iconSize = 18.dp
+                    )
+                }
             }
-            if (meal.entries.isEmpty()) {
-                item(key = "empty-${meal.type}", contentType = "emptyMeal") { EmptyMealTile() }
-            } else {
-                itemsIndexed(meal.entries, key = { _, entry -> "entry-${entry.id}" }, contentType = { _, _ -> "entry" }) { position, entry ->
-                    DashboardFoodItemRow(
-                        entry = entry,
-                        isRevealed = revealedEntryId == entry.id,
-                        onRevealChange = { isRevealed -> viewModel.setRevealedEntry(if (isRevealed) entry.id else null) },
-                        onClick = {
-                            viewModel.setRevealedEntry(null)
-                            onNavigateToDetail(entry.food.id, meal.type, selectedDate.toEpochDay(), entry.id)
-                        },
-                        onDelete = { viewModel.deleteEntry(entry.id) },
-                        onCopy = { viewModel.copyEntry(entry) },
-                        modifier = Modifier.padding(top = if (position == 0) 0.dp else 8.dp)
+
+            // One block per visible meal, its foods listed inline: the meal's header, then each food
+            visibleMeals.forEachIndexed { index, meal ->
+                item(key = "meal-${meal.type}", contentType = "mealHeader") {
+                    MealHeader(
+                        meal = meal,
+                        onAddFoodClick = { onNavigateToSearch(meal.type, viewModel.dateForNewLog()?.toEpochDay()) },
+                        onInfoClick = { selectedMealForInfo = meal },
+                        modifier = Modifier.padding(top = if (index == 0) 10.dp else 18.dp)
+                    )
+                }
+                if (meal.entries.isEmpty()) {
+                    item(key = "empty-${meal.type}", contentType = "emptyMeal") { EmptyMealTile() }
+                } else {
+                    itemsIndexed(meal.entries, key = { _, entry -> "entry-${entry.id}" }, contentType = { _, _ -> "entry" }) { position, entry ->
+                        DashboardFoodItemRow(
+                            entry = entry,
+                            isRevealed = revealedEntryId == entry.id,
+                            onRevealChange = { isRevealed -> viewModel.setRevealedEntry(if (isRevealed) entry.id else null) },
+                            onClick = {
+                                viewModel.setRevealedEntry(null)
+                                onNavigateToDetail(entry.food.id, meal.type, selectedDate.toEpochDay(), entry.id)
+                            },
+                            onDelete = { viewModel.deleteEntry(entry.id) },
+                            onCopy = { viewModel.copyEntry(entry) },
+                            modifier = Modifier.padding(top = if (position == 0) 0.dp else 8.dp)
+                        )
+                    }
+                }
+            }
+
+            // Water and weight: the tracker's icon, then its quick action
+            item(key = "trackers", contentType = "trackers") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = AppSpacing.sectionGap),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    WaterQuickCard(
+                        unitSystem = profile.unitSystem,
+                        onOpenWater = { onNavigateToWater(selectedDate.toEpochDay()) },
+                        onQuickAdd = { onAdded -> viewModel.quickAddWater(onAdded) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TrackerCard(
+                        icon = Ph.Scales,
+                        iconDescription = "Weight tracker",
+                        onIconClick = { onNavigateToWeight(selectedDate.toEpochDay()) },
+                        actionLabel = "Log weight",
+                        onAction = { onLogWeight(selectedDate.toEpochDay()) },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
         }
 
-        // Water and weight: the tracker's icon, then its quick action
-        item(key = "trackers", contentType = "trackers") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = AppSpacing.sectionGap),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                WaterQuickCard(
-                    unitSystem = profile.unitSystem,
-                    onOpenWater = { onNavigateToWater(selectedDate.toEpochDay()) },
-                    onQuickAdd = { onAdded -> viewModel.quickAddWater(onAdded) },
-                    modifier = Modifier.weight(1f)
-                )
-                TrackerCard(
-                    icon = Ph.Scales,
-                    iconDescription = "Weight tracker",
-                    onIconClick = { onNavigateToWeight(selectedDate.toEpochDay()) },
-                    actionLabel = "Log weight",
-                    onAction = { onLogWeight(selectedDate.toEpochDay()) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+        // Where the header row centres it, and it stays there while the page scrolls
+        StickyBasketButton(
+            count = basketCount,
+            lifted = { pageScrolled.value },
+            onClick = onOpenBasket,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 10.dp, end = AppSpacing.screenMargin)
+        )
     }
 
     // Meal card: totals, and Copy / Move / Delete for the whole meal
@@ -587,7 +628,7 @@ fun HomeScreen(
 
 /** The avatar with the first name's initial, the greeting, and the basket. */
 @Composable
-private fun HomeHeader(firstName: String, basketCount: Int, onOpenProfile: () -> Unit, onOpenBasket: () -> Unit) {
+private fun HomeHeader(firstName: String, onOpenProfile: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -608,7 +649,49 @@ private fun HomeHeader(firstName: String, basketCount: Int, onOpenProfile: () ->
                 color = AppColors.TextPrimary
             )
         }
-        MbBasketButton(count = basketCount, onClick = onOpenBasket)
+        // The pinned basket button sits over this space (StickyBasketButton)
+        Spacer(modifier = Modifier.size(Dimensions.HeaderButton))
+    }
+}
+
+/** The header row's height: the avatar's. */
+private val HeaderRowHeight = 48.dp
+
+/** How far a swipe on the calories panel must go to step a day: the calendar's month swipe distance. */
+private val DaySwipeThreshold = 48.dp
+
+/**
+ * A sideways swipe on the calories panel, as the calendar's month swipe: 1 shows the next day
+ * (swiped left), -1 the day before (swiped right), 0 when it is too short to count.
+ */
+internal fun daySwipeStep(dragX: Float, thresholdPx: Float): Int = when {
+    dragX < -thresholdPx -> 1
+    dragX > thresholdPx -> -1
+    else -> 0
+}
+
+/**
+ * The basket button, pinned at the top right while the page scrolls. At the top of the page it looks
+ * as it always has; once the page scrolls under it, it takes the dock's floating fill and shadow, as
+ * the "+" button has, so it stays clear over the cards.
+ */
+@Composable
+private fun StickyBasketButton(count: Int, lifted: () -> Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val reducedMotion = rememberReducedMotion()
+    val backing = animateFloatAsState(
+        targetValue = if (lifted()) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(200, easing = MbMotion.Ease),
+        label = "basketBacking"
+    )
+    Box(modifier = modifier.height(HeaderRowHeight), contentAlignment = Alignment.Center) {
+        // Faded by its layer, so the fade redraws only this circle
+        Box(
+            modifier = Modifier
+                .size(Dimensions.HeaderButton)
+                .graphicsLayer { alpha = backing.value }
+                .mbDockPill()
+        )
+        MbBasketButton(count = count, onClick = onClick)
     }
 }
 
@@ -618,7 +701,7 @@ private fun AvatarRing(firstName: String, onClick: () -> Unit) {
     val initial = firstName.firstOrNull()?.uppercaseChar()
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(HeaderRowHeight)
             .mbClickable(pressedScale = 0.94f, onClick = onClick)
             .semantics { contentDescription = "Profile" }
             .clip(CircleShape)

@@ -2,9 +2,9 @@
 <resources>
     <!-- Dark only (the Mentor design). The accent colours the framework date pickers. -->
     <style name="Theme.MacroBase" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#060706</item>
-        <item name="android:navigationBarColor">#060706</item>
-        <item name="android:windowBackground">#060706</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#000000</item>
         <item name="android:colorAccent">#2DB04C</item>
     </style>
 </resources>
