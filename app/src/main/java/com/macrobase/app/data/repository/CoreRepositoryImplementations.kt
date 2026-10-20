@@ -1,5 +1,6 @@
 package com.macrobase.app.data.repository
 
+import com.macrobase.app.core.util.settledOnLane
 import com.macrobase.app.core.util.onLane
 import kotlin.math.roundToInt
 import com.macrobase.app.data.database.UserDatabase
@@ -246,7 +247,7 @@ class StatisticsRepositoryImpl(
     private fun observeNutritionConsistencyFlow(startDate: LocalDate, endDate: LocalDate): Flow<ConsistencyStatistics> {
         val days = daysBetween(startDate, endDate)
         return combine(
-            diaryRepository.observeNutritionAggregations(startDate, endDate),
+            diaryRepository.observeNutritionAggregations(startDate, endDate).settledOnLane(calculationDispatcher),
             // Each day is judged against the goal in force on it, not today's (BUG-049)
             goalsRepository.observeGoalsForDates(days)
         ) { aggregations, dayGoals ->
@@ -343,7 +344,7 @@ class StatisticsRepositoryImpl(
     private fun observeMacroAveragesFlow(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
         val days = daysBetween(startDate, endDate)
         return combine(
-            diaryRepository.observeNutritionAggregations(startDate, endDate),
+            diaryRepository.observeNutritionAggregations(startDate, endDate).settledOnLane(calculationDispatcher),
             goalsRepository.observeGoalsForDates(days),
             goalsRepository.observeGoals()
         ) { aggregations, dayGoals, currentGoal ->
@@ -437,7 +438,7 @@ class StatisticsRepositoryImpl(
         observeWeightStatisticsFlow(startDate, endDate).onLane(calculationDispatcher)
 
     private fun observeWeightStatisticsFlow(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
-        return weightRepository.observeWeightRange(startDate, endDate).map { entries ->
+        return weightRepository.observeWeightRange(startDate, endDate).settledOnLane(calculationDispatcher).map { entries ->
             val sorted = entries.sortedBy { it.date }
             val weights = sorted.map { it.weightKg }
             val start = weights.firstOrNull()

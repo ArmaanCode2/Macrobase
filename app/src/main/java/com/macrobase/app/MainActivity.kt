@@ -1,5 +1,12 @@
 package com.macrobase.app
 
+import org.koin.android.ext.android.get
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import com.macrobase.app.domain.repository.rank.RankRepository
+import androidx.lifecycle.lifecycleScope
+import android.util.Log
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,6 +37,8 @@ internal fun shouldOpenTodayFromWidget(action: String?, isRecreated: Boolean, la
     (action == MacroBaseWidgetProvider.ACTION_WIDGET_OPEN_TODAY || action == MacroBaseWidgetProvider.LEGACY_ACTION_WIDGET_LOG_FOOD) &&
         !isRecreated && !launchedFromHistory
 
+private const val RANK_WARM_UP_DELAY_MS = 3_000L
+
 class MainActivity : ComponentActivity() {
     // Buffered, so a tap that arrives before the UI collects is kept until it does (BUG-030)
     private val openTodayRequests = Channel<Unit>(Channel.BUFFERED)
@@ -39,6 +48,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         handleWidgetIntent(intent, isRecreated = savedInstanceState != null)
+
+        // A few seconds after the screen opens, the rank starts in the background: the saved
+        // profile when nothing changed, and from then on each change once it settles, so the Rank
+        // tab opens on a profile that is ready. Only here, not when the widget wakes the app.
+        lifecycleScope.launch {
+            delay(RANK_WARM_UP_DELAY_MS)
+            try {
+                get<RankRepository>().observeRankProfile().first()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Rank warm-up skipped: ${e.message}")
+            }
+        }
 
         setContent {
             MacroBaseTheme {

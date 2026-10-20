@@ -1,5 +1,22 @@
 package com.macrobase.app.data.repository.rank
 
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableSharedFlow
+import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
+import java.security.MessageDigest
+import java.io.OutputStream
+import java.io.DataOutputStream
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.CoroutineScope
+import com.macrobase.app.data.cache.SnapshotStore
+import com.macrobase.app.data.cache.RankProfileCodec
+import com.macrobase.app.data.cache.FiguresCache.Companion.RANK_SNAPSHOT_KEY
 import com.macrobase.app.core.util.settleAfterFirst
 import com.macrobase.app.core.config.RankScoringConfig
 import com.macrobase.app.core.util.DeviceClock
@@ -58,34 +75,101 @@ class RankRepositoryImpl(
     private val preferencesRepository: PreferencesRepository? = null,
     private val clock: Clock = DeviceClock,
     /** Where the replay runs; tests pass their own to drive the midnight check in virtual time. */
-    private val dispatcher: CoroutineDispatcher = Dispatchers.Default
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Where the last profile is saved, so it shows at once after the app starts; null saves nothing. */
+    private val snapshotStore: SnapshotStore? = null,
+    /**
+     * Where one shared replay runs for every screen and stays up to date in the background; null
+     * gives each caller its own replay, as tests expect.
+     */
+    private val cacheScope: CoroutineScope? = null
 ) : RankRepository {
 
     /** A built-in food's nutrients by food id and logged name; null when it is not that food. */
-    private data class CatalogNutrition(val nutrition: Nutrition?)
+    private data class CatalogNutrition(val nutrition: Nutrition?, val foodMissing: Boolean = false)
 
     private val catalogCache = ConcurrentHashMap<Pair<Long, String>, CatalogNutrition>()
 
+    /** Catalog lookups that failed: a profile worked out with one is not kept, so the next replay asks again. */
+    private val failedCatalogLookups = AtomicInteger()
+
+    /**
+     * Catalog foods not found. The built-in database reports an error as "no food" too, so a
+     * profile worked out with one is kept for this run, as the lookup itself is, but never saved.
+     */
+    private val missingCatalogFoods = AtomicInteger()
+
+    /** Whether the saved profile was looked at this run; after that the one in memory is current. */
+    @Volatile
+    private var snapshotChecked = false
+
+    /** A screen started showing the rank: "today" is read again, in case the phone slept past midnight. */
+    private val todayChecks = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** The last profile, with the fingerprint of everything it was worked out from. */
+    @Volatile
+    private var remembered: Pair<String, RankProfile>? = null
+
+    /** How many times the whole diary was replayed; tests read it to see a replay was skipped. */
+    internal val replayCount = AtomicInteger()
+
+    /**
+     * The replay shared by the Rank tab and Stats' rank history. Once started it stays up to date
+     * in the background: a change to the diary or goals is replayed after it settles, so the Rank
+     * tab opens on a profile that is already worked out.
+     */
+    private val sharedProfile: Flow<Pair<LocalDate, RankProfile>>? by lazy {
+        cacheScope?.let { scope ->
+            liveDatedProfile()
+                // A replay that fails is logged and tried again a little later, so the shared
+                // replay never stops for good and never takes the app down
+                .retryWhen { cause, attempt ->
+                    Log.w(TAG, "Rank replay failed, trying again: ${cause.message}")
+                    delay(RETRY_DELAY_MS * (attempt + 1))
+                    true
+                }
+                .shareIn(scope, SharingStarted.Lazily, replay = 1)
+        }
+    }
+
     /**
      * The profile for the current day. "Today" is read again after each midnight, so a profile
-     * kept open overnight counts the day that just ended (BUG-032).
+     * kept open overnight counts the day that just ended (BUG-032), and each time a screen starts
+     * showing it: the midnight wait does not count time the phone sleeps.
      */
-    @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeRankProfile(): Flow<RankProfile> =
+        sharedProfile
+            ?.onStart { todayChecks.tryEmit(Unit) }
+            // A profile kept from an earlier day is not shown; the one for today follows
+            ?.filter { (day, _) -> day == ZonedDateTime.now(clock).toLocalDate() }
+            ?.map { (_, profile) -> profile }
+            ?: liveProfile()
+
+    private fun liveProfile(): Flow<RankProfile> = liveDatedProfile().map { (_, profile) -> profile }
+
+    /** Each profile with the day it was worked out for. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun liveDatedProfile(): Flow<Pair<LocalDate, RankProfile>> =
         observeToday()
-            .flatMapLatest { today -> observeRankProfile(today) }
+            .flatMapLatest { today -> observeRankProfile(today).map { today to it } }
             // Replaying years of history is real work: keep it off the main thread
             .flowOn(dispatcher)
 
-    /** Today, then each new day as it starts, checked at least hourly in case the clock or zone changes. */
-    private fun observeToday(): Flow<LocalDate> = flow {
-        while (true) {
-            val now = ZonedDateTime.now(clock)
-            emit(now.toLocalDate())
-            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
-            delay(Duration.between(now, nextMidnight).toMillis().coerceIn(MIN_DAY_CHECK_MS, MAX_DAY_CHECK_MS))
-        }
-    }.distinctUntilChanged()
+    /**
+     * Today, then each new day as it starts, checked at least hourly in case the clock or zone
+     * changes, and again whenever a screen starts showing the rank.
+     */
+    private fun observeToday(): Flow<LocalDate> = merge(
+        flow {
+            while (true) {
+                val now = ZonedDateTime.now(clock)
+                emit(now.toLocalDate())
+                val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
+                delay(Duration.between(now, nextMidnight).toMillis().coerceIn(MIN_DAY_CHECK_MS, MAX_DAY_CHECK_MS))
+            }
+        },
+        todayChecks.map { ZonedDateTime.now(clock).toLocalDate() }
+    ).distinctUntilChanged()
 
     private fun observeRankProfile(today: LocalDate): Flow<RankProfile> = combine(
         // A replay covers the whole diary: only a real change to these starts another
@@ -96,8 +180,113 @@ class RankRepositoryImpl(
         (preferencesRepository?.observeSeenRankRulesVersion() ?: flowOf(RankScoringConfig.RULES_VERSION)).distinctUntilChanged(),
         (preferencesRepository?.observeSeenRankSeason() ?: flowOf(Long.MAX_VALUE)).distinctUntilChanged()
     ) { goals, foods, seenRulesVersion, seenSeasonOn ->
-        buildRankProfile(today, goals, foods, seenRulesVersion, seenSeasonOn)
+        profileFor(today, goals, foods, seenRulesVersion, seenSeasonOn)
     }
+
+    /**
+     * The profile for these inputs. Replaying the whole diary is the costly part, so its result is
+     * kept with a fingerprint of everything the replay reads. The same data again (coming back to
+     * the Rank tab, or the app starting again) reuses that result instead of replaying.
+     */
+    private suspend fun profileFor(
+        today: LocalDate,
+        goals: Goal,
+        foods: List<LoggedFoodNutrients>,
+        seenRulesVersion: Int,
+        seenSeasonOn: Long
+    ): RankProfile {
+        val inputs = replayInputs(today, goals, foods, seenRulesVersion, seenSeasonOn)
+        val fingerprint = inputs.fingerprint
+        remembered?.let { (print, profile) -> if (print == fingerprint) return profile }
+        // The saved profile is looked at once per run; after that the one in memory is the newest
+        if (!snapshotChecked) {
+            snapshotChecked = true
+            snapshotStore?.read(RANK_SNAPSHOT_KEY, RankProfileCodec)?.takeIf { it.tag == fingerprint }?.let { saved ->
+                remembered = fingerprint to saved.value
+                return saved.value
+            }
+        }
+        val failedBefore = failedCatalogLookups.get()
+        val missingBefore = missingCatalogFoods.get()
+        val profile = buildRankProfile(today, goals, foods, seenRulesVersion, seenSeasonOn, inputs.historyStart, inputs.dayGoals)
+        replayCount.incrementAndGet()
+        // A failed lookup is tried again on the next replay, so this profile is not kept at all
+        if (failedCatalogLookups.get() == failedBefore) {
+            remembered = fingerprint to profile
+            // Saved only when every catalog food was found: "not found" can be a database error
+            if (missingCatalogFoods.get() == missingBefore) {
+                snapshotStore?.write(RANK_SNAPSHOT_KEY, fingerprint, profile, RankProfileCodec)
+            }
+        }
+        return profile
+    }
+
+    /**
+     * A fingerprint of everything the replay reads: the day, the goals in force on every day it
+     * scores and where the goal history starts, every logged food, and the notices already seen.
+     * The built-in catalog and the scoring rules belong to the app version, which the snapshot
+     * store checks itself. Any change gives another fingerprint, so a kept profile is never used
+     * for different data.
+     */
+    private suspend fun replayInputs(
+        today: LocalDate,
+        goals: Goal,
+        foods: List<LoggedFoodNutrients>,
+        seenRulesVersion: Int,
+        seenSeasonOn: Long
+    ): ReplayInputs {
+        val historyStart = goalsRepository.getGoalHistoryStart()
+        // The goal of every day from the first logged one: as wide as any day the replay scores,
+        // read in one pass and handed to the replay, so a goal change on any of those days
+        // changes the fingerprint and nothing is read twice
+        val first = foods.minOfOrNull { it.date }
+        val dayGoals = if (first != null && !first.isAfter(today)) {
+            val dates = generateSequence(first) { it.plusDays(1) }.takeWhile { !it.isAfter(today) }.toList()
+            dates.zip(goalsRepository.getGoalsForDates(dates)).toMap()
+        } else {
+            emptyMap()
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        // Written straight into the digest (OutputStream.nullOutputStream needs Android 13)
+        val intoDigest = object : OutputStream() {
+            override fun write(b: Int) = digest.update(b.toByte())
+            override fun write(b: ByteArray, off: Int, len: Int) = digest.update(b, off, len)
+        }
+        DataOutputStream(intoDigest).use { out ->
+            out.writeInt(RankScoringConfig.RULES_VERSION)
+            out.writeLong(today.toEpochDay())
+            out.writeUTF(goals.toString())
+            out.writeUTF(historyStart?.toString() ?: "")
+            dayGoals.forEach { (date, goal) ->
+                out.writeLong(date.toEpochDay())
+                out.writeUTF(goal.toString())
+            }
+            out.writeInt(foods.size)
+            foods.forEach { food ->
+                out.writeLong(food.date.toEpochDay())
+                out.writeLong(food.foodId)
+                // As bytes: writeUTF cannot take a name longer than 64 KB
+                val name = food.foodName.toByteArray(Charsets.UTF_8)
+                out.writeInt(name.size)
+                out.write(name)
+                out.writeDouble(food.calories)
+                out.writeDouble(food.proteinGrams)
+                out.writeDouble(food.carbsGrams)
+                out.writeDouble(food.fatGrams)
+                listOf(food.fiberGrams, food.sugarGrams, food.saturatedFatGrams, food.sodiumMg).forEach { amount ->
+                    out.writeBoolean(amount != null)
+                    if (amount != null) out.writeDouble(amount)
+                }
+            }
+            out.writeInt(seenRulesVersion)
+            out.writeLong(seenSeasonOn)
+        }
+        val fingerprint = digest.digest().joinToString("") { String.format(Locale.US, "%02x", it) }
+        return ReplayInputs(fingerprint, historyStart, dayGoals)
+    }
+
+    /** What the replay reads besides the diary, with the fingerprint of all of it. */
+    private class ReplayInputs(val fingerprint: String, val historyStart: LocalDate?, val dayGoals: Map<LocalDate, Goal>)
 
     override suspend fun getRankProfile(): RankProfile {
         return observeRankProfile().first()
@@ -123,12 +312,14 @@ class RankRepositoryImpl(
         goals: Goal,
         foods: List<LoggedFoodNutrients>,
         seenRulesVersion: Int,
-        seenSeasonOn: Long
+        seenSeasonOn: Long,
+        historyStart: LocalDate?,
+        dayGoals: Map<LocalDate, Goal>
     ): RankProfile {
         // A day before the first saved goal would be scored against a guessed goal: left out
-        val countFrom = goalsRepository.getGoalHistoryStart()
+        val countFrom = historyStart
         // Every day the rank may count, across seasons; the score card reads these
-        val countedDays = scoreDays(if (countFrom == null) foods else foods.filter { !it.date.isBefore(countFrom) }, today)
+        val countedDays = scoreDays(if (countFrom == null) foods else foods.filter { !it.date.isBefore(countFrom) }, today, dayGoals)
         // The rank starts again from the bottom on each anniversary of the first logged day
         val firstLogged = foods.filter { it.calories > 0.0 }.minOfOrNull { it.date }
         val season = firstLogged?.let { RankSeason.containing(it, today) }
@@ -232,13 +423,18 @@ class RankRepositoryImpl(
      * Every day from the first logged day to [lastDay], each scored against the goal in force that
      * day (BUG-024). A day with no calories logged is a missed day.
      */
-    private suspend fun scoreDays(foods: List<LoggedFoodNutrients>, lastDay: LocalDate): List<ScoredDay> {
+    private suspend fun scoreDays(
+        foods: List<LoggedFoodNutrients>,
+        lastDay: LocalDate,
+        /** Goals already read for these days; the rest are read here. */
+        knownGoals: Map<LocalDate, Goal> = emptyMap()
+    ): List<ScoredDay> {
         val byDate = withCatalogNutrients(foods.filter { !it.date.isAfter(lastDay) }).groupBy { it.date }
         val dayNutrients = byDate.mapValues { (_, entries) -> entries.toDayNutrients() }
         val firstLogged = dayNutrients.filterValues { it.calories > 0.0 }.keys.minOrNull() ?: return emptyList()
         val dates = generateSequence(firstLogged) { it.plusDays(1) }.takeWhile { !it.isAfter(lastDay) }.toList()
-        // Read in one pass
-        val dayGoals = goalsRepository.getGoalsForDates(dates)
+        // Read in one pass, unless they were read already
+        val dayGoals = if (dates.all { it in knownGoals }) dates.map { knownGoals.getValue(it) } else goalsRepository.getGoalsForDates(dates)
         return dates.mapIndexed { index, date ->
             val nutrients = dayNutrients[date]?.takeIf { it.calories > 0.0 }
             ScoredDay(
@@ -288,20 +484,25 @@ class RankRepositoryImpl(
      */
     private suspend fun catalogNutrition(repository: FoodRepository, foodId: Long, foodName: String): Nutrition? {
         val key = foodId to foodName.trim().lowercase(Locale.US)
-        catalogCache[key]?.let { return it.nutrition }
+        catalogCache[key]?.let { cached ->
+            if (cached.foodMissing) missingCatalogFoods.incrementAndGet()
+            return cached.nutrition
+        }
         val food = try {
             repository.getFoodById(foodId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // Not remembered: the next replay asks again
+            failedCatalogLookups.incrementAndGet()
             return null
         }
+        if (food == null) missingCatalogFoods.incrementAndGet()
         val nutrition = food
             ?.takeIf { it.name.trim().equals(foodName.trim(), ignoreCase = true) }
             ?.nutrition
             ?.takeIf { it.calories > 0.0 }
-        catalogCache[key] = CatalogNutrition(nutrition)
+        catalogCache[key] = CatalogNutrition(nutrition, foodMissing = food == null)
         return nutrition
     }
 
@@ -449,6 +650,9 @@ class RankRepositoryImpl(
 
         /** How long the diary must stay unchanged before a change is replayed. */
         const val DIARY_SETTLE_MS = 400L
+
+        private const val TAG = "RankRepository"
+        private const val RETRY_DELAY_MS = 5_000L
 
         /**
          * A food from the built-in catalog: any positive id outside the custom food and recipe

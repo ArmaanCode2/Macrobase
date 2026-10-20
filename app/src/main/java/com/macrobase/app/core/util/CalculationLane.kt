@@ -26,7 +26,19 @@ object CalculationLane {
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val replay: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+    /** How long the data must stay unchanged before figures are worked out again. */
+    const val SETTLE_MS = 400L
 }
+
+/**
+ * The input of a calculation on [dispatcher], settled: the first value at once, then a burst of
+ * changes (several foods logged or deleted, a meal moved) as one value once it settles, so the
+ * calculation after it runs once per burst. Unsettled where collected when [dispatcher] is null,
+ * as in tests.
+ */
+fun <T> Flow<T>.settledOnLane(dispatcher: CoroutineDispatcher?): Flow<T> =
+    if (dispatcher == null) this else settleAfterFirst(CalculationLane.SETTLE_MS)
 
 /** This flow's work on [dispatcher]; where it is collected when [dispatcher] is null, as in tests. */
 fun <T> Flow<T>.onLane(dispatcher: CoroutineDispatcher?): Flow<T> =

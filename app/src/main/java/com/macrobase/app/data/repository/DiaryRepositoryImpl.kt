@@ -1,5 +1,6 @@
 package com.macrobase.app.data.repository
 
+import com.macrobase.app.core.util.settledOnLane
 import kotlinx.coroutines.CoroutineDispatcher
 import com.macrobase.app.core.util.onLane
 import com.macrobase.app.data.database.UserDatabase
@@ -179,7 +180,8 @@ class DiaryRepositoryImpl(
 
         val days = daysOf(yearMonth)
         return combine(
-            userDatabase.diaryDao().observeMonthlyCalorieSummaries(startDate.toEpochDay(), endDate.toEpochDay()),
+            userDatabase.diaryDao().observeMonthlyCalorieSummaries(startDate.toEpochDay(), endDate.toEpochDay())
+                .settledOnLane(calculationDispatcher),
             goalsRepository.observeGoalsForDates(days)
         ) { summariesList, goals ->
             monthSummaries(days, summariesList.associate { it.dateEpochDay to it.totalCal }, goals)

@@ -1,5 +1,17 @@
 package com.macrobase.app.core.di
 
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import java.io.File
+import com.macrobase.app.data.cache.SnapshotStore
+import com.macrobase.app.data.cache.FiguresCache
+import com.macrobase.app.data.cache.CachedStatisticsRepository
+import com.macrobase.app.data.cache.CachedDiaryRepository
+import com.macrobase.app.BuildConfig
+import androidx.room.InvalidationTracker
 import com.macrobase.app.core.util.CalculationLane
 import com.macrobase.app.data.database.BuiltInDatabaseManager
 import com.macrobase.app.data.database.UserDatabase
@@ -106,21 +118,73 @@ val databaseModule = module {
     single<FoodDataProvider> { LocalFoodDatabaseProvider(get()) }
 }
 
+/** Logs a failure in background work instead of taking the app down: saved figures are only a shortcut. */
+private fun loggingHandler(tag: String) = CoroutineExceptionHandler { _, e -> android.util.Log.w(tag, "Background figures failed: ${e.message}", e) }
+
 val repositoryModule = module {
     // "Now" for every class that reads the date; tests pass a fixed clock instead
     single<java.time.Clock> { com.macrobase.app.core.util.DeviceClock }
     single<PreferencesRepository> { PreferencesRepositoryImpl(get()) }
     single<GoalsRepository> { GoalsRepositoryImpl(get()) }
-    // Heavier calculations run on the shared calculation lane, off the main thread
-    single<DiaryRepository> { DiaryRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
+
+    // Saved figures (rank, statistics, calendar months): copies the app can always work out
+    // again, so they live in no-backup storage, never in the diary database or a backup
+    single {
+        val context = get<Context>()
+        // Every install or update of the app, including a test build with the same version
+        // number, starts from fresh figures
+        @Suppress("DEPRECATION")
+        val installedAt = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime }.getOrDefault(0L)
+        SnapshotStore(
+            directory = File(context.noBackupFilesDir, "snapshots"),
+            appVersion = (BuildConfig.VERSION_CODE.toLong() shl 44) xor installedAt
+        )
+    }
+    single {
+        val cacheScope = CoroutineScope(SupervisorJob() + CalculationLane.dispatcher + loggingHandler("FiguresCache"))
+        FiguresCache(scope = cacheScope, store = get()).also { cache ->
+            // Saved figures are dropped as soon as the data behind them changes, off Room's thread
+            get<UserDatabase>().invalidationTracker.addObserver(
+                object : InvalidationTracker.Observer(arrayOf("diary_entries", "weight_entries")) {
+                    override fun onInvalidated(tables: Set<String>) {
+                        cacheScope.launch {
+                            if ("diary_entries" in tables) cache.onDiaryChanged()
+                            if ("weight_entries" in tables) cache.onWeightChanged()
+                        }
+                    }
+                }
+            )
+            val goals = get<GoalsRepository>()
+            cacheScope.launch { goals.observeGoals().drop(1).collect { cache.onGoalsChanged() } }
+        }
+    }
+
+    // Heavier calculations run on the shared calculation lane, off the main thread; calendar
+    // months and statistics are kept ready by the figures cache
+    single<DiaryRepository> {
+        CachedDiaryRepository(
+            inner = DiaryRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher),
+            cache = get()
+        )
+    }
     single<FoodRepository> { FoodRepositoryImpl(get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
     single<RecipeRepository> { RecipeRepositoryImpl(get()) }
     single<WeightRepository> { WeightRepositoryImpl(get()) }
     single<WaterRepository> { WaterRepositoryImpl(get()) }
-    single<StatisticsRepository> { StatisticsRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher) }
+    single<StatisticsRepository> {
+        CachedStatisticsRepository(
+            inner = StatisticsRepositoryImpl(get(), get(), get(), get(), calculationDispatcher = CalculationLane.dispatcher),
+            cache = get()
+        )
+    }
     single<PortabilityRepository> {
         val context = get<Context>()
-        PortabilityRepositoryImpl(get(), get(), get(), onUserDataChanged = { MacroBaseWidgetProvider.updateAllWidgets(context) })
+        val snapshots = get<SnapshotStore>()
+        PortabilityRepositoryImpl(get(), get(), get(), onUserDataChanged = {
+            // A restored backup replaces the data every saved figure was worked out from
+            snapshots.clear()
+            MacroBaseWidgetProvider.updateAllWidgets(context)
+        })
     }
     // Saved to the app's private files so staged items survive the process being killed (BUG-015)
     single<com.macrobase.app.domain.repository.basket.BasketRepository> {
@@ -136,7 +200,10 @@ val repositoryModule = module {
             foodRepository = get(),
             preferencesRepository = get(),
             clock = get(),
-            dispatcher = CalculationLane.replay
+            dispatcher = CalculationLane.replay,
+            snapshotStore = get(),
+            // One replay for every screen, kept up to date in the background for the session
+            cacheScope = CoroutineScope(SupervisorJob() + CalculationLane.replay + loggingHandler("RankRepository"))
         )
     }
 }
