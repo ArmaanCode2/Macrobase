@@ -1,5 +1,22 @@
 package com.macrobase.app.feature.statistics
 
+import com.macrobase.app.core.designsystem.components.rememberAccessibilityOn
+import kotlin.math.ceil
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import com.macrobase.app.core.designsystem.components.MbMotion
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.LaunchedEffect
 import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import androidx.compose.foundation.background
@@ -695,7 +712,52 @@ private fun NutritionConsistencyTab(
     }
 }
 
-/** The days as weekday rows (Sun to Sat) and week columns, scrolling sideways. */
+/** The heatmap's weekday rows. */
+private const val HEATMAP_DAYS = 7
+
+/** How long a touch must stay down before it shows as a press: Android's tap timeout. */
+private val TAP_TIMEOUT_MS = android.view.ViewConfiguration.getTapTimeout().toLong()
+
+/** The space between heatmap cells: more around the bigger cells. */
+internal fun heatmapGap(cellSize: Dp): Dp = if (cellSize >= 20.dp) 5.dp else 3.dp
+
+/**
+ * The week column and weekday row under a point of the heatmap picture, or null outside the grid.
+ * A tap in the gap between two cells goes to the nearer one.
+ */
+internal fun heatmapSlotAt(x: Float, y: Float, cellPx: Float, gapPx: Float, weekCount: Int): Pair<Int, Int>? {
+    if (x < 0f || y < 0f) return null
+    val pitch = cellPx + gapPx
+    // How many cells along the point is, each cell owning the half gap on either side of it.
+    // Whole cells are counted down, as a grid index is, so this is truncation on purpose
+    val cellsAcross = (x + gapPx / 2f) / pitch
+    val cellsDown = (y + gapPx / 2f) / pitch
+    val week = cellsAcross.toInt()
+    val day = cellsDown.toInt()
+    return if (week < weekCount && day < HEATMAP_DAYS) week to day else null
+}
+
+private val HeatmapDayFormat = DateTimeFormatter.ofPattern("EEEE, MMM d")
+
+/** What a screen reader says for a heatmap day: its date, then what was logged. */
+internal fun heatmapCellLabel(cell: HeatmapCellData): String {
+    val status = when {
+        cell.isFuture -> "still to come"
+        // Today, nothing logged yet: not counted as a missed day (BUG-032)
+        cell.caloriesLogged <= 0.0 && !cell.isEligible -> "nothing logged yet"
+        cell.caloriesLogged <= 0.0 -> "no food logged"
+        else -> "${cell.caloriesLogged.roundToInt()} kcal, ${cell.percentageOfGoal}% of goal"
+    }
+    return "${cell.date.format(HeatmapDayFormat)}: $status"
+}
+
+/**
+ * The days as weekday rows (Sun to Sat) and week columns, scrolling sideways. The cells are drawn
+ * as one picture: a year is 371 cells, and drawing them is far cheaper than laying out a box for
+ * each. Tapping a day opens it; the day shrinks a little while pressed, as a button does. While an
+ * accessibility service (TalkBack, Switch Access) is on, each day is also a labelled spot it can
+ * reach and open.
+ */
 @Composable
 private fun ConsistencyHeatmap(
     stats: ConsistencyStatistics?,
@@ -703,8 +765,19 @@ private fun ConsistencyHeatmap(
     onCellClick: (HeatmapCellData) -> Unit
 ) {
     val daysOfWeekLabels = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-    val gap = if (cellSize >= 20.dp) 5.dp else 3.dp
-    val cellShape = RoundedCornerShape(if (cellSize >= 20.dp) 5.dp else 3.dp)
+    val gap = heatmapGap(cellSize)
+    val corner = if (cellSize >= 20.dp) 5.dp else 3.dp
+    val weeks = stats?.weeks.orEmpty()
+    val accessibilityOn = rememberAccessibilityOn()
+    val openCell by rememberUpdatedState(onCellClick)
+    val scope = rememberCoroutineScope()
+    // The day being pressed and its scale; read only while drawing, so a press redraws the picture alone
+    var pressedSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    val pressScale = remember { Animatable(1f) }
+    // Whole pixels, as laid-out boxes have, so the cells line up with the weekday labels and the spots
+    val density = LocalDensity.current
+    val cellPx = with(density) { cellSize.roundToPx() }
+    val gapPx = with(density) { gap.roundToPx() }
 
     Row(
         modifier = Modifier
@@ -732,31 +805,105 @@ private fun ConsistencyHeatmap(
             }
         }
 
-        // Week columns
-        stats?.weeks?.forEach { week ->
-            Column(
-                verticalArrangement = Arrangement.spacedBy(gap),
-                modifier = Modifier.padding(end = gap)
+        if (weeks.isEmpty()) return@Row
+        // Week columns, each followed by a gap
+        Box {
+            Canvas(
+                modifier = Modifier
+                    .size(
+                        width = with(density) { ((cellPx + gapPx) * weeks.size).toDp() },
+                        height = with(density) { (cellPx * HEATMAP_DAYS + gapPx * (HEATMAP_DAYS - 1)).toDp() }
+                    )
+                    .pointerInput(weeks, cellPx, gapPx) {
+                        fun slotAt(offset: Offset) = heatmapSlotAt(offset.x, offset.y, cellPx.toFloat(), gapPx.toFloat(), weeks.size)
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            val slot = slotAt(down.position) ?: return@awaitEachGesture
+                            val cell = weeks[slot.first].cells.getOrNull(slot.second) ?: return@awaitEachGesture
+                            // As a button in a scrolling list does, the press shows only once the touch
+                            // is not the start of a scroll. A lift before then is still a tap
+                            val quickLift = withTimeoutOrNull(TAP_TIMEOUT_MS) { listOf(waitForUpOrCancellation()) }
+                            val up = if (quickLift != null) {
+                                quickLift.first()
+                            } else {
+                                pressedSlot = slot
+                                scope.launch { pressScale.animateTo(0.9f, tween(MbMotion.PressMs, easing = MbMotion.Ease)) }
+                                waitForUpOrCancellation().also {
+                                    scope.launch { pressScale.animateTo(1f, tween(MbMotion.PressMs, easing = MbMotion.Ease)) }
+                                }
+                            }
+                            // Opened only when lifted on the day pressed, as each day's own button was
+                            if (up != null && slotAt(up.position) == slot) {
+                                up.consume()
+                                openCell(cell)
+                            }
+                        }
+                    }
             ) {
-                week.cells.forEach { cell ->
-                    if (cell != null) {
+                val cell = cellPx.toFloat()
+                val pitch = (cellPx + gapPx).toFloat()
+                val radius = CornerRadius(corner.toPx())
+                // A border's width is rounded up to whole pixels
+                val strokePx = ceil(1.dp.toPx())
+                val pressed = pressedSlot
+                val factor = pressScale.value
+                weeks.forEachIndexed { week, column ->
+                    column.cells.forEachIndexed { day, data ->
+                        if (data == null) return@forEachIndexed
+                        val topLeft = Offset(week * pitch, day * pitch)
                         // An unlogged today is not a missed day yet, so it looks like one to come
-                        val toCome = cell.isFuture || !cell.isEligible
-                        Box(
-                            modifier = Modifier
-                                .size(cellSize)
-                                .mbClickable(pressedScale = 0.9f, onClick = { onCellClick(cell) })
-                                .clip(cellShape)
-                                .then(
-                                    if (toCome) {
-                                        Modifier.border(1.dp, AppColors.Divider, cellShape)
-                                    } else {
-                                        Modifier.background(CalendarPerformanceConfig.getColorForCategory(cell.category))
-                                    }
+                        val toCome = data.isFuture || !data.isEligible
+                        val drawCell: DrawScope.() -> Unit = {
+                            if (toCome) {
+                                // An outline inside the cell, as a 1 dp border is
+                                drawRoundRect(
+                                    color = AppColors.Divider,
+                                    topLeft = topLeft + Offset(strokePx / 2f, strokePx / 2f),
+                                    size = Size(cell - strokePx, cell - strokePx),
+                                    cornerRadius = CornerRadius(radius.x - strokePx / 2f),
+                                    style = Stroke(width = strokePx)
                                 )
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.size(cellSize))
+                            } else {
+                                drawRoundRect(
+                                    color = CalendarPerformanceConfig.getColorForCategory(data.category),
+                                    topLeft = topLeft,
+                                    size = Size(cell, cell),
+                                    cornerRadius = radius
+                                )
+                            }
+                        }
+                        if (factor != 1f && pressed == (week to day)) {
+                            scale(factor, pivot = topLeft + Offset(cell / 2f, cell / 2f)) { drawCell() }
+                        } else {
+                            drawCell()
+                        }
+                    }
+                }
+            }
+
+            if (accessibilityOn) {
+                // Built only while an accessibility service is on: one labelled spot per day, over the picture
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    weeks.forEach { week ->
+                        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                            week.cells.forEach { cell ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(cellSize)
+                                        .then(
+                                            if (cell == null) {
+                                                Modifier
+                                            } else {
+                                                Modifier.semantics {
+                                                    contentDescription = heatmapCellLabel(cell)
+                                                    role = Role.Button
+                                                    onClick { openCell(cell); true }
+                                                }
+                                            }
+                                        )
+                                )
+                            }
+                        }
                     }
                 }
             }

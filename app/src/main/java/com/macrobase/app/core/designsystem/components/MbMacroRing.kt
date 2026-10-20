@@ -38,7 +38,8 @@ internal fun macroRingProgress(eaten: Double, target: Double): Float = when {
 /**
  * C12 Macro ring: a 78 dp ring with a 5 dp stroke. The arc in the macro colour starts at 12 o'clock
  * and runs clockwise; inside is "eaten/target" in whole grams with no unit, the label below. It fills
- * from empty when it first appears and from the old value when the numbers change.
+ * from empty when it first appears ([fillIn] false starts it at its value) and from the old value when
+ * the numbers change.
  */
 @Composable
 fun MbMacroRing(
@@ -46,13 +47,14 @@ fun MbMacroRing(
     eatenGrams: Double,
     targetGrams: Double,
     color: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fillIn: Boolean = true
 ) {
     val eaten = eatenGrams.roundToInt()
     val target = targetGrams.roundToInt()
     val progress = macroRingProgress(eatenGrams, targetGrams)
     val reducedMotion = rememberReducedMotion()
-    val sweep = remember { Animatable(if (reducedMotion) progress else 0f) }
+    val sweep = remember { Animatable(if (reducedMotion || !fillIn) progress else 0f) }
     LaunchedEffect(progress, reducedMotion) {
         if (reducedMotion) sweep.snapTo(progress) else sweep.animateTo(progress, tween(MbMotion.RingMs, easing = MbMotion.Ease))
     }

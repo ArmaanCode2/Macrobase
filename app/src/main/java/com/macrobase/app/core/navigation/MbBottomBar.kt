@@ -1,5 +1,6 @@
 package com.macrobase.app.core.navigation
 
+import com.macrobase.app.core.designsystem.components.rememberMbHaptics
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
@@ -60,6 +61,7 @@ fun MbBottomBar(
     modifier: Modifier = Modifier
 ) {
     val reducedMotion = rememberReducedMotion()
+    val haptics = rememberMbHaptics()
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -94,7 +96,11 @@ fun MbBottomBar(
                         tab = tab,
                         selected = selected,
                         reducedMotion = reducedMotion,
-                        onClick = { onSelect(index) },
+                        onClick = {
+                            // A light tick when the tab changes, none for the tab already open
+                            if (index != selectedIndex) haptics.switched()
+                            onSelect(index)
+                        },
                         modifier = Modifier.width(if (selected) Dimensions.NavActiveWidth else inactiveWidth)
                     )
                 }

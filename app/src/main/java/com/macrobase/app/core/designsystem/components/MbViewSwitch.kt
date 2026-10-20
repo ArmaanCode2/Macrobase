@@ -85,6 +85,12 @@ fun MbViewSwitch(
     modifier: Modifier = Modifier
 ) {
     val reducedMotion = rememberReducedMotion()
+    val haptics = rememberMbHaptics()
+    // A light tick when the view changes, none for the view already shown
+    val select: (Int) -> Unit = { index ->
+        if (index != selectedIndex) haptics.switched()
+        onSelect(index)
+    }
     Box(
         modifier = modifier
             .height(Dimensions.DockPiece)
@@ -92,9 +98,9 @@ fun MbViewSwitch(
             .padding(PillPadding)
     ) {
         if (items.size <= 2) {
-            HalvesSwitch(items, selectedIndex, onSelect, reducedMotion)
+            HalvesSwitch(items, selectedIndex, select, reducedMotion)
         } else {
-            ScrollingSwitch(items, selectedIndex, onSelect, reducedMotion)
+            ScrollingSwitch(items, selectedIndex, select, reducedMotion)
         }
     }
 }

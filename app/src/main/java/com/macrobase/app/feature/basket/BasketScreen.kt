@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.basket
 
+import com.macrobase.app.core.designsystem.components.rememberMbHaptics
 import com.macrobase.app.feature.detail.steppedQuantity
 import com.macrobase.app.feature.detail.QuantityStepper
 import com.macrobase.app.feature.detail.MacroTiles
@@ -342,6 +343,9 @@ fun BasketItemRow(
     val coroutineScope = rememberCoroutineScope()
     val snapSpec = tween<Float>(durationMillis = MbMotion.SwipeMs, easing = MbMotion.Ease)
     val isOpen by remember { derivedStateOf { offsetX.value < 0f } }
+    val haptics = rememberMbHaptics()
+    // Whether letting go now would open the row, so the tick plays once as a swipe reaches that point
+    var swipePastOpen by remember { mutableStateOf(false) }
 
     var showServingMenu by remember { mutableStateOf(false) }
     // Exact quantity (0.25 stays "0.25"); the typed text is only replaced when the quantity
@@ -404,7 +408,7 @@ fun BasketItemRow(
                 .border(1.dp, AppColors.Edge, rowShape)
                 .pointerInput(item.id) {
                     detectHorizontalDragGestures(
-                        onDragStart = { },
+                        onDragStart = { swipePastOpen = offsetX.value < -deleteActionWidthPx * 0.4f },
                         onDragEnd = {
                             coroutineScope.launch {
                                 if (offsetX.value < -deleteActionWidthPx * 0.4f) {
@@ -425,6 +429,9 @@ fun BasketItemRow(
                             coroutineScope.launch {
                                 val newOffset = (offsetX.value + dragAmount).coerceIn(-deleteActionWidthPx, 0f)
                                 offsetX.snapTo(newOffset)
+                                val pastOpen = newOffset < -deleteActionWidthPx * 0.4f
+                                if (pastOpen && !swipePastOpen) haptics.reachedOpen()
+                                swipePastOpen = pastOpen
                             }
                         }
                     )
