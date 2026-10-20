@@ -59,8 +59,8 @@ All documents are synchronized with the actual Kotlin codebase (`app/src/main/ja
 | **[RELIABILITY_CHECKLIST.md](RELIABILITY_CHECKLIST.md)** | **Reliability & Resilience Guidelines**: Activity lifecycle preservation, process-death recovery, state synchronization, and Room database migration testing. |
 | **[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)** | **Performance Benchmarks & Optimizations**: SQLite FTS5 query latency, 60fps Jetpack Compose scroll metrics, coroutine dispatching profiles, and cold-start benchmarks. |
 | **[RELEASE_CANDIDATE_REPORT.md](RELEASE_CANDIDATE_REPORT.md)** | **Release Verification Matrix**: Test coverage, regression verification, Android SDK version support matrix, and release readiness audit. |
-| **[UI_UX_SPECIFICATION.md](UI_UX_SPECIFICATION.md)** | **Design System & Token Catalog**: Material 3 typography scales, color token schemes (dynamic / dark / light), component states, and layout specifications. |
-| **[UI_AUDIT.md](UI_AUDIT.md)** | **UI & Accessibility Audit**: Touch target sizing, contrast ratios, single-app-bar navigation rules, and Compose constraint hierarchy safeguards. |
+| **[UI_UX_SPECIFICATION.md](UI_UX_SPECIFICATION.md)** | **Design System & Token Catalog**: the "Mentor" design from 1.2.6: pure black canvas, Jura type scale, colour tokens, the pill bottom bar and dock, Home layout, components, motion and vibration. |
+| **[UI_AUDIT.md](UI_AUDIT.md)** | **UI & Accessibility Audit** of the design before 1.2.6: touch target sizing, contrast ratios, single-app-bar navigation rules, and Compose constraint hierarchy safeguards. |
 | **[BUG_AUDIT_REPORT.md](BUG_AUDIT_REPORT.md)** | **Historical Bug Audit**: Retrospective catalog of fixed bugs, regression test mapping, and lessons learned. |
 
 ---

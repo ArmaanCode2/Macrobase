@@ -1,5 +1,7 @@
 # MacroBase UI Fidelity, Polish & Responsive Quality Audit
 
+> This audit covers the design before version 1.2.6. From 1.2.6 the app uses the "Mentor" design described in [`UI_UX_SPECIFICATION.md`](UI_UX_SPECIFICATION.md); the token values and navigation rules below are kept as a historical record.
+
 ## 1. Executive Summary
 
 A comprehensive visual, interaction, and responsive audit of MacroBase was performed against [`docs/UI_UX_SPECIFICATION.md`](file:///e:/antigravity/macrobase/macrobase/docs/UI_UX_SPECIFICATION.md). All 14 application screens, dialogs, modals, and reusable components were audited and brought into strict alignment with the specification.

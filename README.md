@@ -44,7 +44,7 @@ Most nutrition tracking apps rely on cloud services, subscriptions, and telemetr
 
 The app is built following Clean Architecture principles with clear separation of concerns across presentation, domain, and data layers.
 
-- **UI**: Jetpack Compose with Material 3 design system and single top app bar navigation architecture.
+- **UI**: Jetpack Compose with the app's own "Mentor" design system on Material 3 (see `docs/UI_UX_SPECIFICATION.md`): a pure black canvas, the Jura typeface, and a pill bottom bar with five tabs (Home, Foods, Stats, Rank, Profile).
 - **Language**: Kotlin (Coroutines, Flow, StateFlow).
 - **Local Storage**:
   - `built_in_foods.db`: Pre-packaged read-only SQLite database with FTS5 virtual tables.
