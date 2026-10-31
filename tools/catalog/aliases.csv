@@ -1,0 +1,154 @@
+# Extra names search finds a food by. food is the food's name, checked against sourceId.
+# kind: spelling, hindi, regional, english or other.
+sourceId,food,alias,kind,note
+INDB:0148,Chickpeas curry (Safed channa curry),Chole,hindi,
+INDB:0148,Chickpeas curry (Safed channa curry),Chana masala,hindi,
+INDB:0205,Paneer in butter sauce,Paneer butter masala,other,the restaurant name for the dish
+INDB:0205,Paneer in butter sauce,Paneer makhani,hindi,
+INDB:0224,Butter chicken,Murgh makhani,hindi,
+INDB:0229,Fried fish (Indian style) (Tali hui machli),Fish fry,english,
+INDB:0008,Lemonade,Nimbu pani,hindi,
+INDB:0008,Lemonade,Shikanji,hindi,
+INDB:0263,Vermicelli kheer (Semiya/Seviyan ki kheer),Semiya payasam,regional,
+INDB:0263,Vermicelli kheer (Semiya/Seviyan ki kheer),Payasam,regional,semiya payasam is the everyday South Indian payasam
+INDB:0261,Rice kheer (Chawal ki kheer),Paal payasam,regional,
+INDB:0261,Rice kheer (Chawal ki kheer),Kheer,other,the kheer people mean without a qualifier
+INDB:0135,Paneer kaathi roll,Paneer frankie,regional,
+INDB:0135,Paneer kaathi roll,Frankie,regional,
+INDB:0121,Vegetable chowmein,Hakka noodles,other,the restaurant name for vegetable chowmein
+INDB:0119,Chinese fried rice,Veg fried rice,other,the everyday name for this dish
+INDB:0571,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji),Bhindi masala,other,the closest dish in the catalog
+INDB:0571,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji),Bhindi fry,other,another everyday name for this dish
+INDB:0426,Sweet split chickpea roti (Sweet channa dal roti/Puranpoli),Puran poli,spelling,
+INDB:0117,Tamarind rice (Chintapandu pulihora/Puliyodharai/Puli sadam/Huli anna),Puliyogare,regional,
+INDB:0001,Hot tea (Garam Chai),Tea,other,the tea people mean without a qualifier
+INDB:0518,Arhar with spinach (Arhar dal aur palak),Dal palak,hindi,
+INDB:0137,Washed moong dal (Dhuli moong ki dal),Moong dal,other,the moong dal people mean without a qualifier
+INDB:0143,Whole masoor (Masoor ki dal),Masoor dal,other,the masoor dal people mean without a qualifier
+INDB:0138,Washed urad dal (Dhuli urad ki dal),Urad dal,other,the urad dal people mean without a qualifier
+INDB:0920,Split bengal gram dal (Channa dal),Chana dal,spelling,
+INDB:0151,Kidney bean curry (Rajmah curry),Rajma,hindi,
+INDB:0151,Kidney bean curry (Rajmah curry),Rajma masala,hindi,
+INDB:0337,Potato samosa (Aloo ka samosa),Samosa,other,the samosa people mean without a qualifier
+INDB:0503,Plain dosa,Dosa,other,the dosa people mean without a qualifier
+INDB:0054,Boiled egg (Ubla anda),Egg,other,the plain egg
+INDB:0086,Chapati/Roti,Phulka,regional,
+INDB:0103,Boiled rice (Uble chawal),Rice,other,the rice people mean without a qualifier
+INDB:0103,Boiled rice (Uble chawal),Plain rice,english,
+INDB:0103,Boiled rice (Uble chawal),Steamed rice,english,
+INDB:0273,Carrot halwa (Gajar ka halwa),Gajar halwa,hindi,
+INDB:0057,Scrambled egg (Ande ki bhurji),Egg bhurji,hindi,
+INDB:0057,Scrambled egg (Ande ki bhurji),Anda bhurji,hindi,
+INDB:0324,Gulab Jamun with khoya,Gulab jamun,other,the gulab jamun people mean without a qualifier
+INDB:0020,Sweet Lassi (Meethi lassi),Lassi,other,the lassi people mean without a qualifier
+INDB:0674,Plain urad dal vada (Uzunne vada/Minapa garelu/Ulundu vadai/Medu vada),Vada,other,the vada people mean without a qualifier
+INDB:0319,Gram flour ladoo (Besan ladoo),Ladoo,other,the ladoo people mean without a qualifier
+USDA:171265,"Milk, cow, 3.25% fat (toned)",Milk,other,the milk people mean without a qualifier
+USDA:171265,"Milk, cow, 3.25% fat (toned)",Toned milk,english,
+USDA:170872,"Milk, cow, 1% fat (double toned)",Double toned milk,english,
+USDA:171280,"Milk, buffalo (full cream)",Full cream milk,english,
+USDA:171269,"Milk, skimmed",Skim milk,english,
+USDA:171284,"Curd, whole milk (dahi)",Curd,other,the curd people mean without a qualifier
+USDA:171284,"Curd, whole milk (dahi)",Dahi,hindi,
+USDA:171284,"Curd, whole milk (dahi)",Yogurt,english,
+CoFID:12-495,Paneer,Cottage cheese,english,
+USDA:171314,Ghee,Desi ghee,hindi,
+USDA:173410,"Butter, salted",Butter,other,the butter people mean without a qualifier
+USDA:173410,"Butter, salted",Makhan,hindi,
+USDA:170874,"Buttermilk, low fat (chaas)",Chaas,hindi,
+USDA:170874,"Buttermilk, low fat (chaas)",Mattha,hindi,
+USDA:170874,"Buttermilk, low fat (chaas)",Majjige,regional,
+USDA:168893,"Wheat flour, whole (atta)",Atta,other,the flour people mean by atta
+USDA:169761,Refined wheat flour (maida),Maida,other,the flour people mean by maida
+USDA:169761,Refined wheat flour (maida),All purpose flour,english,
+USDA:168933,Semolina (suji),Suji,hindi,
+USDA:168933,Semolina (suji),Rava,regional,
+USDA:174288,Bengal gram flour (besan),Besan,hindi,
+USDA:174288,Bengal gram flour (besan),Gram flour,english,
+USDA:173904,Rolled oats,Oats,other,the oats people mean without a qualifier
+USDA:170688,Broken wheat (dalia),Dalia,hindi,
+USDA:168927,"Pasta, dry (macaroni, vermicelli)",Seviyan,hindi,
+USDA:169717,"Sago, raw (sabudana)",Sabudana,hindi,
+USDA:172436,"Pigeon peas, dry (toor dal)",Toor dal,regional,
+USDA:172436,"Pigeon peas, dry (toor dal)",Arhar dal,hindi,
+USDA:173758,"Black-eyed peas, dry (lobia)",Chawli,regional,
+USDA:169957,"Moong sprouts, raw",Sprouts,other,the sprouts people mean without a qualifier
+USDA:2646170,"Chicken breast, skinless, raw",Boneless chicken,english,
+USDA:171116,"Chicken mince, raw",Chicken keema,hindi,
+USDA:175122,"Seer fish (surmai), raw",King fish,english,
+USDA:175122,"Seer fish (surmai), raw",Vanjaram,regional,
+USDA:172337,Mustard oil,Sarson ka tel,hindi,
+USDA:171025,Sunflower oil,Refined oil,other,the everyday name for refined sunflower oil
+USDA:169655,"Sugar, white",Sugar,other,the sugar people mean without a qualifier
+USDA:169655,"Sugar, white",Cheeni,hindi,
+USDA:170174,Coconut water,Nariyal pani,hindi,
+USDA:170174,Coconut water,Tender coconut,english,
+USDA:173180,Whey protein powder,Protein powder,english,
+USDA:173180,Whey protein powder,Protein shake,other,"whey powder mixed with water, the usual protein shake"
+USDA:174852,Cola,Soft drink,english,
+USDA:174852,Cola,Cold drink,other,the everyday Indian name for a soft drink
+USDA:172688,"Bread, whole wheat (brown)",Brown bread,english,
+USDA:170853,Cheese slice (processed cheese),Cheese,other,"the cheese most bought in India, processed slices"
+USDA:170857,"Cream, light (about 20% fat)",Cream,other,the cream people mean without a qualifier
+USDA:170857,"Cream, light (about 20% fat)",Fresh cream,english,
+USDA:170857,"Cream, light (about 20% fat)",Malai,hindi,
+USDA:169251,"Mushroom, button",Mushroom,other,the mushroom people mean without a qualifier
+USDA:169998,Sweet corn,Corn,other,the corn people mean without a qualifier
+USDA:169998,Sweet corn,Bhutta,hindi,
+USDA:170162,Cashew nuts (kaju),Cashew,other,"the nut itself, not a cashew sweet"
+USDA:170162,Cashew nuts (kaju),Kaju,hindi,
+USDA:168927,"Pasta, dry (macaroni, vermicelli)",Vermicelli,other,dry wheat vermicelli; its values are those of dry pasta
+MacroBase:dal-tadka,Dal tadka (toor dal fry),Dal fry,other,The same toor dal with a tadka; restaurants call it dal fry
+MacroBase:dal-tadka,Dal tadka (toor dal fry),Arhar dal tadka,hindi,
+MacroBase:dal-tadka,Dal tadka (toor dal fry),Tadka dal,spelling,
+MacroBase:jeera-aloo,Jeera aloo (dry potato sabzi),Aloo jeera,spelling,
+MacroBase:jeera-aloo,Jeera aloo (dry potato sabzi),Zeera aloo,spelling,
+MacroBase:pani-puri,Pani puri (golgappa),Puchka,regional,
+MacroBase:pani-puri,Pani puri (golgappa),Gol gappe,spelling,
+MacroBase:pani-puri,Pani puri (golgappa),Gupchup,regional,
+MacroBase:pani-puri,Pani puri (golgappa),Panipuri,spelling,
+MacroBase:motichoor-laddu,Motichoor laddu (boondi laddu),Motichoor ladoo,spelling,
+MacroBase:maggi-cooked,"Instant noodles (masala), cooked",Maggi,other,The usual name in India for masala instant noodles
+MacroBase:khoya,Khoya (mawa),Khoa,spelling,
+MacroBase:peda,Peda (doodh peda),Pedha,spelling,
+MacroBase:kerala-parotta,Kerala parotta (Malabar parotta),Porotta,spelling,
+MacroBase:kerala-parotta,Kerala parotta (Malabar parotta),Parotta,spelling,
+MacroBase:chicken-kathi-roll,Chicken kathi roll,Chicken frankie,regional,
+MacroBase:chicken-kathi-roll,Chicken kathi roll,Chicken roll,english,
+MacroBase:egg-roll,Egg roll,Anda roll,hindi,
+MacroBase:filter-coffee,Filter coffee,Kaapi,regional,
+MacroBase:filter-coffee,Filter coffee,South Indian coffee,english,
+MacroBase:soan-papdi,Soan papdi,Son papdi,spelling,
+MacroBase:soan-papdi,Soan papdi,Patisa,regional,
+MacroBase:jalebi,Jalebi,Jilebi,spelling,
+MacroBase:jalebi,Jalebi,Jilapi,regional,
+MacroBase:mishti-doi,Mishti doi,Sweet curd,english,
+MacroBase:bisi-bele-bath,Bisi bele bath,Bisibelebath,spelling,
+MacroBase:ven-pongal,Ven pongal,Khara pongal,regional,
+MacroBase:jowar-roti,Jowar roti (bhakri),Jolada rotti,regional,
+MacroBase:chole-bhature,Chole bhature (plate),Chhole bhature,spelling,
+MacroBase:momos-veg,"Momos, veg (steamed)",Veg momos,english,
+MacroBase:momos-chicken,"Momos, chicken (steamed)",Chicken momos,english,
+MacroBase:baingan-bharta,Baingan bharta,Baingan ka bharta,hindi,
+MacroBase:kadai-paneer,Kadai paneer,Karahi paneer,spelling,
+MacroBase:kadai-chicken,Kadai chicken,Karahi chicken,spelling,
+MacroBase:mutton-curry,Mutton curry,Gosht curry,hindi,
+MacroBase:badam-milk,Badam milk,Badam doodh,hindi,
+CoFID:11-459,Tandoori roti / phulka (no ghee),Fulka,spelling,
+CoFID:11-459,Tandoori roti / phulka (no ghee),Tandoor roti,spelling,
+USDA:2709461,French fries,Finger chips,english,
+USDA:2709461,French fries,Fries,english,
+USDA:2709422,"Potato chips (wafers), salted",Crisps,english,
+CoFID:17-764,Mixture (namkeen),Bombay mix,english,
+CoFID:17-764,Mixture (namkeen),Farsan,regional,
+USDA:2707451,"Soya chunks, dry (textured soy protein)",Soya badi,hindi,
+USDA:2707451,"Soya chunks, dry (textured soy protein)",Meal maker,other,A brand name used for soya chunks in South India
+USDA:2707451,"Soya chunks, dry (textured soy protein)",Nutrela,other,A brand name used for soya chunks in North India
+USDA:2710606,Sugarcane juice,Ganne ka ras,hindi,
+USDA:2710606,Sugarcane juice,Ganne ka juice,hindi,
+USDA:168106,"Papad, raw",Appalam,regional,
+USDA:168106,"Papad, raw",Papadum,spelling,
+INDB:0494,Cumin pulao (Jeera/Zeera pulao),Jeera rice,other,The same dish; jeera rice is its usual restaurant name
+INDB:0001,Hot tea (Garam Chai),Masala chai,other,Tea with milk and sugar; the spices in masala chai add almost nothing
+INDB:0925,Sev (Omapodi/Karapusa),Bhujia sev,other,"The same fried gram flour noodles, made thicker"
+INDB:0893,Rice murukku,Chakli,regional,

@@ -1,0 +1,2 @@
+# Branded products left out of branded_foods.db, one per row: sourceId (OFF:<barcode>), food (checked), reason.
+sourceId,food,reason

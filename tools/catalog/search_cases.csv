@@ -1,0 +1,249 @@
+# Everyday searches and the food each should find first. CatalogSearchTests runs every query through
+# LocalFoodDatabaseProvider.searchFoods against built_in_foods.db on SQLite without FTS5, as phones have.
+# expect: a case-insensitive regular expression that one of the first `top` results must match.
+# status ok: must pass. status gap: a known miss; the test fails when it starts passing, so mark it ok.
+# found_today: the first result when the case was written. A gap that found something then must still
+# find something.
+query,expect,top,status,found_today
+rice,"^(boiled rice|rice, )",1,ok,Boiled rice (Uble chawal)
+basmati,^basmati,1,ok,"Basmati rice, white, raw"
+brown rice,^brown rice,1,ok,"Brown rice, raw"
+atta,"^wheat flour,|\(atta\)$",1,ok,"Wheat flour, whole (atta)"
+wheat flour,"^wheat flour,|\(atta\)$",1,ok,"Wheat flour, whole (atta)"
+maida,\(maida\)$|^maida$,1,ok,Refined wheat flour (maida)
+besan,\(besan\)$|^besan$,1,ok,Bengal gram flour (besan)
+suji,\(suji\)$|^suji$,1,ok,Semolina (suji)
+oats,"^(rolled oats|oats$|oats,)",1,ok,Rolled oats
+ragi,^finger millet flour|\(ragi\)$,1,gap,Finger millet cake (Ragi cake)
+jowar,^sorghum flour|\(jowar\)$,1,ok,Sorghum flour (jowar)
+bajra,^pearl millet flour|\(bajra\)$,1,gap,Pearl millet ladoo (Bajra ladoo)
+quinoa,"^quinoa(,|$)",1,ok,"Quinoa, raw"
+bread,"^bread, ",1,ok,"Bread, white"
+brown bread,"^bread, (brown|whole wheat)",1,ok,"Bread, whole wheat (brown)"
+pav,^pav( \(|$),1,ok,Pav (dinner roll)
+cornflakes,^cornflakes,1,ok,Cornflakes with milk
+muesli,^muesli,1,ok,Muesli
+vermicelli,"^vermicelli(,|$| \()|^pasta, dry \(macaroni, vermicelli\)$",1,ok,"Pasta, dry (macaroni, vermicelli)"
+toor dal,^(pigeon pea|dal tadka|toor dal|arhar dal),1,ok,"Pigeon peas, dry (toor dal)"
+arhar dal,^(pigeon pea|dal tadka|toor dal|arhar dal),1,ok,"Pigeon peas, dry (toor dal)"
+moong dal,"^(washed moong dal|green gram, split|whole moong|moong dal( tadka| fry)?$)",1,ok,Washed moong dal (Dhuli moong ki dal)
+masoor dal,masoor,1,ok,Whole masoor (Masoor ki dal)
+chana dal,"^(bengal gram, split|split bengal gram dal|chana dal)",1,ok,Split bengal gram dal (Channa dal)
+urad dal,^(washed urad dal|whole urad|black gram),1,ok,Washed urad dal (Dhuli urad ki dal)
+rajma,"^(kidney bean curry|rajma( masala|,|$))",1,ok,Kidney bean curry (Rajmah curry)
+chole,chole|^chickpeas curry|^chana masala|kabuli,1,ok,Chickpeas curry (Safed channa curry)
+kabuli chana,kabuli|^chickpeas,1,ok,"Chickpeas, dry (kabuli chana)"
+soya chunks,"^soya chunks(,|$)",1,ok,"Soya chunks, dry (textured soy protein)"
+peanuts,"^peanuts,",1,ok,"Peanuts, raw (moongphali)"
+sprouts,^(sprouted moong|moong sprouts),1,ok,"Moong sprouts, raw"
+milk,"^milk,",1,ok,"Milk, cow, 3.25% fat (toned)"
+toned milk,"^milk, .*\(toned\)$",1,ok,"Milk, cow, 3.25% fat (toned)"
+buffalo milk,"^milk, buffalo",1,ok,"Milk, buffalo (full cream)"
+curd,"^curd,",1,ok,"Curd, whole milk (dahi)"
+dahi,"^curd,",1,ok,"Curd, whole milk (dahi)"
+greek yogurt,^greek yogurt,1,ok,"Greek yogurt, plain"
+paneer,"^paneer(,|$| \()",1,ok,Paneer
+ghee,^ghee,1,ok,Ghee
+butter,"^butter(,|$)",1,ok,"Butter, salted"
+cheese,"^(cheese slice|mozzarella cheese$|cheese,)",1,ok,Cheese slice (processed cheese)
+cheese slice,"^cheese, processed slice|cheese slice",1,ok,Cheese slice (processed cheese)
+khoya,^(khoya|khoa),1,ok,Khoya (mawa)
+cream,"^(fresh cream|cream,)",1,ok,"Cream, light (about 20% fat)"
+buttermilk,"^buttermilk(,|$| \()|chaas",1,ok,"Buttermilk, low fat (chaas)"
+chaas,"chaas|^buttermilk,",1,ok,"Buttermilk, low fat (chaas)"
+egg,"^(egg, whole|boiled egg)",1,ok,Boiled egg (Ubla anda)
+egg white,^egg white,1,ok,"Egg white, raw"
+tofu,^tofu,1,ok,Tofu
+chicken breast,^chicken breast,1,ok,"Chicken breast, skinless, raw"
+chicken thigh,^chicken thigh,1,ok,"Chicken thigh, skinless, raw"
+mutton,"^mutton( curry|,| \(goat)",1,ok,"Mutton (goat meat), raw"
+fish,^(fish curry \(machli curry\)$|fish fry|fried fish),1,ok,Fish curry (Machli curry)
+rohu,^rohu,1,ok,"Rohu, raw"
+pomfret,^pomfret,1,ok,"Pomfret, white (silver), raw"
+salmon,^salmon,1,ok,"Salmon, raw"
+tuna,^tuna,1,ok,"Tuna, canned in water"
+prawns,^prawns?\b,1,ok,"Prawns, raw"
+potato,"^potato(,|$| \()",1,ok,Potato
+onion,"^onion(,|$| \()",1,ok,Onion
+tomato,"^tomato(,|$| \()",1,ok,Tomato
+spinach,"^spinach(,|$| \()",1,ok,Spinach (palak)
+cucumber,"^cucumber(,|$| \()",1,ok,Cucumber
+carrot,"^carrot(,|$| \()",1,ok,Carrot
+cabbage,"^cabbage(,|$| \()",1,ok,Cabbage
+cauliflower,"^cauliflower(,|$| \()",1,ok,Cauliflower
+broccoli,"^broccoli(,|$| \()",1,ok,Broccoli
+capsicum,"^capsicum(,|$| \()",1,ok,"Capsicum, green"
+okra,"^okra(,|$| \()",1,ok,Okra (bhindi)
+beetroot,"^beetroot(,|$| \()",1,ok,Beetroot
+sweet potato,"^sweet potato(,|$| \()",1,ok,Sweet potato (shakarkand)
+mushroom,"^mushroom(,|$| \()",1,ok,"Mushroom, button"
+bhindi,^(okra|bhindi),1,ok,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji)
+lauki,"^(bottle gourd(,|$| \()|lauki)",1,ok,Bottle gourd (lauki)
+corn,"^(sweet )?corn(,|$| kernels)",1,ok,Sweet corn
+banana,"^banana(,|$| \()",1,ok,Banana
+apple,"^apple(,|$| \()",1,ok,Apple
+mango,"^mango(,|$| \()",1,ok,"Mango, ripe"
+papaya,"^papaya(,|$| \()",1,ok,"Papaya, ripe"
+guava,"^guava(,|$| \()",1,ok,Guava
+orange,"^orange(,|$| \()",1,ok,Orange
+grapes,"^grapes(,|$| \()",1,ok,Grapes
+pomegranate,"^pomegranate(,|$| \()",1,ok,Pomegranate
+pineapple,"^pineapple(,|$| \()",1,ok,Pineapple
+coconut,"^coconut(,|$| \()",1,ok,"Coconut, fresh"
+dates,"^dates(,|$| \()",1,ok,Dates (khajoor)
+watermelon,^watermelon,1,ok,Watermelon
+chikoo,chikoo|^sapota,1,ok,Sapota (chikoo)
+muskmelon,^muskmelon,1,ok,Muskmelon
+litchi,^litchi,1,ok,Litchi
+almonds,^almonds,1,ok,Almonds (badam)
+cashew,"^cashew nuts?(,|$| \()",1,ok,Cashew nuts (kaju)
+walnut,"^walnuts?(,|$| \()",1,ok,Walnuts (akhrot)
+pistachio,^pistachio,1,ok,Pistachios (pista)
+raisins,^raisins,1,ok,Raisins (kishmish)
+makhana,"^(fox nuts|makhana)(,|$| \()|roasted makhana",1,gap,Makhana kheer
+flaxseed,^flaxseed,1,ok,Flaxseed (alsi)
+chia,^chia seeds,1,ok,Chia seeds
+peanut butter,"^peanut butter(,|$)",1,ok,Peanut butter
+mustard oil,^mustard oil,1,ok,Mustard oil
+coconut oil,^coconut oil,1,ok,Coconut oil
+olive oil,^olive oil,1,ok,Olive oil
+sugar,^sugar,1,ok,"Sugar, white"
+jaggery,^jaggery,1,gap,(nothing)
+honey,"^honey(,|$)",1,ok,Honey
+dal tadka,^dal tadka,1,ok,Dal tadka (toor dal fry)
+dal fry,^dal (fry|tadka),1,ok,Dal tadka (toor dal fry)
+chana masala,^chana masala|chole|^chickpeas curry,1,ok,Chickpeas curry (Safed channa curry)
+aloo jeera,^(aloo jeera|jeera aloo),1,ok,Jeera aloo (dry potato sabzi)
+mix veg,^mix(ed)? veg(etable)? (sabzi|curry),1,ok,Mixed vegetable sabzi (mix veg)
+bhindi masala,^bhindi masala|^okra.*fry,1,ok,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji)
+malai kofta,^malai kofta,1,ok,Malai kofta
+paneer butter masala,^paneer butter masala|^paneer in butter sauce|paneer makhani,1,ok,Paneer in butter sauce
+paneer tikka,paneer.*tikka,1,ok,Paneer shaslik/tikka
+chicken biryani,"^chicken biryani|^biryani, chicken",1,ok,Chicken biryani
+egg biryani,^egg biryani,1,ok,Egg biryani
+chicken tikka,^chicken tikka(?! masala),1,ok,Chicken tikka
+chicken tikka masala,^chicken tikka masala,1,ok,Chicken tikka masala
+fish fry,^(fish fry|fried fish),1,ok,Fried fish (Indian style) (Tali hui machli)
+egg bhurji,^(scrambled egg|egg bhurji),1,ok,Scrambled egg (Ande ki bhurji)
+omelette,^(plain )?omelette,1,ok,Plain omelette/omlet
+kadhi,^(besan kadhi|kadhi),1,ok,Besan kadhi with pakodies
+khichdi,^(plain khi(t)?chdi|khichdi),1,ok,Plain khitchdi (Plain khichri/khichdi)
+pongal,pongal,1,ok,Ven pongal
+medu vada,^plain urad dal vada|^medu vada,1,ok,Plain urad dal vada (Uzunne vada/Minapa garelu/Ulundu vadai/Medu vada)
+rava idli,^semolina idli \(suji/rava idli\)$|^rava idli,1,ok,Semolina idli (Suji/Rava idli)
+upma,^(semolina upma|upma|rava upma),1,ok,Semolina upma (Suji/Rava upma)
+aloo paratha,^(potato|aloo) paran?tha,1,ok,Potato parantha/paratha (Aloo ka parantha/paratha)
+butter naan,^butter naan,1,ok,Butter naan
+tandoori roti,^tandoori roti,1,ok,Tandoori roti / phulka (no ghee)
+missi roti,^missi roti,1,ok,Missi roti
+bajra roti,^bajra roti,1,gap,(nothing)
+jowar roti,^jowar (roti|bhakri),1,ok,Jowar roti (bhakri)
+thepla,^(methi )?thepla,1,ok,Methi thepla
+chole bhature,^chole bhature,1,ok,Chole bhature (plate)
+pani puri,^pani puri|golgappa,1,ok,Pani puri (golgappa)
+golgappa,^pani puri|golgappa,1,ok,Pani puri (golgappa)
+vada pav,^vada pav,1,ok,Vada pav
+momos,^momos,1,ok,"Momos, veg (steamed)"
+samosa,^((potato|aloo) samosa|samosa),1,ok,Potato samosa (Aloo ka samosa)
+kachori,^(khasta kachori|peas kachori|kachori),1,ok,Khasta kachori
+aloo tikki,^aloo tikki,1,ok,Aloo tikki
+pav bhaji,^pav bhaji$,1,ok,Pav bhaji
+dabeli,^dabeli,1,ok,Dabeli
+misal pav,^misal,1,ok,Misal pav
+bhel,^bhel puri$,1,ok,Bhel puri
+sev puri,^sev puri,1,ok,Sev puri
+dahi puri,^dahi puri,1,ok,Dahi puri
+frankie,ka+thi roll|frankie,1,ok,Paneer kaathi roll
+kathi roll,kathi roll|kaathi roll,1,ok,Chicken kathi roll
+maggi,maggi|instant noodles,1,ok,"Instant noodles (masala), cooked"
+noodles,hakka noodles|chowmein|^instant noodles,1,ok,"Instant noodles (masala), cooked"
+french fries,^french fries,1,ok,French fries
+namkeen,^(mixture \(namkeen\)|aloo bhujia|moong dal namkeen),1,ok,Mixture (namkeen)
+bhujia,^aloo bhujia,1,gap,Mooli bhujia
+mixture,^mixture,1,ok,Mixture (namkeen)
+chakli,^chakli|murukku,1,ok,Rice murukku
+roasted chana,^(roasted chana|bhuna chana),1,gap,(nothing)
+jalebi,^jalebi,1,ok,Jalebi
+gulab jamun,^gulab jamun,1,ok,Gulab Jamun with khoya
+rasgulla,^rasgulla$,1,ok,Rasgulla
+laddu,^(gram flour ladoo|besan ladoo|motichoor|boondi ladoo),1,ok,Gram flour ladoo (Besan ladoo)
+ladoo,^(gram flour ladoo|besan ladoo|motichoor|boondi ladoo),1,ok,Gram flour ladoo (Besan ladoo)
+motichoor,^motichoor,1,ok,Motichoor laddu (boondi laddu)
+kaju katli,^cashewnut burfi \(kaju burfi/kaju katli\)$|^kaju katli,1,ok,Cashewnut burfi (Kaju burfi/Kaju katli)
+peda,^peda,1,ok,Peda (doodh peda)
+sandesh,^sandesh,1,ok,Sandesh
+mysore pak,^mysore pak,1,ok,Mysore pak
+soan papdi,^soan papdi,1,ok,Soan papdi
+halwa,^(carrot halwa|gajar( ka)? halwa),1,ok,Carrot halwa (Gajar ka halwa)
+kheer,^(rice kheer|kheer),1,ok,Rice kheer (Chawal ki kheer)
+payasam,^(payasam|semiya payasam|vermicelli kheer),1,ok,Vermicelli kheer (Semiya/Seviyan ki kheer)
+barfi,burfi|barfi,1,ok,Plain burfi (Burfi)
+curry,^(chicken curry$|egg curry|fish curry),1,ok,Chicken curry
+potato curry,^potato curry \(aloo ki sabzi\)$,1,ok,Potato curry (Aloo ki sabzi)
+pea curry,^pea curry \(matar ki sabzi\)$,1,ok,Pea curry (Matar ki sabzi)
+palak paneer,^spinach paneer \(palak paneer\)$,1,ok,Spinach paneer (Palak paneer)
+matar paneer,^pea paneer curry \(matar paneer\)$,1,ok,Pea paneer curry (Matar paneer)
+aloo gobi,^potato cauliflower \(aloo gobhi\)$,1,ok,Potato cauliflower (Aloo gobhi)
+dal makhani,^dal makhani$,1,ok,Dal makhani
+chicken curry,^chicken curry$,1,ok,Chicken curry
+butter chicken,^butter chicken$,1,ok,Butter chicken
+idli,^idli$,1,ok,Idli
+dosa,^plain dosa$,1,ok,Plain dosa
+roti,^chapati/roti$,1,ok,Chapati/Roti
+chapati,^chapati/roti$,1,ok,Chapati/Roti
+paratha,^plain parantha/paratha$,1,ok,Plain parantha/paratha
+poha,^poha$,1,ok,Poha
+sambar,^sambar$,1,ok,Sambar
+rasam,^rasam,1,ok,Rasam with tamarind (Puli rasam/ Chintapandu rasam/ Charu/Saaru)
+poori,^poori$,1,ok,Poori
+naan,^naan$,1,ok,Naan
+dhokla,^dhokla$,1,ok,Dhokla
+biryani,biryani,1,ok,Chicken biryani
+ladies finger,^okra/lady's fingers fry,1,ok,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji)
+chai,^(hot tea \(garam chai\)$|tea with milk),1,ok,Hot tea (Garam Chai)
+tea,^(hot tea|tea with milk),1,ok,Hot tea (Garam Chai)
+coffee,^(coffee with milk|filter coffee|instant coffee|black coffee),1,ok,Instant coffee
+filter coffee,^filter coffee,1,ok,Filter coffee
+lassi,^(sweet )?lassi,1,ok,Sweet Lassi (Meethi lassi)
+coconut water,^coconut water,1,ok,Coconut water
+sugarcane juice,^sugarcane,1,ok,Sugarcane juice
+chicken 65,^chicken 65,1,ok,Chicken 65
+kadai paneer,^kadai paneer,1,ok,Kadai paneer
+kadai chicken,^kadai chicken,1,ok,Kadai chicken
+mutton curry,^mutton curry,1,ok,Mutton curry
+paneer bhurji,^paneer bhurji,1,ok,Paneer bhurji
+baingan bharta,^baingan bharta,1,ok,Baingan bharta
+kerala parotta,^kerala parotta,1,ok,Kerala parotta (Malabar parotta)
+parotta,parotta,1,ok,Kerala parotta (Malabar parotta)
+rumali roti,^rumali roti,1,ok,Rumali roti
+luchi,^luchi,1,ok,Luchi
+puchka,^pani puri,1,ok,Pani puri (golgappa)
+momo,^momos,1,ok,"Momos, veg (steamed)"
+veg momos,"^momos, veg",1,ok,"Momos, veg (steamed)"
+egg roll,^egg roll,1,ok,Egg roll
+shawarma,shawarma,1,ok,Chicken shawarma roll
+bread omelette,^bread omelette,1,ok,Bread omelette
+rajma chawal,^rajma chawal,1,ok,Rajma chawal (plate)
+kalakand,^kalakand,1,ok,Kalakand
+mishti doi,^mishti doi,1,ok,Mishti doi
+badam milk,^badam milk,1,ok,Badam milk
+bisi bele bath,^bisi bele bath,1,ok,Bisi bele bath
+papdi chaat,^papdi chaat,1,ok,Papdi chaat
+jeera rice,cumin pulao,1,ok,Cumin pulao (Jeera/Zeera pulao)
+marie biscuit,^marie biscuit,1,ok,Marie biscuit
+glucose biscuit,^glucose biscuit,1,ok,Glucose biscuit (semi-sweet)
+digestive biscuit,^digestive biscuit,1,ok,Digestive biscuit
+cream biscuit,^cream biscuit,1,ok,Cream biscuit
+rusk,^rusk,1,ok,Rusk (toast)
+cake rusk,^cake rusk,1,ok,Cake rusk
+chips,^potato chips,1,ok,"Potato chips (wafers), salted"
+wafers,^potato chips,1,ok,"Potato chips (wafers), salted"
+papad,^papad,1,ok,"Papad, raw"
+khoa,^khoya,1,ok,Khoya (mawa)
+mawa,^khoya,1,ok,Khoya (mawa)
+kaapi,^filter coffee,1,ok,Filter coffee
+nimbu pani,nimbu pani|lemonade,1,ok,Lemonade
+lemonade,^lemonade,1,ok,Lemonade
+orange juice,^orange juice,1,ok,"Orange juice, fresh"
+protein shake,protein shake|whey protein,1,ok,Whey protein powder
+whey,^whey protein,1,ok,Whey protein powder

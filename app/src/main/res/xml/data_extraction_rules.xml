@@ -4,7 +4,7 @@
     Cloud backup: MacroBase keeps personal data on the device, so nothing is sent to Google's cloud
     backup (BUG-018). Users keep copies with Data & Backup > Export.
     Device transfer (cable or Wi-Fi to a new phone) still copies the diary, foods, goals and
-    preferences; the bundled food catalog comes with the app instead.
+    preferences; the bundled food catalogs come with the app instead.
 -->
 <data-extraction-rules>
     <cloud-backup>
@@ -16,5 +16,6 @@
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="built_in_foods.db" />
+        <exclude domain="database" path="branded_foods.db" />
     </device-transfer>
 </data-extraction-rules>

@@ -1,0 +1,7 @@
+# The content each released catalog version has. build_catalog.py adds a row when DATABASE_VERSION is bumped
+# and refuses changed content under a version already listed here.
+database_version,content_fingerprint,pinned_on
+2.1.0,6fad3f54c2d0dfedbda683b51410971d974792bf7c0c53c218833391e5b7a815,2026-10-03
+2.2.0,5f9f2c4e34105d805744c871ba9838056a2508ba3d78a242d1bacb06f40f1516,2026-10-24
+2.3.0,a3607d51abf1db8569a60730e87e86f936cd7240fea994f59eadf0762b9d7f23,2026-10-24
+2.4.0,1765f724679394eb130eff33d8159b64c9cec163833dc087251b448118638168,2026-10-24

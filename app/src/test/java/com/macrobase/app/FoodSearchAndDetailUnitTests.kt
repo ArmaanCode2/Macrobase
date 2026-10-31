@@ -14,6 +14,7 @@ import com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase
 import com.macrobase.app.domain.usecase.GetFoodDetailsUseCase
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import com.macrobase.app.feature.detail.FoodDetailViewModel
+import com.macrobase.app.testutil.catalogWordSearch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -207,7 +208,7 @@ class FoodSearchAndDetailUnitTests {
     }
 
     @Test
-    fun builtInDatabase_fts5Queries_verifiesAllSpecifiedSampleFoods() {
+    fun builtInDatabase_searchQueries_verifiesAllSpecifiedSampleFoods() {
         val conn = checkNotNull(connection)
         val foodsToTest = listOf(
             "paneer",
@@ -226,29 +227,16 @@ class FoodSearchAndDetailUnitTests {
         )
 
         for (query in foodsToTest) {
-            val pstmt = conn.prepareStatement("""
-                SELECT f.id, f.name, f.calories, f.protein, f.carbohydrates, f.fat, c.name as category_name
-                FROM foods_fts fts
-                JOIN foods f ON f.id = fts.food_id
-                LEFT JOIN categories c ON f.category_id = c.id
-                WHERE foods_fts MATCH ? AND f.is_active = 1
-                ORDER BY rank
-                LIMIT 5;
-            """)
-            pstmt.setString(1, "$query*")
-            val rs = pstmt.executeQuery()
-
-            var count = 0
-            while (rs.next()) {
-                count++
-                val name = rs.getString("name")
-                val cal = rs.getDouble("calories")
+            val found = conn.catalogWordSearch(query, limit = 5)
+            assertTrue("Expected at least 1 match for query '$query'", found.isNotEmpty())
+            for (name in found) {
                 assertTrue("Food name must not be empty", name.isNotBlank())
-                assertTrue("Calories must be >= 0", cal >= 0.0)
+                val calories = conn.prepareStatement("SELECT calories FROM foods WHERE name = ?").use { statement ->
+                    statement.setString(1, name)
+                    statement.executeQuery().use { it.next(); it.getDouble(1) }
+                }
+                assertTrue("Calories must be >= 0", calories >= 0.0)
             }
-
-            assertTrue("Expected at least 1 match for query '$query'", count > 0)
-            pstmt.close()
         }
     }
 

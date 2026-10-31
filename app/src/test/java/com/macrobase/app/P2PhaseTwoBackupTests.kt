@@ -446,7 +446,8 @@ class P2PhaseTwoBackupRulesTests {
         val transfer = rules("xml/data_extraction_rules.xml").filter { it.isUnder("device-transfer") }
 
         val excludedPaths = transfer.filter { it.tagName == "exclude" }.map { it.getAttribute("domain") to it.getAttribute("path") }
-        assertEquals(listOf("database" to "built_in_foods.db"), excludedPaths)
+        // Only the bundled catalogs, which come with the app
+        assertEquals(listOf("database" to "built_in_foods.db", "database" to "branded_foods.db"), excludedPaths)
     }
 
     @Test

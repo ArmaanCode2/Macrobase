@@ -135,7 +135,7 @@ class SecurityAndPrivacyUnitTests {
         val stmt = conn.createStatement()
         val rs = stmt.executeQuery("SELECT COUNT(*) FROM foods;")
         assertTrue(rs.next())
-        assertEquals(1014, rs.getInt(1))
+        assertEquals(977, rs.getInt(1))
         rs.close()
     }
 

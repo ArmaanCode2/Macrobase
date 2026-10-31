@@ -2,27 +2,28 @@
 
 ## 1. Overview
 
-This document outlines the complete data lineage from raw USDA datasets to the runtime Android application presentation.
+This document outlines the complete data lineage from the Indian Nutrient Databank (INDB) recipes to the runtime Android application presentation.
 
 ---
 
 ## 2. Ingestion to Runtime Flow
 
 ```
-[ Raw USDA Foundation JSON ]        [ Raw USDA SR Legacy JSON ]
-            │                                     │
-            └─────────────────┬───────────────────┘
+  [ macrobase_indian_foods_canonical.csv ]      [ USDA FoodData Central + UK CoFID 2021 ]
+  - 1,014 INDB recipes, per 100 g                 - tools/catalog/import_basic_foods.py
+  - Portion weights from INDB per-unit energy     - 190 foods -> tools/catalog/new_foods.csv
+                                                  - SR Legacy, Foundation, FNDDS and CoFID
                               │
                               ▼
-            [ Ingestion & Normalization Engine ]
-            - Standardizes 247 nutrients to 100g/100mL base
-            - Generates 14,641 structured portion servings
-            - Normalizes text & compiles 9,343 search aliases
-            - Builds FTS5 search index with diacritic stripping
+            [ tools/catalog/build_catalog.py ]
+            - Applies exclusions, frying-oil and value corrections, aliases (tools/catalog/*.csv)
+            - Works out 49 standard recipes from their ingredients (recipes.csv)
+            - Checks ids, names, nutrients and portion weights; writes nothing on failure
+            - Refuses new content without a new database_version
                               │
                               ▼
             [ `built_in_foods.db` (Production Asset) ]
-            - 45.8 MB SQLite database
+            - 2.1 MB SQLite database, 977 foods
             - Packed at `app/src/main/assets/databases/built_in_foods.db`
                               │
                               ▼
@@ -32,8 +33,16 @@ This document outlines the complete data lineage from raw USDA datasets to the r
             - Opens read-only on Dispatchers.IO
                               │
                               ▼
+            [ branded_foods.db: Open Food Facts, ODbL ]
+            - tools/catalog/import_branded_foods.py: 1,632 checked products sold in India
+            - tools/catalog/build_branded.py: the same tables and checks, a separate file
+                              │
+                              ▼
             [ LocalFoodDatabaseProvider ]
-            - FTS5 tokenized & prefix search (e.g. `apple*`, `greek* yogurt*`)
+            - Searches both catalogs and merges by how well each food matched
+            - Word search on the food_search table: every query word starts a word of the
+              name, an alias or a spelling of one, ranked by common foods first
+              (Android's SQLite has no FTS5); a substring search catches fragments
             - Single food lookup & portion extraction
             - Strict preservation of nullable unanalyzed nutrients
                               │
@@ -54,7 +63,7 @@ This document outlines the complete data lineage from raw USDA datasets to the r
 
 ## 3. Provider Extension Pipeline
 
-Adding a new food provider (e.g. Open Food Facts or Indian Food Database) adheres to the identical downstream pipeline:
+Adding a new food provider adheres to the identical downstream pipeline (Open Food Facts already ships as branded_foods.db, read by the same provider):
 
 ```
 [ External Data Source ]
@@ -80,7 +89,7 @@ Adding a new food provider (e.g. Open Food Facts or Indian Food Database) adhere
 ```
 +─────────────────────────────────────────────────────────────────────────+
 |                           FOOD DISCOVERY                                |
-|   Built-in FTS Search  •  On-Device Label OCR  •  Custom Foods & Recipes|
+|   Built-in Word Search •  On-Device Label OCR  •  Custom Foods & Recipes|
 +────────────────────────────────────┬────────────────────────────────────+
                                      │ Food Selected (foodId / draft)
                                      ▼

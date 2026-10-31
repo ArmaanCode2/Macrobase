@@ -26,8 +26,8 @@ android {
         applicationId = "com.macrobase.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.2.6"
+        versionCode = 18
+        versionName = "1.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -108,6 +108,16 @@ tasks.withType<com.android.build.gradle.tasks.ProcessApplicationManifest>().conf
             throw GradleException("${merged.path} registers the datatransport CCT upload backend; MacroBase must stay offline")
         }
     }
+}
+
+// The catalog tests read the bundled catalog and tools/catalog straight from disk, which Gradle does
+// not see as test inputs: without these, a data-only change could leave testDebugUnitTest UP-TO-DATE.
+tasks.withType<Test>().configureEach {
+    inputs.files(
+        "src/main/assets/databases/built_in_foods.db", "src/main/assets/databases/built_in_foods.fingerprint",
+        "src/main/assets/databases/branded_foods.db", "src/main/assets/databases/branded_foods.fingerprint"
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(fileTree("../tools/catalog") { include("*.csv", "branded/*.csv") }).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // Room writes every schema version to app/schemas. Keep each JSON in version control: the

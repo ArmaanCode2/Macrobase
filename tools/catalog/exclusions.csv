@@ -1,0 +1,278 @@
+# Imported foods left out of the catalog, one per row, with the reason. food is for reading; sourceId decides.
+sourceId,food,reason
+INDB:0476,Almond soup (Badam ka soup),INDB's values cannot be used (sodium of 8377 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0954,American frosting,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0645,Apple crumb pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0307,Apple snowballs,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0643,Apricot fool,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0773,Atta dal burfi,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0489,Bacon and mushroom pancake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0196,Baked brinjal in tomato sauce,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0552,Baked stuffed fish,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0755,Banana groundnut paste/puree,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0508,Beans and macaroni,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:1014,Bengal 5 Spice Blend (Panch Phoran),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0313,Bottle gourd burfi (Ghiya/Lauki burfi),An unusual variant of a common dish; the common version stays.
+INDB:0997,Bread sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0544,Broccoli chicken ala king,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0940,Brown sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0066,Brown stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0718,Butter icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0733,Butterfly biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0266,Cabbage kheer (Pattagobhi ki kheer),An unusual variant of a common dish; the common version stays.
+INDB:0187,Cabbage kofta curry (Pattagobhi kofta curry),An unusual variant of a common dish; the common version stays.
+INDB:0443,Canjee,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0033,Carrot apple sandwich (Gajar aur seb ka sandwich),An unusual variant of a common dish; the common version stays.
+INDB:0591,Cauliflower au gratin,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0582,Cauliflower basket,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0444,Cauliflower canjee (Phoolgobhi ki canjee),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0268,Cauliflower kheer (Phoolgobhi ki kheer),An unusual variant of a common dish; the common version stays.
+INDB:0186,Cauliflower kofta curry (Phoolgobhi kofta curry),An unusual variant of a common dish; the common version stays.
+INDB:0781,Cauliflower potato canjee,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0751,Cereal mix,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0754,Cereal pulse mix with amylase rice flour,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0956,Channa murmura premix,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0294,Charlotte rousse,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0698,Checker board sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0025,Cheese and pineapple sandwich (Cheese aur ananas ka sandwich),An unusual variant of a common dish; the common version stays.
+INDB:0123,Cheese noodle ring,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0377,Cheese patties,An unusual variant of a common dish; the common version stays.
+INDB:0300,Cheese pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0936,Cheese sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0471,Cheese soup,INDB's values cannot be used (sodium of 13695 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0732,Cheese straws,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0876,Chicken and cheese souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0599,Chicken and tomato towers,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0071,Chicken consomme (Clear chicken soup),INDB's values cannot be used (sodium of 8954 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0068,Chicken stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0546,Chicken sweet and sour,"INDB counts the whole pot of frying oil, and once it is taken out the soy-sauce sodium comes to 3,100 to 4,600 mg per 100 g: the recipe's values do not hold together."
+INDB:0077,Chicken sweet corn soup,INDB's values cannot be used (sodium of 12205 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0080,Chinese cabbage and meat ball soup,INDB's values cannot be used (sodium of 4249 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0314,Chocolate burfi,An unusual variant of a common dish; the common version stays.
+INDB:0719,Chocolate butter icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0729,Chocolate cream shells,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0717,Chocolate glace icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0372,Chocolate meringue pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0626,Chocolate sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0288,Chocolate souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0949,Choux pastry,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0743,Choux swans,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0726,Christmas bell biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0724,Christmas biscuit,An unusual variant of a common dish; the common version stays.
+INDB:0727,Christmas star biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0728,Christmas tree biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0725,Christmas wreath biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0930,Classic seasoned black beans,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0011,Coco pine cooler,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0723,Coffee drops,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0628,Coffee pear alaska,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0641,Cold chocolate souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0477,Cold cucumber cream soup,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0637,Cold lemon souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0638,Cold orange souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0639,Cold pineapple souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0085,Cold summer garden soup,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0640,Cold vanilla souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0466,Consomme au julienne,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0467,Consomme au vermicelli,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0368,Cottage cheese pie,An unusual variant of a common dish; the common version stays.
+INDB:0957,Cracked wheat and green gram dal premix (Dalia moong dal premix),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0826,Cranberry cookies,An unusual variant of a common dish; the common version stays.
+INDB:0745,Cream horns,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0474,Cream of broccoli soup,INDB's values cannot be used (sodium of 8792 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0073,Cream of green peas soup,INDB's values cannot be used (sodium of 5000 mg and macros that do not match the energy); Green pea soup (Matar ka soup) stays with measured values.
+INDB:0075,Cream of mixed vegetable soup,INDB's values cannot be used (sodium of 5655 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0074,Cream of spinach soup,INDB's values cannot be used (sodium of 4430 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0782,Creamed spinach,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0589,Creamed spinach and mushroom,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0554,Crispy baked fish,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:1001,Cumin seeds baghar (Jeera baghar/tadka),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0605,Curd dressing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0914,Curried Cauliflower soup,INDB's values cannot be used (sodium of 7311 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0702,Danish luncheon sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0584,Ducheese potato,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0713,Dundee cake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0274,Egg halwa (Ande ka halwa),An unusual variant of a common dish; the common version stays.
+INDB:0853,Egg in a pepper,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0937,Egg sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0767,Fermented bengal gram vada (Khameerikrit/Ufna hua channa dal ka vada),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0846,Fish orly,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0553,Fish pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0555,Fish souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0950,Flaky pastry,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0734,Flan pastry,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0603,French dressing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0590,Fricassee of Mushroom,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0602,Frozen frosty fruit salad (Phalon ka salaad),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0635,Fruit delight,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0737,Fruit puree tart,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0722,Gingerman biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0441,Gingo,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0952,Glace icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0632,Grape and orange whip,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0180,Gravy for kofta,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0821,Greenpea cookies,An unusual variant of a common dish; the common version stays.
+INDB:0955,Gum icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0907,Ham and Bean soup,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0239,Hawain salad,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0824,Hazelnut cookies,An unusual variant of a common dish; the common version stays.
+INDB:0515,Home made egg noodles,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0999,Home made plain noodles,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0633,Honey banana cream,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0378,Hot cheese souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:1004,Hot cherry sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0309,Hot chocolate souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0380,Hot fish souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0647,Hot lemon souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0308,Hot orange souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0379,Hot potato souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0381,Hot spinach souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0310,Hot vanilla souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0408,Ice box cookies,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0502,Instant idli (with semolina),An unusual variant of a common dish; the common version stays.
+INDB:0064,Jam and fruit pancake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0707,Jam filling,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0600,Jellied sunshine fruit salad,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0992,Kashmiri masala,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0062,Keema pancake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0065,Khoa and coconut pancake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0814,Kidney bean sandwich with cottage cheese,An unusual variant of a common dish; the common version stays.
+INDB:0009,Lem-o-gin,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0739,Lemon chiffon pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0706,Lemon curd filling,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0371,Lemon meringue pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0285,Lemon souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0757,Lentils and semolina porridge (Dal suji porridge/daliya),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0760,Lentils and wheat porridge (Dal wheat porridge/daliya ),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0945,Low calorie quick mayonnaise,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0761,Maize porridge,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0504,Masala dosa mixed vegetable fillings,An unusual variant of a common dish; the common version stays.
+INDB:0505,Masala dosa paneer fillings,An unusual variant of a common dish; the common version stays.
+INDB:0875,Masala souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0961,Mashed banana with milk,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0604,Mayonnaise without eggs,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0510,Meat and macaroni casserole,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0465,Meat consomme (with mutton),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0463,Meat stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0413,Melting moments,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0299,Meringue and rice pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0915,Millet soup,INDB's values cannot be used (sodium of 10919 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0491,Minced meat pancake (with chicken),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0442,Mintade,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0462,Mixed stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0243,Mixed vegetable salad with curd sauce,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0966,Moong dal mixture,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0938,Mushroom sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0939,Mustard sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:1003,Mustard seeds baghar (Mustard seed tadka),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0827,Olive biscuit,An unusual variant of a common dish; the common version stays.
+INDB:1002,Onion tomato baghar (Pyaaz tamatar ka tadka),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0293,Orange and pineapple cream,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0740,Orange chiffon pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0736,Orange cream flan,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0365,Orange cream tart,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0710,Orange gateau,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0459,Orange omelette/omlet,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0286,Orange souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0235,"Paneer, apple and pineapple salad",An unusual variant of a common dish; the common version stays.
+INDB:0588,Parsley potato,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0943,Pasta cheese sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0126,Pasta hot pot,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0942,Pasta spinach sauce,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0430,Paushtik ladoo,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0431,Paushtik roti,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0878,Pav bhaji masala,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0644,Pavlova,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0177,Pea vadi curry,An unusual variant of a common dish; the common version stays.
+INDB:0829,Peach blueberry preserves,An unusual variant of a common dish; the common version stays.
+INDB:0625,Pear chocholate sunday,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0749,Pearl millet infant food (Bajra shishu aahaar),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0765,Pearl millet mathri (Bajra mathri),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0125,Penne platter,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0405,Pin wheel biscuit,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0032,Pin wheel sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0289,Pineapple souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0962,Poha with curd (Poha aur dahi),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0779,Poshtik chilla/cheela,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0670,Poshtik cutlet,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0775,Poshtik khichdi/khichri,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0768,Poshtik namak paras,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0744,Potato aigrettes,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0445,Potato canjee (Aloo canjee),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0275,Potato halwa (Aloo ka halwa),An unusual variant of a common dish; the common version stays.
+INDB:0587,Potato nests,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0963,Potato with curd,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0458,Puffy omelette/omlet,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0752,Pulse mix,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0658,Pumpkin coconut burfi (Kaddu aur nariyal ki burfi),An unusual variant of a common dish; the common version stays.
+INDB:0820,Pumpkin cookies,An unusual variant of a common dish; the common version stays.
+INDB:0303,Queen of pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0029,Rainbow sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0634,Raspberry bavarian cream,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0819,Raspberry shortbread cookies,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0166,Raw turnip with coconut,An unusual variant of a common dish; the common version stays.
+INDB:0697,Ribbon sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0756,Rice dal porridge (Chawal dal ki khichdi/khichri),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0958,Rice flakes and roasted channa,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0696,Rolled sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0953,Royal icing,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0750,Sajina,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0746,Savoury cheese horns,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0742,Savoury puffs,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0220,Scotch egg,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0195,Shepherd's pie (vegetarian),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0221,Shepherd's pie (with minced meat),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0753,Shishu ahar,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0948,Short crust pastry,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0296,Snow flakes pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0769,Soya chikki,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0533,Soya chunks sweet and sour (Nutrinugget sweet and sour),"INDB counts the whole pot of frying oil, and once it is taken out the soy-sauce sodium comes to 3,100 to 4,600 mg per 100 g: the recipe's values do not hold together."
+INDB:0774,Soya roti,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0415,Soyabean muthias,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0417,Soyabean namak paras,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0416,Soyabean tikki,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0124,Spaghetti and cheese balls in tomato sauce,A Western cookery-school dish rarely eaten in India; INDB counts its whole pot of frying oil.
+INDB:0509,Spaghetti bolognese,INDB's values cannot be used (sodium of 5359 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0874,Spinach and paneer souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0425,Spinach burfi (Palak burfi),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0762,Spinach peanut burfi (Palak aur mungfali ki burfi),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0419,Spinach peanut namak paras (Palak moongfali namak paras),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0593,Spinach souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0469,Spinach soup (Palak ka soup),INDB's values cannot be used (sodium of 12088 mg and macros that do not match the energy) and there is no measured replacement.
+INDB:0959,Spinach soup in milk,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0763,Split bengal gram burfi/fudge (Channa dal burfi),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0597,Spring basket salad,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0427,Sprouted moong daliya,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0428,Sprouted moong poha,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0831,Starfruit preserves,An unusual variant of a common dish; the common version stays.
+INDB:0646,Steamed cake with chocolate sauce,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0298,Steamed orange pudding,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0642,Stewed fruit (with pear),A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0586,Stuffed baked potatoes,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0012,Summer cooler,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0822,Sunflower cookies,An unusual variant of a common dish; the common version stays.
+INDB:0701,Sunset and sunrise open sandwich,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0037,Sweet open sandwich,An unusual variant of a common dish; the common version stays.
+INDB:0837,Sweet peach pickle (Aadoo ka achaar),An unusual variant of a common dish; the common version stays.
+INDB:0818,Sweet potato biscuit (Shakarkand ke biscuit),An unusual variant of a common dish; the common version stays.
+INDB:0964,Sweet wheat porridge (Sweet dalia),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0083,Talaumein soup,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0601,Tomato aspic,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0828,Tutti fruitti biscuit,An unusual variant of a common dish; the common version stays.
+INDB:0631,Vanilla ice cream with apples in hot cherry sauce,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0287,Vanilla souffle,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0592,Vegetable and cheese pie,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0759,Vegetable mix,"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0067,Vegetable stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0190,Vegetarian egg kofta curry,An unusual variant of a common dish; the common version stays.
+INDB:0539,Vegetarian nargisi kofta curry,An unusual variant of a common dish; the common version stays.
+INDB:0354,Vegeterian scotch egg,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0714,Victorian sandwich cake,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0245,Waldroff salad,A Western banquet or cookery-school dish rarely eaten in India.
+INDB:0812,Watercress sandwich,An unusual variant of a common dish; the common version stays.
+INDB:0424,Wheat flour and moong dal burfi (Atta aur moong dal ki burfi),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0771,Wheat flour and nuts ladoos (Atta nuts ladoos),"An infant, nutrition-programme or therapeutic recipe, not an everyday food."
+INDB:0934,White sauce (medium),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0935,White sauce (thick),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0933,White sauce (thin),"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."
+INDB:0464,White stock,"A component of other dishes (stock, sauce base, icing, pastry, tadka or spice mix), not logged on its own."

@@ -1,0 +1,40 @@
+# Foods that fail a plausibility check. value is what the check saw; the row stops covering the food when
+# the value changes. status fix: a known error to correct. status accepted: the value is right, note says why.
+sourceId,check,value,status,note
+USDA:168746,energy_vs_macros,43 kcal vs 16,accepted,"The energy includes alcohol (7 kcal/g), which the check does not count."
+USDA:173190,energy_vs_macros,85 kcal vs 11,accepted,"The energy includes alcohol (7 kcal/g), which the check does not count."
+USDA:174815,energy_vs_macros,231 kcal vs 0,accepted,"The energy includes alcohol (7 kcal/g), which the check does not count."
+USDA:170567,fat_level,49.93 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:173410,fat_level,81.11 g,accepted,Butter is about 81% fat.
+USDA:171412,fat_level,99.06 g,accepted,A cooking oil or fat: almost all of it is fat.
+INDB:0842,fat_level,51.71 g,accepted,Coconut kept in oil; about half of it is fat.
+USDA:170170,fat_level,64.53 g,accepted,Dried coconut is about 65% fat.
+USDA:171314,fat_level,100 g,accepted,"Ghee is clarified butter, almost all fat."
+USDA:171410,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+INDB:0944,fat_level,84.52 g,accepted,Mayonnaise is mostly oil; 75-85 g fat per 100 g is normal.
+USDA:172337,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:171413,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:174266,fat_level,51.36 g,accepted,"Ground peanuts, about half fat."
+USDA:172430,fat_level,49.24 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:174262,fat_level,49.66 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:170184,fat_level,45.32 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:170556,fat_level,49.05 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:171013,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:171016,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:170150,fat_level,49.67 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+USDA:171411,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:171025,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:170562,fat_level,51.46 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+INDB:0995,fat_level,66.12 g,accepted,A mayonnaise-based sauce; 60-70 g fat per 100 g is normal.
+USDA:171011,fat_level,100 g,accepted,A cooking oil or fat: almost all of it is fat.
+USDA:170187,fat_level,65.21 g,accepted,Nuts and oilseeds are 45 to 65% fat.
+INDB:0058,portion_weight,101 g,accepted,"The unit is one egg's share of a dish with other ingredients, not a plain egg."
+INDB:0460,portion_weight,128 g,accepted,The unit is one egg's share of an omelette with cheese and mushroom.
+INDB:0136,portion_weight,85 g,accepted,Makki ki roti is thick; 60-90 g each is normal.
+INDB:0461,portion_weight,152 g,accepted,The unit is one egg's share of an omelette with potato and vegetables.
+INDB:0699,portion_weight,194.4 g,accepted,"The unit is one filled submarine roll, not the bare bun."
+INDB:1009,sodium_level,3507.59 mg,accepted,Salt-preserved pickle.
+INDB:0991,sodium_level,11873.6 mg,accepted,Chaat masala is a spice blend made with black salt.
+INDB:1008,sodium_level,7559.38 mg,accepted,Salt-preserved pickle.
+INDB:0983,sodium_level,3429.94 mg,accepted,Salt-preserved pickle.
+INDB:0985,sodium_level,6415.9 mg,accepted,Salt-preserved pickle.

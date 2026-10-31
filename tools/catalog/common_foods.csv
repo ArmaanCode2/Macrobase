@@ -1,0 +1,280 @@
+# How commonly a food is eaten, so search ranks it above rarer foods with the same words. priority 3: the
+# everyday version people mean, 2: a common everyday dish, 1: common. Foods not listed rank as 0.
+sourceId,food,priority
+INDB:0086,Chapati/Roti,3
+INDB:0103,Boiled rice (Uble chawal),3
+INDB:0087,Plain parantha/paratha,3
+INDB:0001,Hot tea (Garam Chai),3
+INDB:0002,Instant coffee,3
+INDB:0137,Washed moong dal (Dhuli moong ki dal),3
+INDB:0152,Sambar,3
+INDB:0131,Idli,3
+INDB:0503,Plain dosa,3
+INDB:0132,Masala dosa,3
+INDB:0452,Poha,3
+INDB:0447,Semolina upma (Suji/Rava upma),3
+INDB:0501,Plain khitchdi (Plain khichri/khichdi),3
+INDB:0054,Boiled egg (Ubla anda),3
+INDB:0059,Plain omelette/omlet,3
+INDB:0020,Sweet Lassi (Meethi lassi),3
+INDB:0116,Curd rice (Dahi bhaat/Dahi chawal/ Perugu annam/Daddojanam/Thayir saadam),3
+INDB:0151,Kidney bean curry (Rajmah curry),3
+INDB:0148,Chickpeas curry (Safed channa curry),3
+INDB:0156,Potato cauliflower (Aloo gobhi),3
+INDB:0173,Pea potato curry (Aloo matar),3
+INDB:0174,Pea paneer curry (Matar paneer),3
+INDB:0198,Spinach paneer (Palak paneer),3
+INDB:0222,Chicken curry,3
+INDB:0557,Egg curry (Anda curry),3
+INDB:0228,Fish curry (Machli curry),3
+INDB:0571,Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji),3
+INDB:0088,Potato parantha/paratha (Aloo ka parantha/paratha),3
+INDB:0097,Poori,3
+INDB:0129,Naan,3
+INDB:0252,Cucumber raita (Kheere ka raita),3
+INDB:0337,Potato samosa (Aloo ka samosa),3
+INDB:0261,Rice kheer (Chawal ki kheer),3
+INDB:0273,Carrot halwa (Gajar ka halwa),3
+INDB:0324,Gulab Jamun with khoya,3
+INDB:0653,Rasgulla,3
+INDB:0319,Gram flour ladoo (Besan ladoo),3
+INDB:0315,Cashewnut burfi (Kaju burfi/Kaju katli),3
+INDB:0311,Plain burfi (Burfi),3
+INDB:0433,Dhokla,3
+INDB:0892,Pav bhaji,3
+INDB:0112,Mutton biryani/biriyani,3
+INDB:0113,Vegetable biryani/biriyani,3
+INDB:0674,Plain urad dal vada (Uzunne vada/Minapa garelu/Ulundu vadai/Medu vada),3
+INDB:0224,Butter chicken,3
+INDB:0918,Dal makhani,3
+INDB:0328,Onion pakora/pakoda (Pyaaz ke pakode),3
+INDB:0057,Scrambled egg (Ande ki bhurji),3
+INDB:0360,Coconut chutney (Nariyal ki chutney),3
+INDB:0983,Mango pickle (Aam ka achaar),3
+INDB:0008,Lemonade,3
+USDA:171265,"Milk, cow, 3.25% fat (toned)",3
+USDA:171284,"Curd, whole milk (dahi)",3
+CoFID:12-495,Paneer,3
+USDA:171314,Ghee,3
+USDA:171287,"Egg, whole, raw",3
+USDA:169756,"Rice, white, raw",3
+USDA:168893,"Wheat flour, whole (atta)",3
+USDA:172436,"Pigeon peas, dry (toor dal)",3
+USDA:2646170,"Chicken breast, skinless, raw",3
+USDA:170028,Potato,3
+USDA:170000,Onion,3
+USDA:170457,Tomato,3
+USDA:173944,Banana,3
+USDA:171688,Apple,3
+USDA:169655,"Sugar, white",3
+USDA:172337,Mustard oil,3
+USDA:171025,Sunflower oil,3
+USDA:170567,Almonds (badam),3
+USDA:169910,"Mango, ripe",3
+USDA:170169,"Coconut, fresh",3
+INDB:0143,Whole masoor (Masoor ki dal),2
+INDB:0142,Whole moong (Moong ki dal),2
+INDB:0138,Washed urad dal (Dhuli urad ki dal),2
+INDB:0145,Whole urad (Urad ki dal),2
+INDB:0141,Mixed dal,2
+INDB:0920,Split bengal gram dal (Channa dal),2
+INDB:0518,Arhar with spinach (Arhar dal aur palak),2
+INDB:0516,Sour lentils (Khatti dal),2
+INDB:0520,Rasam with tamarind (Puli rasam/ Chintapandu rasam/ Charu/Saaru),2
+INDB:0153,Besan kadhi with pakodies,2
+INDB:0114,"Lemon rice (Pulihora, Elumichai sadam, Chitranna)",2
+INDB:0117,Tamarind rice (Chintapandu pulihora/Puliyodharai/Puli sadam/Huli anna),2
+INDB:0104,Plain pulao,2
+INDB:0494,Cumin pulao (Jeera/Zeera pulao),2
+INDB:0495,Peas pulao (Matar pulao),2
+INDB:0105,Mixed vegetable pulao,2
+INDB:0119,Chinese fried rice,2
+INDB:0121,Vegetable chowmein,2
+INDB:0506,Uttapam,2
+INDB:0134,Onion tomato uttapam,2
+INDB:0507,Appam,2
+INDB:0133,Semolina dosa (Suji/Rava dosa),2
+INDB:0778,Semolina idli (Suji/Rava idli),2
+INDB:0884,Moong bean dosa (Pesarattu),2
+INDB:0482,Methi parantha/paratha,2
+INDB:0089,Radish parantha/paratha (Mooli ka parantha/paratha),2
+INDB:0090,Cauliflower parantha/paratha (Phoolgobhi ka parantha/paratha),2
+INDB:0095,Paneer parantha/paratha,2
+INDB:0885,Methi thepla,2
+INDB:0136,Makki ki roti,2
+INDB:0130,Bhatura,2
+INDB:0102,Tandoori parantha/paratha,2
+INDB:0178,Paneer curry,2
+INDB:0209,Kadhai Paneer,2
+INDB:0204,Shahi paneer,2
+INDB:0205,Paneer in butter sauce,2
+INDB:0207,Chilli paneer,2
+INDB:0355,Paneer shaslik/tikka,2
+INDB:0197,Dum aloo,2
+INDB:0162,Dry potato (Sookhe aloo),2
+INDB:0556,Potato curry (Aloo ki sabzi),2
+INDB:0563,Spinach and potato (Palak aloo),2
+INDB:0160,Potato fenugreek (Aloo methi),2
+INDB:0158,Cabbage and peas (Pattagobhi aur matar),2
+INDB:0161,Brinjal bhartha (Baingan ka bhartha),2
+INDB:0168,Stuffed okra (Bharwa bhindi),2
+INDB:0200,Sarson ka saag,2
+INDB:0176,Pea curry (Matar ki sabzi),2
+INDB:0535,Mushroom matar,2
+INDB:0202,Avial,2
+INDB:0223,Tandoori chicken,2
+INDB:0226,Chilli chicken,2
+INDB:0547,Chicken korma,2
+INDB:0527,Mutton korma,2
+INDB:0210,Roghan josh,2
+INDB:0212,Pea keema curry (Matar keema ki sabzi),2
+INDB:0229,Fried fish (Indian style) (Tali hui machli),2
+INDB:0551,Prawn curry (with coconut) (Jhinga curry),2
+INDB:0055,Fried Egg,2
+INDB:0256,Boondi raita,2
+INDB:0361,Mint and coriander chutney (Pudinay aur dhaniye ki chutney),2
+INDB:1012,Tomato chutney (Tamatar ki chutney),2
+INDB:0327,Potato pakora/pakoda (Aloo pakoda),2
+INDB:0334,Bread pakora/pakoda,2
+INDB:0342,Vegetable cutlet,2
+INDB:0341,Khasta kachori,2
+INDB:0487,Peas kachori (Matar kachori),2
+INDB:0894,Bhel puri,2
+INDB:0258,Dahi vadas/Dahi bhalla,2
+INDB:0891,Veg manchurian,2
+INDB:0654,Rasmalai,2
+INDB:0297,Kulfi,2
+INDB:0808,Sweetened yogurt (Shrikhand),2
+INDB:0809,Thickened sweetened milk (Rabri),2
+INDB:0270,Phirni,2
+INDB:0277,Moong dal halwa,2
+INDB:0271,Semolina halwa (Suji ka halwa),2
+INDB:0263,Vermicelli kheer (Semiya/Seviyan ki kheer),2
+INDB:0356,Peanut brittle (Moongfali ki chikki),2
+INDB:0021,Lassi (salted),2
+INDB:0015,Banana milkshake (Kele milkshake),2
+INDB:0016,Mango milkshake (Aam milkshake),2
+INDB:0005,Raw mango drink (Aam panna),2
+INDB:0440,Jal jeera,2
+INDB:0049,Cornflakes with milk,2
+INDB:0048,Oatmeal Porridge,2
+INDB:0453,Vegetable poha,2
+INDB:0241,Sprouted moong salad,2
+INDB:0072,Cream of tomato soup,2
+INDB:0912,Sweet corn soup,2
+INDB:0350,Cheese pizza,2
+INDB:0349,Vegetable burger,2
+USDA:170872,"Milk, cow, 1% fat (double toned)",2
+USDA:171269,"Milk, skimmed",2
+USDA:171280,"Milk, buffalo (full cream)",2
+USDA:170886,"Curd, low fat (dahi)",2
+USDA:173410,"Butter, salted",2
+USDA:170853,Cheese slice (processed cheese),2
+USDA:170857,"Cream, light (about 20% fat)",2
+USDA:170874,"Buttermilk, low fat (chaas)",2
+USDA:169757,"Rice, white, cooked",2
+CoFID:11-857,"Basmati rice, white, raw",2
+CoFID:11-858,"Basmati rice, white, boiled",2
+USDA:169761,Refined wheat flour (maida),2
+USDA:168933,Semolina (suji),2
+USDA:174288,Bengal gram flour (besan),2
+USDA:169714,Rice flour,2
+USDA:168943,Sorghum flour (jowar),2
+USDA:170290,Maize flour (makki atta),2
+USDA:173904,Rolled oats,2
+USDA:170688,Broken wheat (dalia),2
+USDA:168927,"Pasta, dry (macaroni, vermicelli)",2
+USDA:169717,"Sago, raw (sabudana)",2
+USDA:174924,"Bread, white",2
+USDA:172688,"Bread, whole wheat (brown)",2
+USDA:172793,Pav (dinner roll),2
+USDA:174648,Corn flakes,2
+CoFID:13-098,"Green gram, split (moong dal)",2
+USDA:174256,"Green gram, whole (sabut moong)",2
+USDA:174284,"Red lentils, split (masoor dal)",2
+CoFID:13-060,"Black gram, split (urad dal)",2
+USDA:174259,"Black gram, whole (sabut urad)",2
+USDA:173744,"Kidney beans, dry (rajma)",2
+USDA:173756,"Chickpeas, dry (kabuli chana)",2
+USDA:173758,"Black-eyed peas, dry (lobia)",2
+USDA:169957,"Moong sprouts, raw",2
+USDA:170419,"Green peas, fresh (matar)",2
+USDA:172183,"Egg white, raw",2
+USDA:171052,"Chicken, skinless, raw (curry cut)",2
+USDA:171116,"Chicken mince, raw",2
+USDA:175303,"Mutton (goat meat), raw",2
+USDA:175179,"Prawns, raw",2
+USDA:175122,"Seer fish (surmai), raw",2
+CoFID:16-132,"Rohu, raw",2
+CoFID:16-125,"Pomfret, white (silver), raw",2
+USDA:169230,Garlic,2
+USDA:169231,Ginger,2
+USDA:170497,Green chilli,2
+USDA:168462,Spinach (palak),2
+USDA:169997,Coriander leaves (dhaniya),2
+USDA:169975,Cabbage,2
+USDA:169986,Cauliflower,2
+USDA:170393,Carrot,2
+USDA:168409,Cucumber,2
+USDA:170427,"Capsicum, green",2
+USDA:169260,Okra (bhindi),2
+USDA:169228,Brinjal (baingan),2
+USDA:169232,Bottle gourd (lauki),2
+USDA:168393,Bitter gourd (karela),2
+USDA:169998,Sweet corn,2
+USDA:167746,Lemon,2
+USDA:169097,Orange,2
+USDA:169926,"Papaya, ripe",2
+USDA:173044,Guava,2
+USDA:174683,Grapes,2
+USDA:167765,Watermelon,2
+USDA:169134,Pomegranate,2
+USDA:169124,Pineapple,2
+USDA:171726,Dates (khajoor),2
+USDA:170162,Cashew nuts (kaju),2
+USDA:170187,Walnuts (akhrot),2
+USDA:172430,"Peanuts, raw (moongphali)",2
+USDA:171410,Groundnut oil,2
+USDA:171412,Coconut oil,2
+USDA:169640,Honey,2
+USDA:173227,"Tea, black, no milk or sugar",2
+USDA:171890,Black coffee,2
+USDA:170174,Coconut water,2
+USDA:173180,Whey protein powder,2
+CoFID:19-454,Chicken biryani,3
+MacroBase:dal-tadka,Dal tadka (toor dal fry),3
+MacroBase:jeera-aloo,Jeera aloo (dry potato sabzi),2
+MacroBase:mix-veg,Mixed vegetable sabzi (mix veg),2
+MacroBase:kadai-paneer,Kadai paneer,2
+MacroBase:paneer-bhurji,Paneer bhurji,2
+MacroBase:malai-kofta,Malai kofta,2
+MacroBase:baingan-bharta,Baingan bharta,2
+MacroBase:kadai-chicken,Kadai chicken,2
+MacroBase:mutton-curry,Mutton curry,2
+MacroBase:chicken-tikka,Chicken tikka,2
+CoFID:19-296,Chicken tikka masala,2
+MacroBase:chicken-65,Chicken 65,2
+MacroBase:egg-biryani,Egg biryani,2
+MacroBase:ven-pongal,Ven pongal,2
+MacroBase:butter-naan,Butter naan,2
+CoFID:11-459,Tandoori roti / phulka (no ghee),2
+MacroBase:kerala-parotta,Kerala parotta (Malabar parotta),2
+MacroBase:aloo-tikki,Aloo tikki,2
+MacroBase:vada-pav,Vada pav,3
+MacroBase:pani-puri,Pani puri (golgappa),3
+MacroBase:sev-puri,Sev puri,2
+MacroBase:momos-veg,"Momos, veg (steamed)",3
+MacroBase:momos-chicken,"Momos, chicken (steamed)",2
+MacroBase:maggi-cooked,"Instant noodles (masala), cooked",2
+MacroBase:chole-bhature,Chole bhature (plate),2
+MacroBase:jalebi,Jalebi,2
+MacroBase:motichoor-laddu,Motichoor laddu (boondi laddu),2
+MacroBase:peda,Peda (doodh peda),2
+USDA:2709461,French fries,2
+CoFID:17-764,Mixture (namkeen),2
+CoFID:11-797,Glucose biscuit (semi-sweet),2
+USDA:2709422,"Potato chips (wafers), salted",2
+CoFID:11-940,Rusk (toast),2
+MacroBase:filter-coffee,Filter coffee,2
+MacroBase:khoya,Khoya (mawa),2
+USDA:2707451,"Soya chunks, dry (textured soy protein)",2

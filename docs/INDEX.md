@@ -36,7 +36,7 @@ All documents are synchronized with the actual Kotlin codebase (`app/src/main/ja
 
 | Document | Description |
 | :--- | :--- |
-| **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | **Dual-Database Architecture**: Full DDL schema for read-only asset `built_in_foods.db` (FTS5 search) and user database `macrobase_user.db` (Room v3 migrations `1->2` and `2->3` with `loggedFiber`, `loggedSugar`, `loggedSodium`). |
+| **[DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)** | **Dual-Database Architecture**: Full DDL schema for read-only asset `built_in_foods.db` (word search) and user database `macrobase_user.db` (Room v3 migrations `1->2` and `2->3` with `loggedFiber`, `loggedSugar`, `loggedSodium`). |
 | **[BACKUP_FORMAT.md](BACKUP_FORMAT.md)** | **Backup & Portability Specification**: JSON serialization schema, bounded streaming ZIP archive manager, format versioning, and preservation of custom portion names (`customUnitName`). |
 | **[PRIVACY_DATA_MAP.md](PRIVACY_DATA_MAP.md)** | **Privacy Contract & Data Storage Map**: Complete audit of local file paths, zero-telemetry policy, network isolation, and on-device hardware data residency. |
 

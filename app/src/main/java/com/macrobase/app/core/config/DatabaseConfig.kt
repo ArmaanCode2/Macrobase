@@ -7,7 +7,15 @@ object DatabaseConfig {
     // Built-in Static Food Database (Bundled SQLite asset)
     const val BUILT_IN_FOODS_DB_NAME = "built_in_foods.db"
     const val BUILT_IN_FOODS_ASSET_PATH = "databases/built_in_foods.db"
+    // The bundled catalog's content fingerprint, written beside it by tools/catalog/build_catalog.py
+    const val BUILT_IN_FOODS_FINGERPRINT_ASSET_PATH = "databases/built_in_foods.fingerprint"
     const val BUILT_IN_FOODS_DB_VERSION = 1
+
+    // Branded products sold in India, from Open Food Facts (Open Database Licence): a second read-only
+    // catalog, kept in its own file by tools/catalog/build_branded.py
+    const val BRANDED_FOODS_DB_NAME = "branded_foods.db"
+    const val BRANDED_FOODS_ASSET_PATH = "databases/branded_foods.db"
+    const val BRANDED_FOODS_FINGERPRINT_ASSET_PATH = "databases/branded_foods.fingerprint"
 
     // User Data Room Database (Diary logs, custom foods, recipes, weight, water)
     const val USER_DATABASE_NAME = "macrobase_user.db"

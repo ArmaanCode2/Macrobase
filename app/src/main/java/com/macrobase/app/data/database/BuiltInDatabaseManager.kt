@@ -13,27 +13,74 @@ import java.io.FileOutputStream
 import java.io.InputStream
 
 /**
- * Thread-safe manager responsible for copying, validating, versioning,
- * and opening the read-only built-in SQLite food database (built_in_foods.db).
+ * Thread-safe manager responsible for copying, validating, versioning, and opening one of the app's
+ * read-only SQLite food catalogs: the built-in catalog (built_in_foods.db) by default, or
+ * [Catalog.BRANDED], the Open Food Facts products (branded_foods.db).
  */
 class BuiltInDatabaseManager(
-    private val context: Context
+    private val context: Context,
+    private val catalog: Catalog = Catalog.MAIN
 ) {
     private val mutex = Mutex()
     private var database: SQLiteDatabase? = null
 
+    /** The content fingerprint of the catalog in this build's assets, or null if the APK has none. */
+    private val bundledFingerprint: String? by lazy {
+        try {
+            context.assets.open(catalog.fingerprintAssetPath).bufferedReader().use { it.readText().trim() }
+        } catch (e: Exception) {
+            Log.w(TAG, "No bundled catalog fingerprint: ${e.message}")
+            null
+        }
+    }
+
     companion object {
         private const val TAG = "BuiltInDbManager"
-        const val EXPECTED_DATABASE_VERSION = "2.1.0"
-        const val EXPECTED_SCHEMA_VERSION = "1"
+        const val EXPECTED_DATABASE_VERSION = "2.4.0"
+        const val EXPECTED_SCHEMA_VERSION = "2"
         const val EXPECTED_DATASET_NAME = "macrobase_indian_foods_canonical"
+        // tools/catalog/build_branded.py DATABASE_VERSION and dataset_name
+        const val BRANDED_DATABASE_VERSION = "1.0.0"
+        const val BRANDED_DATASET_NAME = "macrobase_branded_foods_off"
 
         /**
-         * An installed catalog is reused only if it is the dataset and version bundled with this
-         * build; anything else is replaced from assets so catalog fixes reach existing installs.
+         * An installed catalog is reused only if it is the dataset, version and content bundled with
+         * this build; anything else is replaced from assets so catalog fixes reach existing installs,
+         * including a test phone that has an earlier build of the same version. Without a bundled
+         * fingerprint the version alone decides.
          */
-        fun isCurrentCatalog(datasetName: String?, databaseVersion: String?): Boolean =
-            datasetName == EXPECTED_DATASET_NAME && databaseVersion == EXPECTED_DATABASE_VERSION
+        fun isCurrentCatalog(
+            datasetName: String?,
+            databaseVersion: String?,
+            fingerprint: String? = null,
+            bundledFingerprint: String? = null,
+            expected: Catalog = Catalog.MAIN
+        ): Boolean =
+            datasetName == expected.datasetName && databaseVersion == expected.databaseVersion &&
+                (bundledFingerprint == null || fingerprint == bundledFingerprint)
+    }
+
+    /** One read-only catalog the app ships: its files, and the dataset and version it must hold. */
+    data class Catalog(
+        val dbName: String,
+        val assetPath: String,
+        val fingerprintAssetPath: String,
+        val datasetName: String,
+        val databaseVersion: String,
+        val minimumFoods: Int
+    ) {
+        companion object {
+            val MAIN = Catalog(
+                DatabaseConfig.BUILT_IN_FOODS_DB_NAME, DatabaseConfig.BUILT_IN_FOODS_ASSET_PATH,
+                DatabaseConfig.BUILT_IN_FOODS_FINGERPRINT_ASSET_PATH,
+                BuiltInDatabaseManager.EXPECTED_DATASET_NAME, BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION, 500
+            )
+            val BRANDED = Catalog(
+                DatabaseConfig.BRANDED_FOODS_DB_NAME, DatabaseConfig.BRANDED_FOODS_ASSET_PATH,
+                DatabaseConfig.BRANDED_FOODS_FINGERPRINT_ASSET_PATH,
+                BuiltInDatabaseManager.BRANDED_DATASET_NAME, BuiltInDatabaseManager.BRANDED_DATABASE_VERSION, 100
+            )
+        }
     }
 
     /**
@@ -55,7 +102,7 @@ class BuiltInDatabaseManager(
         mutex.withLock {
             database?.let { if (it.isOpen) return@withLock it }
 
-            val dbFile = context.getDatabasePath(DatabaseConfig.BUILT_IN_FOODS_DB_NAME)
+            val dbFile = context.getDatabasePath(catalog.dbName)
             ensureDatabaseInstalled(dbFile)
 
             val openedDb = SQLiteDatabase.openDatabase(
@@ -119,14 +166,14 @@ class BuiltInDatabaseManager(
             return
         }
 
-        Log.i(TAG, "Installing built-in food database from asset: ${DatabaseConfig.BUILT_IN_FOODS_ASSET_PATH}")
+        Log.i(TAG, "Installing food database from asset: ${catalog.assetPath}")
         dbFile.parentFile?.mkdirs()
 
-        val tempFile = File(dbFile.parentFile, "${DatabaseConfig.BUILT_IN_FOODS_DB_NAME}.tmp")
+        val tempFile = File(dbFile.parentFile, "${catalog.dbName}.tmp")
         if (tempFile.exists()) tempFile.delete()
 
         try {
-            context.assets.open(DatabaseConfig.BUILT_IN_FOODS_ASSET_PATH).use { input ->
+            context.assets.open(catalog.assetPath).use { input ->
                 FileOutputStream(tempFile).use { output ->
                     copyStream(input, output)
                 }
@@ -169,21 +216,23 @@ class BuiltInDatabaseManager(
             )
             validateDatabase(testDb)
 
-            // Verify dataset and version match the catalog bundled with this build
+            // Verify dataset, version and content match the catalog bundled with this build
             var datasetName: String? = null
             var databaseVersion: String? = null
+            var fingerprint: String? = null
             testDb.rawQuery(
-                "SELECT key, value FROM database_metadata WHERE key IN ('dataset_name', 'database_version')",
+                "SELECT key, value FROM database_metadata WHERE key IN ('dataset_name', 'database_version', 'content_fingerprint')",
                 null
             ).use { cursor ->
                 while (cursor.moveToNext()) {
                     when (cursor.getString(0)) {
                         "dataset_name" -> datasetName = cursor.getString(1)
                         "database_version" -> databaseVersion = cursor.getString(1)
+                        "content_fingerprint" -> fingerprint = cursor.getString(1)
                     }
                 }
             }
-            isCurrentCatalog(datasetName, databaseVersion)
+            isCurrentCatalog(datasetName, databaseVersion, fingerprint, bundledFingerprint, catalog)
         } catch (e: Exception) {
             Log.w(TAG, "Database validation check failed for ${file.name}: ${e.message}")
             false
@@ -196,7 +245,7 @@ class BuiltInDatabaseManager(
 
     private fun validateDatabase(db: SQLiteDatabase) {
         // Validate core tables exist
-        db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('foods', 'servings', 'categories', 'foods_fts', 'database_metadata')", null).use { cursor ->
+        db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('foods', 'servings', 'categories', 'food_search', 'database_metadata')", null).use { cursor ->
             if (cursor.count < 5) {
                 throw IllegalStateException("Database missing required schema tables. Found count: ${cursor.count}")
             }
@@ -206,7 +255,7 @@ class BuiltInDatabaseManager(
         db.rawQuery("SELECT COUNT(*) FROM foods", null).use { cursor ->
             if (cursor.moveToFirst()) {
                 val count = cursor.getInt(0)
-                if (count < 500) {
+                if (count < catalog.minimumFoods) {
                     throw IllegalStateException("Database has insufficient food records: $count")
                 }
             }

@@ -1,0 +1,3 @@
+# The content each released branded catalog version has; build_branded.py adds a row for a new version.
+database_version,content_fingerprint,pinned_on
+1.0.0,35ad9ec3eec82070e0faa4dc1bb57195c9e3302ad1b14e00b961511a6d473cb6,2026-10-24

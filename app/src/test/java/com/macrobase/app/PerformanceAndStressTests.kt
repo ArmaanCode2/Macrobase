@@ -22,6 +22,7 @@ import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.model.UserPreferencesBackupDto
 import com.macrobase.app.domain.model.WaterLogBackupDto
+import com.macrobase.app.testutil.catalogWordSearch
 import com.macrobase.app.domain.model.WeightEntryBackupDto
 import com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase
 import kotlinx.coroutines.runBlocking
@@ -73,7 +74,7 @@ class PerformanceAndStressTests {
     }
 
     // =========================================================================
-    // 1. BUILT-IN DATABASE VERIFICATION: SCHEMA, FTS5, INDEXES, RECORD COUNTS
+    // 1. BUILT-IN DATABASE VERIFICATION: SCHEMA, SEARCH TABLE, INDEXES, RECORD COUNTS
     // =========================================================================
 
     @Test
@@ -81,7 +82,7 @@ class PerformanceAndStressTests {
         val conn = checkNotNull(connection)
         val stmt = conn.createStatement()
 
-        // 1. Verify all required core & FTS5 tables exist
+        // 1. Verify all required core & search tables exist
         val tables = mutableSetOf<String>()
         stmt.executeQuery("SELECT name FROM sqlite_master WHERE type='table';").use { rs ->
             while (rs.next()) tables.add(rs.getString("name"))
@@ -91,7 +92,7 @@ class PerformanceAndStressTests {
         assertTrue("Table 'servings' exists", tables.contains("servings"))
         assertTrue("Table 'categories' exists", tables.contains("categories"))
         assertTrue("Table 'food_nutrients' exists", tables.contains("food_nutrients"))
-        assertTrue("Table 'foods_fts' exists", tables.contains("foods_fts"))
+        assertTrue("Table 'food_search' exists", tables.contains("food_search"))
         assertTrue("Table 'database_metadata' exists", tables.contains("database_metadata"))
 
         // 2. Verify Indexes exist in database
@@ -111,16 +112,13 @@ class PerformanceAndStressTests {
             if (rs.next()) totalServings = rs.getInt(1)
         }
 
-        assertEquals(1014, totalFoods)
-        assertEquals(1877, totalServings)
+        assertEquals(977, totalFoods)
+        assertEquals(1831, totalServings)
 
-        // 4. Verify FTS5 virtual table queries and ranking
-        val ftsQuery = "SELECT food_id, name FROM foods_fts WHERE foods_fts MATCH 'chicken*' ORDER BY rank LIMIT 10;"
-        var ftsHits = 0
-        stmt.executeQuery(ftsQuery).use { rs ->
-            while (rs.next()) ftsHits++
-        }
-        assertTrue("FTS5 query for 'chicken*' must return results", ftsHits > 0)
+        // 4. Verify the word search finds and ranks foods
+        val hits = conn.catalogWordSearch("chicken", limit = 10)
+        assertTrue("Word search for 'chicken' must return results", hits.isNotEmpty())
+        assertEquals("Word search for 'chicken' must put the everyday chicken curry first", "Chicken curry", hits.first())
     }
 
     // =========================================================================
@@ -155,36 +153,17 @@ class PerformanceAndStressTests {
 
         val latenciesMs = mutableListOf<Double>()
 
-        val searchSql = """
-            SELECT f.id, f.uuid, f.name, f.calories, f.protein, f.carbohydrates, f.fat
-            FROM foods_fts fts
-            JOIN foods f ON f.id = fts.food_id
-            WHERE foods_fts MATCH ? AND f.is_active = 1
-            ORDER BY rank
-            LIMIT 50;
-        """.trimIndent()
-
         // Warm up query cache
-        conn.prepareStatement(searchSql).use { ps ->
-            ps.setString(1, "apple*")
-            ps.executeQuery().close()
-        }
+        conn.catalogWordSearch("apple", limit = 50)
 
-        conn.prepareStatement(searchSql).use { ps ->
-            for (query in benchmarkQueries) {
-                val ftsFormatted = com.macrobase.app.data.provider.LocalFoodDatabaseProvider.sanitizeFtsQuery(query)
-                if (ftsFormatted.isBlank()) continue
-                ps.setString(1, ftsFormatted)
+        for (query in benchmarkQueries) {
+            if (com.macrobase.app.data.provider.LocalFoodDatabaseProvider.searchWords(query).isEmpty()) continue
 
-                val elapsedNanos = measureNanoTime {
-                    ps.executeQuery().use { rs ->
-                        var rowCount = 0
-                        while (rs.next()) rowCount++
-                    }
-                }
-                val ms = elapsedNanos / 1_000_000.0
-                latenciesMs.add(ms)
+            val elapsedNanos = measureNanoTime {
+                conn.catalogWordSearch(query, limit = 50)
             }
+            val ms = elapsedNanos / 1_000_000.0
+            latenciesMs.add(ms)
         }
 
         latenciesMs.sort()

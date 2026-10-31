@@ -1,0 +1,36 @@
+MacroBase built-in food catalog: data sources
+
+Indian Nutrient Databank (INDB)
+  Vijayakumar et al., Current Developments in Nutrition 8(7):103790, 2024.
+  https://github.com/lindsayjaacks/Indian-Nutrient-Databank-INDB-
+  Published without a licence; MacroBase uses it with this credit.
+  Recipes and their nutrition per 100 g. Fried foods, soups and some portions are corrected in the
+  catalog, some with USDA or CoFID measured values; tools/catalog in the source repository lists
+  every change and its reference.
+
+USDA FoodData Central: SR Legacy (April 2018) and Foundation Foods (April 2026)
+  U.S. Department of Agriculture, Agricultural Research Service. FoodData Central.
+  https://fdc.nal.usda.gov/
+  Public domain (CC0 1.0).
+
+USDA FoodData Central: FNDDS 2021-2023 (October 2024)
+  Food and Nutrient Database for Dietary Studies, U.S. Department of Agriculture, Agricultural
+  Research Service. https://fdc.nal.usda.gov/  Public domain (CC0 1.0).
+
+UK Composition of Foods Integrated Dataset (CoFID) 2021, McCance and Widdowson's
+  https://www.gov.uk/government/publications/composition-of-foods-integrated-dataset-cofid
+  Contains public sector information licensed under the Open Government Licence v3.0:
+  https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+
+MacroBase standard recipes
+  Dishes worked out from the foods above (tools/catalog/recipes.csv in the source repository).
+
+Open Food Facts: branded products sold in India
+  Open Food Facts contributors, https://world.openfoodfacts.org/
+  The branded product database in this app, databases/branded_foods.db, is made available under
+  the Open Database Licence 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+  Its individual contents are under the Database Contents Licence 1.0:
+  https://opendatacommons.org/licenses/dbcl/1-0/
+  The file itself is in the app package (assets/databases/branded_foods.db), and the source repository
+  holds it as tools/catalog/branded/branded_foods.csv with the scripts that build it.
+  Products were chosen and checked by tools/catalog/import_branded_foods.py; values are as labelled.

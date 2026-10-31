@@ -102,7 +102,11 @@ import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.qualifier.named
 import org.koin.dsl.module
+
+/** The Koin name of the branded catalog's BuiltInDatabaseManager. */
+const val BRANDED_CATALOG = "branded_catalog"
 
 val databaseModule = module {
     single { UserDatabase.create(get()) }
@@ -115,7 +119,9 @@ val databaseModule = module {
     single { com.macrobase.app.data.repository.DiaryFoodLinkRepair(get()) }
 
     single { BuiltInDatabaseManager(get()) }
-    single<FoodDataProvider> { LocalFoodDatabaseProvider(get()) }
+    // Open Food Facts products, in their own file under the Open Database Licence
+    single(named(BRANDED_CATALOG)) { BuiltInDatabaseManager(get(), BuiltInDatabaseManager.Catalog.BRANDED) }
+    single<FoodDataProvider> { LocalFoodDatabaseProvider(get(), get(named(BRANDED_CATALOG))) }
 }
 
 /** Logs a failure in background work instead of taking the app down: saved figures are only a shortcut. */

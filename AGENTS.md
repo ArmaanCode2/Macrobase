@@ -21,6 +21,8 @@ MacroBase is an offline-first, Android-only nutrition-tracking application engin
    - Repositories abstract underlying Room entities, SQLite cursors, or DataStore preferences into clean Domain models (`Food`, `Serving`, `Nutrition`, `DiaryEntry`).
 3. **Hard Separation Between Built-in and User Data**:
    - **Asset Database (`built_in_foods.db`)**: Read-only SQLite database bundled at `app/src/main/assets/databases/built_in_foods.db`. Managed via `BuiltInDatabaseManager` and `LocalFoodDatabaseProvider`. Must be opened with `SQLiteDatabase.OPEN_READONLY`. **Never write to or alter the asset database at runtime.**
+   - The asset is built only by `tools/catalog/build_catalog.py` from the foods CSV and the curation files in `tools/catalog/` (see its README), with its content fingerprint in `built_in_foods.fingerprint` beside it. Never edit the `.db` file by hand or with another script. Catalog carbohydrate is total carbohydrate with fibre in it wherever the food states fibre: the build converts INDB's and CoFID's available carbohydrate, so section 2.3's net carbs hold for them. INDB counts the whole pot of frying oil as eaten; `tools/catalog/corrections.csv` takes it out of every fried food it ships.
+   - **Branded Database (`branded_foods.db`)**: A second read-only asset of packaged products from Open Food Facts, built only by `tools/catalog/build_branded.py` and managed by a `BuiltInDatabaseManager` with `Catalog.BRANDED`. It is under the Open Database Licence (ODbL), so it stays a separate file: never copy its rows into `built_in_foods.db` or the main catalog's rows into it, and keep the Open Food Facts credit in Preferences and `assets/licenses/Food-data-sources.txt`.
    - **User Database (`macrobase_user.db`)**: Read/write AndroidX Room database (`UserDatabase`) storing personal logs (`diary_entries`, `custom_foods`, `recipes`, `weight_entries`, `water_logs`).
    - **User Preferences**: Daily goals and display preferences persist via AndroidX DataStore (`user_goals`, `user_prefs`).
 4. **Immutable Historical Snapshot Strategy**:
@@ -109,7 +111,7 @@ $$\text{Net Carbs} = \max(0.0, \text{Carbohydrates} - \text{Dietary Fiber})$$
 
 ### 4.2. ID Space Partitioning
 To prevent primary key collisions across federated food sources within a unified `Food` model:
-- **Built-in Foods**: large hash IDs from `built_in_foods.db` (the smallest is `1,896,880,878,330,341`), never inside the user ranges below. Do not test `foodId < 100_000_000` to find a catalog food: that matches no current catalog food. A catalog food id is `foodId > 0 && !(foodId >= CUSTOM_FOOD_ID_OFFSET && foodId < Recipe.FOOD_ID_RANGE_END)`, as `DiaryDao.getRecentCatalogFoods` uses.
+- **Built-in Foods**: large hash IDs from `built_in_foods.db` (the smallest is `1,896,880,878,330,341`) and `branded_foods.db` (the smallest is `221,146,044,269,319`; the two files never share an id, which `build_branded.py` checks), never inside the user ranges below. Do not test `foodId < 100_000_000` to find a catalog food: that matches no current catalog food. A catalog food id is `foodId > 0 && !(foodId >= CUSTOM_FOOD_ID_OFFSET && foodId < Recipe.FOOD_ID_RANGE_END)`, as `DiaryDao.getRecentCatalogFoods` uses.
 - **Custom User Foods**: IDs offset by `CUSTOM_FOOD_ID_OFFSET = 100_000_000L` (`FoodRepositoryImpl`):
   $$\text{foodId} = 100\_000\_000\text{L} + \text{customFoodEntity.id}$$
 - **Recipes**: IDs offset by `Recipe.FOOD_ID_OFFSET = 200_000_000L`, up to `Recipe.FOOD_ID_RANGE_END` (`300_000_000L`):
@@ -178,3 +180,4 @@ Before submitting or approving any modification:
 - [ ] Verify no raw `â€¢` mojibake or unescaped non-ASCII characters exist in UI strings.
 - [ ] Verify all floating-point calorie/macro numbers are rounded using `roundToInt()`.
 - [ ] Verify Room schema migrations remain non-destructive (nullable or with default values), and that `app/schemas` holds the JSON for the new version.
+- [ ] If the built-in catalog or `tools/catalog/` changed: `python tools/catalog/build_catalog.py --check`, `python tools/catalog/build_branded.py --check` and `python -m unittest discover tools/catalog` pass. A content change needs a new `DATABASE_VERSION` matching `BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION`, and a branded change a new `build_branded.DATABASE_VERSION` matching `BuiltInDatabaseManager.BRANDED_DATABASE_VERSION`.

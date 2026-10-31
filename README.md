@@ -13,7 +13,7 @@ For developers, architects, and AI coding agents, comprehensive technical docume
   - **[Architecture (docs/ARCHITECTURE.md)](docs/ARCHITECTURE.md)**: Clean Architecture layers, Koin DI modules, and immutable historical snapshotting.
   - **[Calculation Engine (docs/CALCULATION_ENGINE.md)](docs/CALCULATION_ENGINE.md)**: Exact mathematical formulas for serving multipliers, Atwater energy, recipes, net carbs, and aggregations.
   - **[Known Pitfalls & Guardrails (docs/KNOWN_PITFALLS_AND_GUARDRAILS.md)](docs/KNOWN_PITFALLS_AND_GUARDRAILS.md)**: Critical engineering pitfalls and regression prevention catalog.
-  - **[Database Schema (docs/DATABASE_SCHEMA.md)](docs/DATABASE_SCHEMA.md)**: Schemas for read-only `built_in_foods.db` (FTS5) and Room `macrobase_user.db` (v3).
+  - **[Database Schema (docs/DATABASE_SCHEMA.md)](docs/DATABASE_SCHEMA.md)**: Schemas for read-only `built_in_foods.db` and Room `macrobase_user.db` (v3).
   - **[Data Pipeline (docs/DATA_PIPELINE.md)](docs/DATA_PIPELINE.md)**: Data lifecycle from search and basket to diary persistence and edit mode.
   - **[Basket Architecture (docs/BASKET_ARCHITECTURE.md)](docs/BASKET_ARCHITECTURE.md)**: In-memory staging repository and bulk editing flow.
 
@@ -21,14 +21,14 @@ For developers, architects, and AI coding agents, comprehensive technical docume
 
 ## Overview
 
-Most nutrition tracking apps rely on cloud services, subscriptions, and telemetry. MacroBase stores all user data locally on the device using SQLite and Room. It includes a pre-packaged offline food database with FTS5 search, an on-device OCR scanner for physical nutrition labels, and a centralized food basket that lets you edit multiple items in bulk before committing them to your diary.
+Most nutrition tracking apps rely on cloud services, subscriptions, and telemetry. MacroBase stores all user data locally on the device using SQLite and Room. It includes a pre-packaged offline Indian food database with word search, an on-device OCR scanner for physical nutrition labels, and a centralized food basket that lets you edit multiple items in bulk before committing them to your diary.
 
 ---
 
 ## Key Features
 
 - **Daily Dashboard & Nutrition Summary**: Tracks daily calorie limits and macronutrient targets (protein, carbs, fat) across six meal slots: Breakfast, Lunch, Dinner, AM Snack, PM Snack, and Late Snack. Includes an in-depth daily nutrition summary modal showing secondary nutrients (dietary fiber, sugar, sodium) with mathematical rounding.
-- **Fast Offline Search**: Instant food search using SQLite FTS5 full-text indexing over tens of thousands of built-in USDA entries, custom foods, and recipes with categorized search results.
+- **Fast Offline Search**: Instant food search over the built-in Indian food catalog, packaged products sold in India (Open Food Facts), custom foods and recipes: word starts in any order, other spellings and Hindi names, everyday foods first.
 - **Centralized Food Basket**: A bulk editing staging repository (`InMemoryBasketRepository`) for pending logs. Edit quantities and serving units inline, apply common dates or meal types across all items, and review total calories and macros before saving.
 - **Diary Entry Editing**: Direct inline editing of previously logged diary entries with pre-populated quantities and instant historical recalculation.
 - **On-Device Nutrition Label Scanner**: Scan physical food labels using the device camera. The app parses serving sizes, calories, and nutrient breakdown directly on-device using ML Kit Text Recognition with 100% offline privacy.
@@ -47,7 +47,7 @@ The app is built following Clean Architecture principles with clear separation o
 - **UI**: Jetpack Compose with the app's own "Mentor" design system on Material 3 (see `docs/UI_UX_SPECIFICATION.md`): a pure black canvas, the Jura typeface, and a pill bottom bar with five tabs (Home, Foods, Stats, Rank, Profile).
 - **Language**: Kotlin (Coroutines, Flow, StateFlow).
 - **Local Storage**:
-  - `built_in_foods.db`: Pre-packaged read-only SQLite database with FTS5 virtual tables.
+  - `built_in_foods.db`: Pre-packaged read-only SQLite database, built by `tools/catalog/build_catalog.py`.
   - `macrobase_user.db`: Room database (v3) storing user diary entries (with historical snapshot macros and secondary nutrients: fiber, sugar, sodium), custom foods, recipes, weight, and water logs.
 - **Dependency Injection**: Koin (modularized into `databaseModule`, `repositoryModule`, `useCaseModule`, `viewModelModule`).
 - **Navigation**: Jetpack Navigation Compose with type-safe routing arguments.
@@ -75,7 +75,7 @@ macrobase/
 │   └── src/
 │       ├── main/
 │       │   ├── assets/
-│       │   │   ├── databases/built_in_foods.db  # Read-only USDA catalog (FTS5)
+│       │   │   ├── databases/built_in_foods.db  # Read-only Indian food catalog
 │       │   ├── java/com/macrobase/app/
 │       │   │   ├── core/           # Design system, navigation, DI, utilities
 │       │   │   ├── data/           # Room entities, DAOs, repositories, database

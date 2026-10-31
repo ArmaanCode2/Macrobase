@@ -971,10 +971,28 @@ fun PreferencesScreen(
                 .fillMaxWidth()
                 .padding(top = AppSpacing.xl)
         )
+        // Credit the food catalog's sources ask for (assets/licenses/Food-data-sources.txt)
+        Text(
+            text = FOOD_DATA_CREDIT,
+            style = AppTypography.Caption,
+            color = AppColors.TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = AppSpacing.sm)
+        )
         // Clears the bottom dock
         Spacer(modifier = Modifier.height(LocalDockInset.current))
     }
 }
+
+/** The credit the food catalog's sources ask for; CoFID's Open Government Licence requires its statement. */
+internal const val FOOD_DATA_CREDIT =
+    "Food data: Indian Nutrient Databank (INDB); USDA FoodData Central; UK CoFID 2021, which contains " +
+        "public sector information licensed under the Open Government Licence v3.0 " +
+        "(nationalarchives.gov.uk/doc/open-government-licence/version/3). Branded products: Open Food Facts " +
+        "contributors (openfoodfacts.org), available under the Open Database Licence " +
+        "(opendatacommons.org/licenses/odbl/1-0)."
 
 private val FieldGap = 12.dp
 private val NoteStyle = AppTypography.Body2.copy(fontSize = 12.5.sp, lineHeight = 18.sp)

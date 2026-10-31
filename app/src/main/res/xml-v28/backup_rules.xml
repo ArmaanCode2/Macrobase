@@ -9,4 +9,5 @@
     <include domain="file" path="." requireFlags="deviceToDeviceTransfer" />
     <include domain="sharedpref" path="." requireFlags="deviceToDeviceTransfer" />
     <exclude domain="database" path="built_in_foods.db" />
+    <exclude domain="database" path="branded_foods.db" />
 </full-backup-content>

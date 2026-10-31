@@ -13,6 +13,7 @@ import com.macrobase.app.domain.model.Food
 import com.macrobase.app.domain.model.Nutrition
 import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.Serving
+import com.macrobase.app.testutil.catalogWordSearch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -31,7 +32,7 @@ private val catalogFile: File
     get() = listOf(File("src/main/assets/databases/built_in_foods.db"), File("app/src/main/assets/databases/built_in_foods.db"))
         .first { it.isFile }
 
-/** BUG-054: the query keeps every script's letters, and the catalog's own tokenizer folds accents. */
+/** BUG-054: the query keeps every script's letters, and accents fold the same way in the query and the catalog. */
 class P4PhaseFourSearchQueryTests {
 
     private lateinit var catalog: Connection
@@ -47,24 +48,25 @@ class P4PhaseFourSearchQueryTests {
     }
 
     @Test
-    fun wordsBecomeQuotedPrefixTerms() {
-        assertEquals("\"greek\"* \"yogurt\"*", LocalFoodDatabaseProvider.sanitizeFtsQuery("greek  yogurt"))
-        assertEquals("\"low\"* \"fat\"*", LocalFoodDatabaseProvider.sanitizeFtsQuery("low-fat"))
-        // A quote the user typed is not FTS5 syntax
-        assertEquals("\"say\"* \"cheese\"*", LocalFoodDatabaseProvider.sanitizeFtsQuery("say \"cheese\""))
+    fun theQueryBecomesFoldedWords() {
+        assertEquals(listOf("greek", "yogurt"), LocalFoodDatabaseProvider.searchWords("Greek  yogurt"))
+        assertEquals(listOf("low", "fat"), LocalFoodDatabaseProvider.searchWords("low-fat"))
+        // A quote or a LIKE wildcard the user typed is not part of a word
+        assertEquals(listOf("say", "cheese"), LocalFoodDatabaseProvider.searchWords("say \"cheese\""))
+        assertEquals(listOf("50", "off", "peak"), LocalFoodDatabaseProvider.searchWords("50% off_peak"))
     }
 
     @Test
-    fun accentedAndNonLatinLettersAreKept() {
-        assertEquals("\"jalape\u00f1o\"*", LocalFoodDatabaseProvider.sanitizeFtsQuery("jalape\u00f1o"))
-        // Hindi: the vowel sign is a combining mark and stays in the query
-        assertEquals("\"\u0926\u093e\u0932\"*", LocalFoodDatabaseProvider.sanitizeFtsQuery("\u0926\u093e\u0932"))
+    fun accentsFoldAndNonLatinLettersAreKept() {
+        assertEquals(listOf("jalapeno"), LocalFoodDatabaseProvider.searchWords("jalape\u00f1o"))
+        // Hindi: the vowel sign is a combining mark and stays in the word
+        assertEquals(listOf("\u0926\u093e\u0932"), LocalFoodDatabaseProvider.searchWords("\u0926\u093e\u0932"))
     }
 
     @Test
-    fun nothingSearchableGivesAnEmptyQuery() {
-        assertEquals("", LocalFoodDatabaseProvider.sanitizeFtsQuery("!!!"))
-        assertEquals("", LocalFoodDatabaseProvider.sanitizeFtsQuery("  "))
+    fun nothingSearchableGivesNoWords() {
+        assertEquals(emptyList<String>(), LocalFoodDatabaseProvider.searchWords("!!!"))
+        assertEquals(emptyList<String>(), LocalFoodDatabaseProvider.searchWords("  "))
     }
 
     @Test
@@ -75,35 +77,79 @@ class P4PhaseFourSearchQueryTests {
         assertEquals("\u0926\u0942\u0927", LocalFoodDatabaseProvider.foldForNormalizedName("\u0926\u0942\u0927"))
     }
 
-    private fun ftsMatches(query: String): Int =
-        catalog.prepareStatement("SELECT COUNT(*) FROM foods_fts WHERE foods_fts MATCH ?").use { statement ->
-            statement.setString(1, LocalFoodDatabaseProvider.sanitizeFtsQuery(query))
-            statement.executeQuery().use { it.next(); it.getInt(1) }
-        }
-
-    // The table's unicode61 tokenizer removes the accent, so the accented word finds the plain one
+    // The catalog's words are folded when it is built, so the accented word finds the plain one
     @Test
     fun anAccentedQueryFindsThePlainSpelling() {
-        val plain = ftsMatches("puree")
+        val plain = catalog.catalogWordSearch("puree")
 
-        assertTrue(plain > 0)
-        assertEquals(plain, ftsMatches("pur\u00e9e"))
+        assertTrue(plain.isNotEmpty())
+        assertEquals(plain, catalog.catalogWordSearch("pur\u00e9e"))
     }
 
-    // A fragment inside a word has no full-text match, which is why the LIKE search follows
+    // A fragment inside a word has no word match, which is why the substring search follows
     @Test
-    fun aFragmentInsideAWordHasNoFullTextMatchButALikeMatch() {
-        assertEquals(0, ftsMatches("ancake"))
+    fun aFragmentInsideAWordHasNoWordMatchButASubstringMatch() {
+        assertEquals(emptyList<String>(), catalog.catalogWordSearch("ancake"))
         val likeMatches = catalog.prepareStatement("SELECT COUNT(*) FROM foods WHERE normalized_name LIKE '%ancake%'").use { statement ->
             statement.executeQuery().use { it.next(); it.getInt(1) }
         }
         assertTrue(likeMatches > 0)
     }
+
+    // "tea" is inside "gateau" and "lassi" inside "classic": neither is a word starting that way
+    @Test
+    fun aQueryWordMatchesOnlyTheStartOfAWord() {
+        assertTrue(catalog.catalogWordSearch("tea").none { it.contains("gateau", ignoreCase = true) })
+        assertTrue(catalog.catalogWordSearch("lassi").none { it.contains("classic", ignoreCase = true) })
+    }
+
+    @Test
+    fun queryWordsMatchInAnyOrder() {
+        assertEquals("Chilli paneer", catalog.catalogWordSearch("paneer chilli").first())
+        assertEquals("Chilli paneer", catalog.catalogWordSearch("chilli paneer").first())
+    }
+
+    @Test
+    fun otherSpellingsAndAliasesFindTheFood() {
+        assertTrue(catalog.catalogWordSearch("barfi").contains("Plain burfi (Burfi)"))
+        assertEquals("Chickpeas curry (Safed channa curry)", catalog.catalogWordSearch("chole").first())
+        assertEquals("Split bengal gram dal (Channa dal)", catalog.catalogWordSearch("chana dal").first())
+    }
+
+    // An everyday food comes before a rarer one with the same word
+    @Test
+    fun commonFoodsComeFirst() {
+        assertEquals("Boiled rice (Uble chawal)", catalog.catalogWordSearch("rice").first())
+        assertEquals("Hot tea (Garam Chai)", catalog.catalogWordSearch("tea").first())
+    }
+
+    // "kheer" starts "Kheere ka raita" and "egg" starts "eggplant", but a food with the whole word comes first
+    @Test
+    fun aWholeWordComesBeforeAWordThatOnlyStartsWithIt() {
+        assertTrue(catalog.catalogWordSearch("kheer").take(5).none { it.startsWith("Cucumber raita") })
+        assertTrue(catalog.catalogWordSearch("egg").take(5).none { it.startsWith("Brinjal") })
+    }
+
+    // "(curry)" describes "Cabbage rolls (curry)"; the name before the brackets is the food's name
+    @Test
+    fun textInBracketsIsNotTheFoodsName() {
+        assertTrue(catalog.catalogWordSearch("curry").first() in setOf("Chicken curry", "Egg curry (Anda curry)", "Fish curry (Machli curry)"))
+        assertEquals("Potato curry (Aloo ki sabzi)", catalog.catalogWordSearch("potato curry").first())
+        assertEquals("Pea curry (Matar ki sabzi)", catalog.catalogWordSearch("pea curry").first())
+    }
+
+    @Test
+    fun anApostropheJoinsItsWord() {
+        assertTrue(catalog.catalogWordSearch("ladys finger").contains("Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji)"))
+        assertEquals("Okra/Lady's fingers fry (Bhindi sabzi/sabji/subji)", catalog.catalogWordSearch("ladies finger").first())
+        assertEquals("Crispy okra/Crispy lady's fingers (Karare bhindi)", catalog.catalogWordSearch("crispy ladys").first())
+        assertEquals(listOf("ladys", "fingers"), LocalFoodDatabaseProvider.searchWords("Lady\u2019s fingers"))
+    }
 }
 
 /**
- * BUG-054 through the real provider and the bundled catalog. Robolectric's SQLite has no FTS5, so
- * every search here takes the LIKE path; the JDBC tests above cover the full-text path.
+ * BUG-054 through the real provider and the bundled catalog: the word search and then the
+ * substring search, as a phone runs them. The JDBC tests above run the word search SQL alone.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -127,6 +173,16 @@ class P4PhaseFourCatalogSearchTests {
 
         assertTrue(foods.isNotEmpty())
         assertTrue(foods.joinToString { it.name }, foods.all { it.name.lowercase().contains("ancake") })
+    }
+
+    // "nut" starts a word in a few names and sits inside many more (peanut, coconut): both are found
+    @Test
+    fun aFragmentInsideAWordIsFoundAfterTheWordMatches() = runBlocking {
+        val names = provider.searchFoods("nut", 30).map { it.name }
+
+        assertTrue(names.joinToString(), Regex("""\bnut""", RegexOption.IGNORE_CASE).containsMatchIn(names.first()))
+        assertTrue(names.joinToString(), names.any { it.contains("coconut", ignoreCase = true) })
+        assertEquals(names.size, names.toSet().size)
     }
 
     @Test

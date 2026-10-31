@@ -8,6 +8,7 @@ import com.macrobase.app.domain.model.Nutrition
 import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.ServingUnit
 import com.macrobase.app.domain.usecase.CalculateNutritionForServingUseCase
+import com.macrobase.app.testutil.catalogWordSearch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -21,7 +22,7 @@ import java.sql.DriverManager
 
 /**
  * Direct SQLite tests against the production asset database (built_in_foods.db)
- * verifying schema structure, FTS5 search, metadata versioning, portion mapping,
+ * verifying schema structure, word search, metadata versioning, portion mapping,
  * and nutrition calculation accuracy using real database records.
  */
 class DatabaseIntegrationTests {
@@ -67,7 +68,7 @@ class DatabaseIntegrationTests {
         assertTrue("Table 'servings' must exist", tables.contains("servings"))
         assertTrue("Table 'categories' must exist", tables.contains("categories"))
         assertTrue("Table 'food_nutrients' must exist", tables.contains("food_nutrients"))
-        assertTrue("Table 'foods_fts' must exist", tables.contains("foods_fts"))
+        assertTrue("Table 'food_search' must exist", tables.contains("food_search"))
         assertTrue("Table 'database_metadata' must exist", tables.contains("database_metadata"))
 
         // 2. Verify metadata records
@@ -79,14 +80,15 @@ class DatabaseIntegrationTests {
 
         // Must equal the version the app expects, or the copied asset fails validation on device
         assertEquals(BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION, metadata["database_version"])
-        assertEquals("1", metadata["schema_version"])
-        assertEquals("1014", metadata["total_foods"])
-        assertEquals("1877", metadata["total_servings"])
-        assertEquals("18088", metadata["total_food_nutrients"])
+        assertEquals(BuiltInDatabaseManager.EXPECTED_DATASET_NAME, metadata["dataset_name"])
+        assertEquals(BuiltInDatabaseManager.EXPECTED_SCHEMA_VERSION, metadata["schema_version"])
+        assertEquals("977", metadata["total_foods"])
+        assertEquals("1831", metadata["total_servings"])
+        assertEquals("17103", metadata["total_food_nutrients"])
     }
 
     @Test
-    fun builtInDatabase_fts5Search_findsAllRequiredSampleFoods() {
+    fun builtInDatabase_search_findsAllRequiredSampleFoods() {
         val conn = checkNotNull(connection)
         val sampleQueries = listOf(
             "paneer",
@@ -105,30 +107,8 @@ class DatabaseIntegrationTests {
         )
 
         for (query in sampleQueries) {
-            val ftsQuery = "$query*"
-            val pstmt = conn.prepareStatement("""
-                SELECT f.id, f.name, f.calories, f.protein, f.carbohydrates, f.fat, c.name as cat_name
-                FROM foods_fts fts
-                JOIN foods f ON f.id = fts.food_id
-                LEFT JOIN categories c ON f.category_id = c.id
-                WHERE foods_fts MATCH ? AND f.is_active = 1
-                ORDER BY rank
-                LIMIT 5;
-            """)
-            pstmt.setString(1, ftsQuery)
-            val rs = pstmt.executeQuery()
-
-            var count = 0
-            var firstFoodName = ""
-            while (rs.next()) {
-                count++
-                if (firstFoodName.isEmpty()) {
-                    firstFoodName = rs.getString("name")
-                }
-            }
-
-            assertTrue("Search query '$query' should return at least 1 match (found $count)", count > 0)
-            pstmt.close()
+            val found = conn.catalogWordSearch(query, limit = 5)
+            assertTrue("Search query '$query' should return at least 1 match (found ${found.size})", found.isNotEmpty())
         }
     }
 
@@ -136,27 +116,12 @@ class DatabaseIntegrationTests {
     fun builtInDatabase_prefixSearchAndMultiWordSearch_worksAccurately() {
         val conn = checkNotNull(connection)
 
-        // 1. Prefix search: 'paneer*'
-        val pstmt1 = conn.prepareStatement("""
-            SELECT f.id, f.name FROM foods_fts fts
-            JOIN foods f ON f.id = fts.food_id
-            WHERE foods_fts MATCH ? LIMIT 5;
-        """)
-        pstmt1.setString(1, "paneer*")
-        val rs1 = pstmt1.executeQuery()
-        assertTrue("Prefix search for 'paneer*' must return results", rs1.next())
-        pstmt1.close()
+        // 1. Prefix search: the start of a word finds it
+        assertTrue("Prefix search for 'pane' must return paneer dishes", conn.catalogWordSearch("pane").any { it.contains("paneer", ignoreCase = true) })
 
-        // 2. Multi-word search: 'chilli paneer'
-        val pstmt2 = conn.prepareStatement("""
-            SELECT f.id, f.name FROM foods_fts fts
-            JOIN foods f ON f.id = fts.food_id
-            WHERE foods_fts MATCH ? LIMIT 5;
-        """)
-        pstmt2.setString(1, "chilli* paneer*")
-        val rs2 = pstmt2.executeQuery()
-        assertTrue("Multi-word search for 'chilli* paneer*' must return results", rs2.next())
-        pstmt2.close()
+        // 2. Multi-word search, in either order
+        assertTrue("Multi-word search for 'chilli paneer' must find Chilli paneer", conn.catalogWordSearch("chilli paneer").contains("Chilli paneer"))
+        assertTrue("Multi-word search for 'paneer chilli' must find Chilli paneer", conn.catalogWordSearch("paneer chilli").contains("Chilli paneer"))
     }
 
     @Test
@@ -236,7 +201,7 @@ class DatabaseIntegrationTests {
             nutrition = Nutrition(
                 calories = rs.getDouble("calories"),     // 202.31 kcal per 100g
                 proteinGrams = rs.getDouble("protein"),  // 5.88g per 100g
-                carbsGrams = rs.getDouble("carbohydrates"), // 35.65g per 100g
+                carbsGrams = rs.getDouble("carbohydrates"), // 41.96g per 100g: INDB's 35.65g available carbohydrate plus 6.31g fibre
                 fatGrams = rs.getDouble("fat")           // 3.56g per 100g
             )
         )
@@ -255,7 +220,7 @@ class DatabaseIntegrationTests {
         val calculated200g = calculateNutritionUseCase(food, standardServing, 2.0)
         assertEquals(404.62, calculated200g.calories, 0.1)
         assertEquals(11.76, calculated200g.proteinGrams, 0.01)
-        assertEquals(71.30, calculated200g.carbsGrams, 0.01)
+        assertEquals(83.92, calculated200g.carbsGrams, 0.01)
         assertEquals(7.12, calculated200g.fatGrams, 0.01)
     }
 
@@ -301,11 +266,13 @@ class DatabaseIntegrationTests {
             assertEquals("Food ${rs.getLong("id")} must have exactly one default serving", 1, rs.getInt("defaults"))
             assertEquals("Food ${rs.getLong("id")} must default to 100 g", 1, rs.getInt("hundred_gram_defaults"))
         }
-        assertEquals(1014, foods)
+        assertEquals(977, foods)
     }
 
-    // Mirrors PORTION_BOUNDS_G in tools/derive_indb_portion_weights.py: INDB sometimes records a
-    // whole recipe yield as "1 bowl", which must not ship as a single portion.
+    // Mirrors the container units of PORTION_BOUNDS_G in tools/catalog/build_catalog.py: INDB
+    // sometimes records a whole recipe yield as "1 bowl", which must not ship as a single portion.
+    // USDA's portions are measured weights of that food (a cup of spinach is 30 g), so only INDB's
+    // cooked-dish portions are held to these ranges.
     @Test
     fun builtInDatabase_portionWeightsArePlausible() {
         val bounds = mapOf(
@@ -315,21 +282,24 @@ class DatabaseIntegrationTests {
             "ice cream cup" to 40.0..300.0, "ice-cream cup" to 40.0..300.0, "souffle cup" to 40.0..300.0,
             "glass" to 120.0..500.0, "tall glass" to 150.0..600.0, "juice glass" to 100.0..400.0,
             "sundae glass" to 100.0..500.0, "tall stemmed glass" to 100.0..500.0,
-            "bowl" to 80.0..600.0, "small bowl" to 50.0..400.0, "soup bowl" to 120.0..600.0, "curry bowl" to 80.0..600.0
+            "bowl" to 80.0..600.0, "small bowl" to 50.0..400.0, "soup bowl" to 120.0..600.0, "curry bowl" to 80.0..600.0,
+            "plate" to 60.0..500.0
         )
         val conn = checkNotNull(connection)
         val rs = conn.createStatement().executeQuery(
-            "SELECT s.unit_type, s.gram_weight, f.name FROM servings s JOIN foods f ON f.id = s.food_id WHERE s.description != '100 g';"
+            "SELECT s.unit_type, s.gram_weight, f.name, f.source_id FROM servings s JOIN foods f ON f.id = s.food_id WHERE s.description != '100 g';"
         )
         var portions = 0
         while (rs.next()) {
             portions++
-            val unit = rs.getString("unit_type").trim().lowercase()
             val weight = rs.getDouble("gram_weight")
+            assertTrue("${rs.getString("name")}: a portion weighs $weight g", weight > 0.0 && weight <= 2000.0)
+            if (!rs.getString("source_id").startsWith("INDB:")) continue
+            val unit = rs.getString("unit_type").trim().lowercase()
             val range = bounds[unit] ?: 1.0..1000.0
             assertTrue("${rs.getString("name")}: 1 $unit = $weight g is outside $range", weight in range)
         }
-        assertEquals(863, portions)
+        assertEquals(854, portions)
     }
 
     @Test
@@ -339,7 +309,7 @@ class DatabaseIntegrationTests {
         val expectations = listOf(
             Triple("Mutton biryani/biriyani", "1 plate", 396.0),
             Triple("Chapati/Roti", "1 chapati", 73.0),
-            Triple("Butter icing", "1 tablespoon", 81.0)
+            Triple("Coconut chutney (Nariyal ki chutney)", "1 tablespoon", 67.0)
         )
         for ((name, portion, expectedKcal) in expectations) {
             val pstmt = conn.prepareStatement("""
@@ -370,6 +340,55 @@ class DatabaseIntegrationTests {
         }
     }
 
+    // INDB counts the whole pot of frying oil as eaten (a poori at 125 g and 921 kcal, a bowl of
+    // kadhi with pakodies at 2,367 kcal); corrections.csv takes it out and reweighs the portion.
+    @Test
+    fun builtInDatabase_friedFoodsCountOnlyTheOilTheyKeep() {
+        val conn = checkNotNull(connection)
+        val expectations = listOf(
+            Triple("Poori", "1 poori", 102.4),
+            Triple("Besan kadhi with pakodies", "1 bowl", 336.9)
+        )
+        for ((name, portion, expectedKcal) in expectations) {
+            val pstmt = conn.prepareStatement("""
+                SELECT f.calories, f.fat, s.gram_weight
+                FROM foods f JOIN servings s ON s.food_id = f.id
+                WHERE f.name = ? AND s.description = ?;
+            """)
+            pstmt.setString(1, name)
+            pstmt.setString(2, portion)
+            val rs = pstmt.executeQuery()
+            assertTrue("$name must have a '$portion' serving", rs.next())
+            assertEquals("$name, $portion", expectedKcal, rs.getDouble("calories") * rs.getDouble("gram_weight") / 100.0, 1.0)
+            assertTrue("$name: ${rs.getDouble("fat")} g fat per 100 g", rs.getDouble("fat") < 30.0)
+            pstmt.close()
+        }
+    }
+
+    // tools/catalog/recipes.csv: a standard recipe's portion is what its batch weighs over its pieces
+    @Test
+    fun builtInDatabase_standardRecipePortionsCarryTheirRecipesEnergy() {
+        val conn = checkNotNull(connection)
+        val expectations = listOf(
+            Triple("Vada pav", "1 vada pav", 258.0),
+            Triple("Momos, veg (steamed)", "1 momo", 35.0),
+            Triple("Motichoor laddu (boondi laddu)", "1 laddu", 149.0)
+        )
+        for ((name, portion, expectedKcal) in expectations) {
+            conn.prepareStatement("""
+                SELECT f.calories, f.source_name, s.gram_weight FROM foods f JOIN servings s ON s.food_id = f.id
+                WHERE f.name = ? AND s.description = ?;
+            """).use { pstmt ->
+                pstmt.setString(1, name)
+                pstmt.setString(2, portion)
+                val rs = pstmt.executeQuery()
+                assertTrue("$name must have a '$portion' serving", rs.next())
+                assertEquals("MacroBase standard recipes", rs.getString("source_name"))
+                assertEquals("$name, $portion", expectedKcal, rs.getDouble("calories") * rs.getDouble("gram_weight") / 100.0, 1.5)
+            }
+        }
+    }
+
     @Test
     fun catalogVersionCheck_replacesOlderOrForeignCatalogs() {
         val expected = BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION
@@ -378,5 +397,28 @@ class DatabaseIntegrationTests {
         assertTrue("A pre-fix 2.0.0 catalog must be replaced", !BuiltInDatabaseManager.isCurrentCatalog(dataset, "2.0.0"))
         assertTrue(!BuiltInDatabaseManager.isCurrentCatalog(dataset, null))
         assertTrue(!BuiltInDatabaseManager.isCurrentCatalog("some_other_dataset", expected))
+    }
+
+    // A test phone with an earlier build of the same catalog version still gets the new content
+    @Test
+    fun catalogVersionCheck_replacesACatalogWhoseContentDiffersUnderTheSameVersion() {
+        val expected = BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION
+        val dataset = BuiltInDatabaseManager.EXPECTED_DATASET_NAME
+        assertTrue(BuiltInDatabaseManager.isCurrentCatalog(dataset, expected, "abc", "abc"))
+        assertTrue(!BuiltInDatabaseManager.isCurrentCatalog(dataset, expected, "abc", "def"))
+        assertTrue("A catalog from before fingerprints must be replaced", !BuiltInDatabaseManager.isCurrentCatalog(dataset, expected, null, "def"))
+        assertTrue("Without a bundled fingerprint the version decides", BuiltInDatabaseManager.isCurrentCatalog(dataset, expected, "abc", null))
+    }
+
+    @Test
+    fun theBundledFingerprintIsTheCatalogsOwn() {
+        val conn = checkNotNull(connection)
+        val stored = conn.createStatement().executeQuery("SELECT value FROM database_metadata WHERE key = 'content_fingerprint'").use { rs ->
+            assertTrue("The catalog must record its content fingerprint", rs.next())
+            rs.getString(1)
+        }
+        val bundled = listOf(File("src/main/assets/databases/built_in_foods.fingerprint"), File("app/src/main/assets/databases/built_in_foods.fingerprint"))
+            .first { it.isFile }.readText().trim()
+        assertEquals(stored, bundled)
     }
 }
