@@ -13,6 +13,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -73,6 +84,27 @@ fun MbSearchPill(
         }
         trailing()
     }
+}
+
+/**
+ * A [FocusRequester] for a search field that takes focus and opens the keyboard when its screen or dialog
+ * first shows, so a search needs no second tap. It waits for the window's focus, without which the keyboard
+ * stays closed, and runs once per visit: coming back from a food leaves the results uncovered.
+ */
+@Composable
+fun rememberSearchFocus(): FocusRequester {
+    val focusRequester = remember { FocusRequester() }
+    var focused by rememberSaveable { mutableStateOf(false) }
+    val windowInfo = LocalWindowInfo.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        if (focused) return@LaunchedEffect
+        snapshotFlow { windowInfo.isWindowFocused }.first { it }
+        focusRequester.requestFocus()
+        keyboard?.show()
+        focused = true
+    }
+    return focusRequester
 }
 
 /** The outlined 42 dp scan button inside a search bar. */

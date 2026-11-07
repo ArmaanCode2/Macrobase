@@ -147,6 +147,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
+import com.macrobase.app.core.config.CalendarPerformanceConfig
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -770,7 +773,6 @@ private fun CaloriesPanel(
                 CalorieBar(
                     eaten = summary.totalCaloriesIntake,
                     goal = summary.calorieGoal,
-                    over = summary.isOverBudget,
                     modifier = Modifier.padding(top = 14.dp)
                 )
                 Row(
@@ -808,10 +810,36 @@ private fun CaloriesPanel(
     }
 }
 
-/** The 6 dp calorie bar in the brand gradient; red and full once over the target. */
+/**
+ * How far past the goal [eaten] is: 0 up to the goal, 1 at [CalendarPerformanceConfig.OVER_BUDGET_RATIO] of it,
+ * where the calendar calls a day well over. With no goal, any food is over.
+ */
+internal fun calorieOverShare(eaten: Double, goal: Double): Float = when {
+    goal <= 0.0 -> if (eaten > 0.0) 1f else 0f
+    else -> ((eaten / goal - 1.0) / (CalendarPerformanceConfig.OVER_BUDGET_RATIO - 1.0)).toFloat().coerceIn(0f, 1f)
+}
+
+/** How much of the calorie bar is filled: up to the goal, and all of it past the goal or with food and no goal. */
+internal fun calorieBarFill(eaten: Double, goal: Double): Float =
+    if (goal > 0.0) (eaten / goal).toFloat().coerceIn(0f, 1f) else if (eaten > 0.0) 1f else 0f
+
+/**
+ * The calorie bar's gradient [over] of the way from the brand green to [AppColors.ProgressOver], through
+ * [AppColors.Warning] amber at the halfway mark: a straight blend of green and red greys out in between.
+ */
+internal fun calorieBarStops(over: Float): List<Pair<Float, Color>> = when {
+    over <= 0f -> AppBrushes.BrandGradientStops
+    over >= 1f -> AppBrushes.BrandGradientStops.map { (at, _) -> at to AppColors.ProgressOver }
+    over < 0.5f -> AppBrushes.BrandGradientStops.map { (at, color) -> at to lerp(color, AppColors.Warning, over * 2) }
+    else -> AppBrushes.BrandGradientStops.map { (at, _) -> at to lerp(AppColors.Warning, AppColors.ProgressOver, over * 2 - 1) }
+}
+
+/** The 6 dp calorie bar in the brand gradient, turning amber then red step by step past the target: 10 kcal over is a touch. */
 @Composable
-private fun CalorieBar(eaten: Double, goal: Double, over: Boolean, modifier: Modifier = Modifier) {
-    val fraction = if (goal > 0.0) (eaten / goal).toFloat().coerceIn(0f, 1f) else 0f
+private fun CalorieBar(eaten: Double, goal: Double, modifier: Modifier = Modifier) {
+    val fraction = calorieBarFill(eaten, goal)
+    val stops = calorieBarStops(calorieOverShare(eaten, goal))
+    val brush = remember(stops) { Brush.horizontalGradient(*stops.toTypedArray()) }
     val shape = RoundedCornerShape(6.dp)
     Box(
         modifier = modifier
@@ -820,15 +848,13 @@ private fun CalorieBar(eaten: Double, goal: Double, over: Boolean, modifier: Mod
             .clip(shape)
             .background(AppColors.BarTrack)
     ) {
-        if (over) {
-            Box(modifier = Modifier.fillMaxSize().clip(shape).background(AppColors.ProgressOver))
-        } else if (fraction > 0f) {
+        if (fraction > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(fraction)
                     .fillMaxHeight()
                     .clip(shape)
-                    .background(AppBrushes.BrandGradient)
+                    .background(brush)
             )
         }
     }

@@ -11,6 +11,8 @@ import com.macrobase.app.core.designsystem.components.mealLabel
 import com.macrobase.app.core.designsystem.components.MealAndDayPicker
 import com.macrobase.app.core.designsystem.components.MbSheet
 import com.macrobase.app.core.designsystem.components.MbTextField
+import com.macrobase.app.core.designsystem.components.rememberSearchFocus
+import androidx.compose.ui.focus.focusRequester
 import com.macrobase.app.core.designsystem.components.MbButtonKind
 import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbButton
@@ -886,12 +888,14 @@ fun EditRecipeScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val chosen = current.food
                     if (chosen == null) {
+                        // "Add ingredient" opens straight into the search, keyboard up
+                        val ingredientFocus = rememberSearchFocus()
                         MbTextField(
                             value = current.query,
                             onValueChange = { viewModel.onIngredientQuery(it) },
                             placeholder = "Search ingredient...",
                             leadingIcon = Ph.MagnifyingGlass.light,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().focusRequester(ingredientFocus)
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
                         current.searchError?.let { error ->

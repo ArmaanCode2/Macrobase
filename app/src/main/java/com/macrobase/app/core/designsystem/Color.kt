@@ -116,10 +116,13 @@ object AppColors {
 
 /** The design's gradients (design.txt section 2). */
 object AppBrushes {
-    /** Calorie bar and widget bar. */
-    val BrandGradient: Brush = Brush.horizontalGradient(
+    /** [BrandGradient]'s colours and where they sit; the calorie bar blends them toward red past the goal. */
+    val BrandGradientStops: List<Pair<Float, Color>> = listOf(
         0f to Color(0xFF35CE4F), 0.52f to Color(0xFF7FDC48), 1f to Color(0xFFD3F444)
     )
+
+    /** The brand gradient; Home's calorie bar draws it from [BrandGradientStops] so it can turn red past the goal. */
+    val BrandGradient: Brush = Brush.horizontalGradient(*BrandGradientStops.toTypedArray())
 
     /** Primary buttons, with [AppColors.OnPrimary] ink. */
     val PrimaryButtonGradient: Brush = Brush.horizontalGradient(

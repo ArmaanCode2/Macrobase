@@ -3,6 +3,8 @@ package com.macrobase.app.feature.search
 import androidx.compose.ui.draw.drawBehind
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbSearchPillFrame
+import com.macrobase.app.core.designsystem.components.rememberSearchFocus
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +35,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -200,9 +203,11 @@ fun SearchScreen(
         }
     }
 
+    // The keyboard is up from the start, so the lists end above it and their last rows can scroll into view
     Column(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
     ) {
         // 1. The header: back, then the search field with its clear button
         SearchHeader(
@@ -340,6 +345,8 @@ private fun SearchHeader(
     onClear: () -> Unit,
     onBack: () -> Unit
 ) {
+    // Opened to search: the field takes focus and the keyboard opens without a second tap
+    val searchFocus = rememberSearchFocus()
     // Read while drawing, so the band fades in without recomposing the search field
     val band = animateColorAsState(
         targetValue = if (scrolled) AppColors.HeaderBand else Color.Transparent,
@@ -384,6 +391,7 @@ private fun SearchHeader(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 10.dp)
+                    .focusRequester(searchFocus)
                     .semantics { contentDescription = "Search foods" },
                 decorationBox = { innerTextField ->
                     Box(modifier = Modifier.heightIn(min = 38.dp), contentAlignment = Alignment.CenterStart) {
