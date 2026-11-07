@@ -100,7 +100,10 @@ class DiaryRepositoryImpl(
                 totalSodiumMg = totalSodium,
                 totalWaterMl = waterMl ?: 0.0,
                 waterGoalMl = prefs.dailyWaterGoalMl,
-                meals = meals
+                meals = meals,
+                proteinPercentage = goals.proteinPercentage,
+                carbPercentage = goals.carbPercentage,
+                fatPercentage = goals.fatPercentage
             )
         }
     }

@@ -1,5 +1,8 @@
 package com.macrobase.app.core.designsystem.components
 
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -27,6 +30,13 @@ import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import kotlin.math.roundToInt
+
+/** The ring's number sizes, largest first: at large font scales the numbers shrink to fit (BUG-030). */
+internal val MACRO_RING_FONT_SIZES: List<TextUnit> = (14 downTo 7).map { it.sp }
+
+/** The first of [sizes] at which [widthAt] fits in [available], or the last when none does. */
+internal fun fittingFontSize(sizes: List<TextUnit>, available: Float, widthAt: (TextUnit) -> Float): TextUnit =
+    sizes.firstOrNull { widthAt(it) <= available } ?: sizes.last()
 
 /** How full a macro ring is: eaten over target, full at or over target, empty when nothing is eaten. */
 internal fun macroRingProgress(eaten: Double, target: Double): Float = when {
@@ -91,11 +101,23 @@ fun MbMacroRing(
                     )
                 }
             }
+            // The ring has a fixed size, so at large font scales the numbers shrink instead of being cut off (BUG-030)
+            val text = "$eaten/$target"
+            val style = AppTypography.Header3.copy(fontSize = 14.sp, letterSpacing = (-0.01).em)
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            val available = with(density) { (Dimensions.MacroRing - Dimensions.MacroRingStroke * 2 - 8.dp).toPx() }
+            val fontSize = remember(text, density) {
+                fittingFontSize(MACRO_RING_FONT_SIZES, available) { size ->
+                    measurer.measure(text, style.copy(fontSize = size), maxLines = 1, softWrap = false).size.width.toFloat()
+                }
+            }
             Text(
-                text = "$eaten/$target",
-                style = AppTypography.Header3.copy(fontSize = 14.sp, letterSpacing = (-0.01).em),
+                text = text,
+                style = style.copy(fontSize = fontSize),
                 color = AppColors.TextPrimary,
-                maxLines = 1
+                maxLines = 1,
+                softWrap = false
             )
         }
         Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary)

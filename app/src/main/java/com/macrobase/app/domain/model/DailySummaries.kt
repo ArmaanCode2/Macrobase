@@ -21,7 +21,11 @@ data class DailyNutritionSummary(
     val totalSodiumMg: Double? = null,
     val totalWaterMl: Double = 0.0,
     val waterGoalMl: Double = 2500.0,
-    val meals: List<Meal> = emptyList()
+    val meals: List<Meal> = emptyList(),
+    // The day's macro split, from the goal in force that day, for its rings (BUG-020)
+    val proteinPercentage: Double = 25.0,
+    val carbPercentage: Double = 50.0,
+    val fatPercentage: Double = 25.0
 ) {
     val calorieBalance: Double
         get() = calorieGoal - totalCaloriesIntake

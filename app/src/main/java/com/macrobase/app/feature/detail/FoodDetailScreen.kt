@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.detail
 
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import com.macrobase.app.feature.basket.basketDateLabel
 import com.macrobase.app.feature.dashboard.mealForTime
 import com.macrobase.app.core.designsystem.components.MealAndDayPicker
@@ -178,9 +180,17 @@ class FoodDetailViewModel(
     private val _uiState = MutableStateFlow(FoodDetailUiState())
     val uiState: StateFlow<FoodDetailUiState> = _uiState.asStateFlow()
 
-    /** The daily calorie target, for "% of your daily target"; 0 when it is not known. */
+    /**
+     * The daily calorie target of the day the food logs to, for "% of your daily target"; 0 when it
+     * is not known. A past day has its own goal (BUG-020).
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val dailyCalorieGoal: StateFlow<Double> = (
-        getGoalsUseCase?.invoke()?.map { it.dailyCalorieGoal } ?: kotlinx.coroutines.flow.flowOf(0.0)
+        getGoalsUseCase?.let { goals ->
+            _uiState.map { it.targetDate }.distinctUntilChanged()
+                .flatMapLatest { date -> goals.forDate(date) }
+                .map { it.dailyCalorieGoal }
+        } ?: kotlinx.coroutines.flow.flowOf(0.0)
     ).stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), 0.0)
 
     private var editingEntryId: Long? = null

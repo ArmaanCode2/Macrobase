@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.calendar
 
+import kotlinx.coroutines.flow.combine
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -99,9 +100,12 @@ class CalendarViewModel(
     private val _displayedYearMonth = MutableStateFlow(YearMonth.now(clock))
     val displayedYearMonth: StateFlow<YearMonth> = _displayedYearMonth.asStateFlow()
 
+    // Today as of the last time the screen was shown, so a calendar kept open overnight moves on (BUG-029)
+    private val today = MutableStateFlow(LocalDate.now(clock))
+
     // Each summary carries the goal in force on its day, so a goal change never recolours history (BUG-049)
-    val uiState: StateFlow<CalendarUiState> = _displayedYearMonth.flatMapLatest { ym ->
-        getCalendarAdherenceUseCase.observe(ym.year, ym.monthValue).map { summaries -> calculateMonthState(ym, summaries) }
+    val uiState: StateFlow<CalendarUiState> = combine(_displayedYearMonth, today) { ym, day -> ym to day }.flatMapLatest { (ym, day) ->
+        getCalendarAdherenceUseCase.observe(ym.year, ym.monthValue).map { summaries -> calculateMonthState(ym, summaries, day) }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -133,19 +137,20 @@ class CalendarViewModel(
      * month it is now; one the user moved to another month stays there.
      */
     fun onShown() {
+        today.value = LocalDate.now(clock)
         if (followsCurrentMonth) _displayedYearMonth.value = YearMonth.now(clock)
     }
 
     private fun calculateMonthState(
         yearMonth: YearMonth,
-        summaries: List<CalendarDaySummary>
+        summaries: List<CalendarDaySummary>,
+        today: LocalDate
     ): CalendarUiState {
         val summariesMap = summaries.associateBy { it.date.dayOfMonth }
         // Days outside the month are padding and are never judged; they show the nearest day's goal
         val firstGoal = summaries.firstOrNull()?.calorieGoal ?: 0.0
         val lastGoal = summaries.lastOrNull()?.calorieGoal ?: 0.0
 
-        val today = LocalDate.now(clock)
         val totalDays = yearMonth.lengthOfMonth()
         val firstDayOfMonth = yearMonth.atDay(1)
 

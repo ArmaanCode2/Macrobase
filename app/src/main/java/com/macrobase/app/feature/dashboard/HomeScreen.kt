@@ -186,6 +186,13 @@ internal fun macroTargetGrams(calorieGoal: Double, profile: HomeProfile): Triple
     )
 }
 
+/** The ring targets of [summary]'s day: its calorie goal at that day's own split (BUG-020). */
+internal fun macroTargetGrams(summary: DailyNutritionSummary): Triple<Double, Double, Double> =
+    macroTargetGrams(
+        summary.calorieGoal,
+        HomeProfile(proteinPercentage = summary.proteinPercentage, carbPercentage = summary.carbPercentage, fatPercentage = summary.fatPercentage)
+    )
+
 /** The water Home's quick add logs: 250 mL, or 8 fl oz with imperial units (the Water screen's first amounts). */
 internal fun quickAddWaterMl(unitSystem: UnitSystem): Double =
     if (unitSystem == UnitSystem.IMPERIAL) UnitConversions.flOzToMl(8.0) else 250.0
@@ -742,7 +749,7 @@ private fun CaloriesPanel(
     modifier: Modifier = Modifier,
     ringsFillIn: Boolean = true
 ) {
-    val (proteinTarget, carbTarget, fatTarget) = macroTargetGrams(summary.calorieGoal, profile)
+    val (proteinTarget, carbTarget, fatTarget) = macroTargetGrams(summary)
     MbPanel(modifier = modifier.fillMaxWidth()) {
         Box(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.fillMaxWidth()) {

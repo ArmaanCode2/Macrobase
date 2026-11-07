@@ -1,5 +1,6 @@
 package com.macrobase.app.domain.usecase
 
+import kotlinx.coroutines.flow.map
 import java.util.Locale
 import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.Goal
@@ -127,6 +128,9 @@ class GetGoalsUseCase(
     operator fun invoke(): Flow<Goal> {
         return goalsRepository.observeGoals()
     }
+
+    /** The goal in force on [date], as the goal history holds it (BUG-020). */
+    fun forDate(date: LocalDate): Flow<Goal> = goalsRepository.observeGoalsForDates(listOf(date)).map { it.single() }
 
     /** False until goals are saved for the first time, so the strategy is still the untouched default. */
     suspend fun hasSaved(): Boolean = goalsRepository.hasSavedGoals()

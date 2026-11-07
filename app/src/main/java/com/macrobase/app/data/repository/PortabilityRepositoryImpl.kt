@@ -367,17 +367,19 @@ class PortabilityRepositoryImpl(
                         userDatabase.weightDao().insertWeightEntries(toInsertWeights)
                     }
 
-                    // 5. Merge Water Logs
+                    // 5. Merge Water Logs. A log is its day and time: editing one keeps its time, so
+                    // a backup's older amount is the same log, and this phone's amount stays (BUG-047)
                     val existingWater = userDatabase.waterDao().getAllWaterLogsList()
-                        .map { Triple(it.dateEpochDay, it.timestamp, it.amountMl) }.toSet()
+                        .associate { (it.dateEpochDay to it.timestamp) to it.amountMl }
                     val toInsertWater = mutableListOf<WaterLogEntity>()
                     for (dto in backupData.waterEntries) {
-                        val key = Triple(dto.dateEpochDay, dto.timestamp, dto.amountMl)
-                        if (!existingWater.contains(key)) {
+                        val phoneAmount = existingWater[dto.dateEpochDay to dto.timestamp]
+                        if (phoneAmount == null) {
                             toInsertWater.add(dto.toEntity())
                             imported++
                         } else {
                             skipped++
+                            if (phoneAmount != dto.amountMl) conflicts++
                         }
                     }
                     if (toInsertWater.isNotEmpty()) {

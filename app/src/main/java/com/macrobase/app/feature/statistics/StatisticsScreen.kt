@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.statistics
 
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.macrobase.app.core.designsystem.components.rememberAccessibilityOn
 import kotlin.math.ceil
 import androidx.compose.ui.platform.LocalDensity
@@ -335,7 +336,10 @@ fun StatisticsScreen(
     )
 
     // A kept Stats screen opened in a new month shows that month
-    LaunchedEffect(calendarViewModel) { calendarViewModel.onShown() }
+    LifecycleResumeEffect(calendarViewModel) {
+        calendarViewModel.onShown()
+        onPauseOrDispose { }
+    }
 
     // Each view scrolls on its own, under the header and behind the dock, and ends clear of the dock
     Box(modifier = modifier.fillMaxSize()) {

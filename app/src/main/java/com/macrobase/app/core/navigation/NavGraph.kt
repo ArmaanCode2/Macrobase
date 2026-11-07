@@ -1,5 +1,6 @@
 package com.macrobase.app.core.navigation
 
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NamedNavArgument
@@ -296,7 +297,11 @@ fun NavGraph(
         // Food Logging Calendar
         screen(navController, Screen.Calendar.route) {
             val viewModel: CalendarViewModel = koinViewModel()
-            LaunchedEffect(viewModel) { viewModel.onShown() }
+            // Shown again after a while, such as overnight: the calendar catches up with today (BUG-029)
+            LifecycleResumeEffect(viewModel) {
+                viewModel.onShown()
+                onPauseOrDispose { }
+            }
             CalendarScreen(
                 viewModel = viewModel,
                 onDateClick = { selectedDate ->
@@ -488,7 +493,8 @@ fun NavGraph(
             com.macrobase.app.feature.basket.BasketScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popIfCurrent(backStackEntry) },
-                onNavigateToSearch = { navController.navigate(Screen.Search.createRoute()) },
+                // An empty basket has no day of its own: the day and meal Home is on, as the "+" sheet's search
+                onNavigateToSearch = { navController.navigate(homeViewModel.logContext().searchRoute) },
                 onNavigateToDashboard = { navController.popBackStack(Screen.Home.route, inclusive = false) },
                 onEditItem = { basketItemId, foodId ->
                     navController.navigate(Screen.FoodDetail.createRoute(foodId = foodId, basketItemId = basketItemId))

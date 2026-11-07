@@ -272,11 +272,13 @@ class GoalsRepositoryImpl(
                 prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] = goals.maintenanceCalories
                 prefs[Keys.SCHEDULED_EFFECTIVE_DATE] = tomorrow.toString()
             } else {
+                // Missing keys get the strategy in force now, never the one asked for: asking for
+                // the pending one must not start it today (BUG-052)
                 if (prefs[Keys.FITNESS_GOAL] == null) {
-                    prefs[Keys.FITNESS_GOAL] = goals.fitnessGoal.name
+                    prefs[Keys.FITNESS_GOAL] = currentFitnessGoal.name
                 }
                 if (prefs[Keys.MAINTENANCE_CALORIES] == null) {
-                    prefs[Keys.MAINTENANCE_CALORIES] = goals.maintenanceCalories
+                    prefs[Keys.MAINTENANCE_CALORIES] = currentMaintenance
                 }
             }
 
