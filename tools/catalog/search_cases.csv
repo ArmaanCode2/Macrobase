@@ -247,3 +247,15 @@ lemonade,^lemonade,1,ok,Lemonade
 orange juice,^orange juice,1,ok,"Orange juice, fresh"
 protein shake,protein shake|whey protein,1,ok,Whey protein powder
 whey,^whey protein,1,ok,Whey protein powder
+# Plurals and phrases (BUG-004): a query word longer than the stored one, and words no food holds all of
+apples,^apple$,1,ok,(nothing)
+bananas,^banana$,1,ok,(nothing)
+onions,^onion$,1,ok,(nothing)
+samosas,samosa,1,ok,(nothing)
+tomatoes,^tomato$,1,ok,Stuffed tomatoes
+dosas,dosa,1,ok,(nothing)
+rotis,roti,1,ok,(nothing)
+potatoes,^potato$,1,ok,(nothing)
+dal and rice,dal|rice,1,ok,(nothing)
+tea with milk,tea,1,ok,(nothing)
+egg fried rice,fried rice,1,ok,(nothing)

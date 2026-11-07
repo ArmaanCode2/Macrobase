@@ -258,6 +258,88 @@ class BuildTests(unittest.TestCase):
         self.assertEqual("ice cream ke saath", b.normalize_name("Ice cream\xa0ke  saath"))
 
 
+def cooked_water(water, sid="T:1", name="Plain dosa"):
+    return {"sourceId": sid, "food": name, "correction": "cooked_water", "water_g": str(water), "reason": "r", "reference": "ref"}
+
+
+class CookedWaterTests(unittest.TestCase):
+    """BUG-009: griddled and boiled dishes INDB carries at nearly the dry weight of their ingredients."""
+
+    def dosa(self):
+        return food("T:1", "Plain dosa", kcal=380.9, protein=10.3, carbs=64.1, fat=8.4, unit="dosa", weight=36.1,
+                    fiberGPer100g="5.2", sodiumMgPer100g="10")
+
+    def test_the_water_is_set_and_every_nutrient_and_the_portion_follow_it(self):
+        before = b.estimated_water(self.dosa())
+        dosa = b.apply_curation([self.dosa()], curation(corrections=[cooked_water(57)]))[0]
+        value = lambda column: float(dosa[column])
+        scale = 43 / (100 - before)
+
+        self.assertAlmostEqual(57.0, b.estimated_water(dosa), delta=0.01)
+        self.assertAlmostEqual(380.9 * scale, value("caloriesKcalPer100g"), delta=0.05)
+        self.assertAlmostEqual(10.3 * scale, value("proteinGPer100g"), delta=0.01)
+        self.assertAlmostEqual(8.4 * scale, value("fatGPer100g"), delta=0.01)
+        self.assertAlmostEqual(5.2 * scale, value("fiberGPer100g"), delta=0.01)
+
+    def test_one_dosa_keeps_its_energy_because_only_water_was_added(self):
+        dosa = b.apply_curation([self.dosa()], curation(corrections=[cooked_water(57)]))[0]
+
+        self.assertAlmostEqual(380.9 * 36.1 / 100, float(dosa["caloriesKcalPer100g"]) * float(dosa["servingWeightG"]) / 100, delta=0.05)
+
+    def test_a_blank_nutrient_stays_blank(self):
+        dosa = b.apply_curation([self.dosa()], curation(corrections=[cooked_water(57)]))[0]
+
+        self.assertEqual("", dosa.get("cholesterolMgPer100g", ""))
+
+    def test_a_target_drier_than_the_food_is_refused(self):
+        self.assertIn("already holds", problems_of([self.dosa()], curation(corrections=[cooked_water(5)])))
+
+    def test_a_target_is_required(self):
+        self.assertIn("water_g must be a number", problems_of([self.dosa()], curation(corrections=[cooked_water("")])))
+
+    def test_a_cooked_dish_with_too_little_water_is_a_data_problem(self):
+        _, findings = b.check_foods([food("INDB:1", "Plain dosa", kcal=380, protein=10, carbs=69, fat=8, fiberGPer100g="5")])
+
+        self.assertIn(("INDB:1", "cooked_dish_water"), findings)
+
+    def test_only_recipes_are_held_to_it(self):
+        raw = food("USDA:1", "Rice, white, raw", kcal=360, protein=7, carbs=80, fat=1)
+
+        self.assertNotIn(("USDA:1", "cooked_dish_water"), b.check_foods([raw])[1])
+
+
+class BundledCatalogTests(unittest.TestCase):
+    """The dishes as they ship: a griddled or boiled dish holds its cooking water."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "app", "src", "main", "assets", "databases", "built_in_foods.db")
+        cls.con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        cls.addClassCleanup(cls.con.close)
+
+    def kcal(self, source_id):
+        return self.con.execute("SELECT calories FROM foods WHERE source_id = ?", (source_id,)).fetchone()[0]
+
+    def test_griddled_batter_is_as_dense_as_its_siblings(self):
+        masala_dosa = self.kcal("INDB:0132")
+        for source_id in ("INDB:0503", "INDB:0884", "INDB:0770", "INDB:0506", "INDB:0927"):
+            self.assertLess(self.kcal(source_id), masala_dosa * 1.5, source_id)
+
+    def test_a_boiled_dal_is_not_at_dry_weight(self):
+        self.assertLess(self.kcal("INDB:0931"), 150)
+
+    def test_a_cooked_rice_dish_is_not_at_dry_weight(self):
+        self.assertLess(self.kcal("INDB:0117"), 200)
+
+    def test_a_dosa_keeps_its_energy_and_gains_its_weight(self):
+        grams = self.con.execute(
+            "SELECT s.gram_weight FROM servings s JOIN foods f ON f.id = s.food_id WHERE f.source_id = 'INDB:0503' AND s.description = '1 dosa'"
+        ).fetchone()[0]
+
+        self.assertAlmostEqual(137.5, self.kcal("INDB:0503") * grams / 100, delta=1.0)
+        self.assertGreater(grams, 60)
+
+
 def frying(frying_oil, kept, water="", sid="T:1", name="Poori"):
     return {"sourceId": sid, "food": name, "correction": "excess_frying_oil", "frying_oil_g": str(frying_oil),
             "oil_kept_g": str(kept), "water_g": str(water), "reason": "r", "reference": "ref"}

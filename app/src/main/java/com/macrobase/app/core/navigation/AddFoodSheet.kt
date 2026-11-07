@@ -46,7 +46,7 @@ fun AddFoodSheet(
     onSearch: (MealType) -> Unit,
     onScanLabel: () -> Unit,
     onCreateCustomFood: () -> Unit,
-    onLogRecipe: () -> Unit,
+    onLogRecipe: (MealType) -> Unit,
     onOpenBasket: () -> Unit,
     onLogWater: () -> Unit,
     onLogWeight: () -> Unit
@@ -77,7 +77,7 @@ fun AddFoodSheet(
             MbRowTile(title = "Search foods", icon = Ph.MagnifyingGlass.light, onClick = { go { onSearch(meal) } })
             MbRowTile(title = "Scan nutrition label", icon = Ph.Scan.light, onClick = { go(onScanLabel) })
             MbRowTile(title = "Create custom food", icon = Ph.NotePencil.light, onClick = { go(onCreateCustomFood) })
-            MbRowTile(title = "Log a recipe", icon = Ph.CookingPot.light, onClick = { go(onLogRecipe) })
+            MbRowTile(title = "Log a recipe", icon = Ph.CookingPot.light, onClick = { go { onLogRecipe(meal) } })
             MbRowTile(
                 title = copyFromYesterdayLabel(meal),
                 subtitle = if (yesterdayMealIsEmpty) "Nothing logged for ${mealLabel(meal)} yesterday" else null,

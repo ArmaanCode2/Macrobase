@@ -1,6 +1,7 @@
 package com.macrobase.app.core.navigation
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,9 +49,12 @@ import com.macrobase.app.core.designsystem.components.MbBasketButton
 import com.macrobase.app.core.designsystem.components.MbFab
 import com.macrobase.app.core.designsystem.components.MbHeader
 import com.macrobase.app.core.designsystem.components.MbViewSwitch
+import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import com.macrobase.app.feature.foods.FOODS_VIEW_KEY
 import com.macrobase.app.feature.foods.FOODS_VIEW_RECIPES
+import com.macrobase.app.feature.foods.RECIPE_LOG_DAY_KEY
+import com.macrobase.app.feature.foods.RECIPE_LOG_MEAL_KEY
 import org.koin.androidx.compose.koinViewModel
 
 /** The route without its arguments, such as "home" for "home?dateEpochDay={dateEpochDay}". */
@@ -89,6 +93,7 @@ fun MacroBaseScaffold(
 
     val chrome = remember { ScaffoldChrome() }
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -126,7 +131,8 @@ fun MacroBaseScaffold(
                         }
                         else -> MbHeader(
                             title = getScreenTitle(currentRoute),
-                            onBack = { navController.popBackStack() },
+                            // The system's Back, so a screen that asks before leaving sees this tap too
+                            onBack = { backDispatcher?.onBackPressed() },
                             scrolled = chrome.isScrolled(navBackStackEntry?.id)
                         ) {
                             if (routeBase == Screen.Basket.route.routeBase() && basketItems.isNotEmpty()) {
@@ -171,24 +177,28 @@ fun MacroBaseScaffold(
 
         if (showAddSheet && homeViewModel != null) {
             val onHome = routeBase == Screen.Home.route.routeBase()
+            // On Home the day on screen is used, as Home's own add buttons do; elsewhere today
+            fun logContext(meal: MealType = homeViewModel.currentMeal()) =
+                if (onHome) homeViewModel.logContext(meal) else LogContext(date = null, meal = meal)
             AddFoodSheet(
                 homeViewModel = homeViewModel,
                 onDismiss = { showAddSheet = false },
-                onSearch = { meal ->
-                    // On Home the day on screen is used, as Home's own add buttons do; elsewhere today
-                    val date = if (onHome) homeViewModel.dateForNewLog() else null
-                    navController.navigate(Screen.Search.createRoute(meal.name, date?.toEpochDay()))
-                },
+                onSearch = { meal -> navController.navigate(logContext(meal).searchRoute) },
                 onScanLabel = openScanner,
                 onCreateCustomFood = { navController.navigate(Screen.EditCustomFood.createRoute()) },
-                onLogRecipe = {
-                    // The Foods tab, on its Recipes view
+                onLogRecipe = { meal ->
+                    val context = logContext(meal)
+                    // The Foods tab, on its Recipes view, set to the day and meal the sheet was on
                     navController.navigateToTopLevel(Screen.CustomFoods, homeViewModel)
-                    navController.currentBackStackEntry?.savedStateHandle?.set(FOODS_VIEW_KEY, FOODS_VIEW_RECIPES)
+                    navController.currentBackStackEntry?.savedStateHandle?.let { saved ->
+                        saved[FOODS_VIEW_KEY] = FOODS_VIEW_RECIPES
+                        saved[RECIPE_LOG_MEAL_KEY] = context.meal.name
+                        saved[RECIPE_LOG_DAY_KEY] = context.date?.toEpochDay()
+                    }
                 },
                 onOpenBasket = openBasket,
-                onLogWater = { navController.navigate(Screen.Water.createRoute()) },
-                onLogWeight = { navController.navigate(Screen.Weight.createRoute(openLog = true)) }
+                onLogWater = { navController.navigate(logContext().waterRoute) },
+                onLogWeight = { navController.navigate(logContext().weightLogRoute) }
             )
         }
     }

@@ -38,7 +38,7 @@ FINGERPRINT_FILE = os.path.join(os.path.dirname(TARGET_DB), "built_in_foods.fing
 # Must equal BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION (DatabaseIntegrationTests checks).
 # Installed phones replace their catalog only when it changes, so the build refuses new content
 # under a version already pinned in catalog_versions.csv.
-DATABASE_VERSION = "2.4.0"
+DATABASE_VERSION = "2.5.0"
 # The table layout; BuiltInDatabaseManager.EXPECTED_SCHEMA_VERSION mirrors it.
 SCHEMA_VERSION = "2"
 # Must equal BuiltInDatabaseManager.EXPECTED_DATASET_NAME, or the app refuses the catalog.
@@ -123,7 +123,7 @@ CARBOHYDRATE_RULES = ("total", "available")
 # the water frying dries off; the oil comes out but what the food keeps, and the water is set.
 # values_from: the listed columns (or all nutrient columns) come from a reference row of an
 # imported file, one marked role=reference. Corrections apply in this order.
-CORRECTION_KINDS = ("excess_frying_oil", "values_from")
+CORRECTION_KINDS = ("excess_frying_oil", "cooked_water", "values_from")
 OIL_KCAL_PER_G = 9.0  # INDB's energy counts fat at 9 kcal/g, frying oil included
 # Columns that come with the frying oil and shrink with the fat; every other nutrient comes with
 # the food and is concentrated as the excess oil leaves
@@ -306,8 +306,12 @@ GRAM_COLUMNS = ("proteinGPer100g", "carbohydratesGPer100g", "fatGPer100g", "fibe
                 "saturatedFatGPer100g", "transFatGPer100g")
 
 # Checks a data_exceptions.csv row may cover, one per food. Every other problem stops the build.
-EXCEPTION_CHECKS = ("name_text", "serving_text", "energy_vs_macros", "macro_total", "fat_level", "sodium_level", "portion_weight")
+EXCEPTION_CHECKS = ("name_text", "serving_text", "energy_vs_macros", "macro_total", "fat_level", "sodium_level", "portion_weight", "cooked_dish_water")
 EXCEPTION_STATUSES = ("fix", "accepted")
+
+# INDB dishes that are griddled or boiled in water, and the least water one holds as eaten
+COOKED_DISH = re.compile(r"\b(dosa|cheela|chilla|uttapam|pesarattu|upma|daliya|poha|dal|rice)\b", re.IGNORECASE)
+COOKED_DISH_MIN_WATER_G = 45.0
 ALIAS_KINDS = ("spelling", "hindi", "regional", "english", "other")
 PRIORITIES = ("1", "2", "3")
 
@@ -674,6 +678,15 @@ def apply_corrections(foods, excluded, references, carbohydrate_rules, correctio
             problem = remove_frying_oil(food, frying_oil, kept, water)
             if problem:
                 problems.append(f"{where}: {problem}")
+        elif kind == "cooked_water":
+            try:
+                water = float(c.get("water_g", ""))
+            except ValueError:
+                problems.append(f"{where}: water_g must be a number")
+                continue
+            problem = set_cooked_water(food, water)
+            if problem:
+                problems.append(f"{where}: {problem}")
         else:
             ref = references.get(c.get("from", ""))
             if ref is None:
@@ -711,6 +724,28 @@ def estimated_water(food, carbohydrate_has_fibre=False):
     parts = ("proteinGPer100g", "fatGPer100g", "carbohydratesGPer100g") + (() if carbohydrate_has_fibre else ("fiberGPer100g",))
     dry = sum(grams(c) for c in parts)
     return max(0.0, 100 - dry - ash)
+
+
+def set_cooked_water(food, water):
+    """Gives [food] [water] g of water per 100 g as eaten. Returns a problem, or None.
+
+    INDB adds up its ingredients' raw weights, so a griddled or boiled dish with no pot of frying oil
+    to take out can sit at nearly the dry weight of its ingredients, without the water it was cooked
+    in. 100 g of INDB's food becomes m g: every nutrient is concentrated by 100 / m, and the household
+    portion becomes m% of its weight, so one dosa keeps its energy and gets its real weight.
+    """
+    current = estimated_water(food)
+    if not current < water < 100:
+        return f"the food already holds {current:.1f} g water per 100 g by difference, so it cannot take water_g {water:g}"
+    mass = (100 - current) / (1 - water / 100)
+    for column in NUTRIENT_COLUMNS:
+        value = number(food[column])
+        if value is not None:
+            food[column] = format_number(value * 100 / mass)
+    weight = number(food["servingWeightG"])
+    if weight:
+        food["servingWeightG"] = format_number(weight * mass / 100)
+    return None
 
 
 def remove_frying_oil(food, frying_oil, kept, water=None):
@@ -1043,6 +1078,11 @@ def check_foods(foods):
         sodium = values["sodiumMgPer100g"]
         if sodium is not None and sodium > SODIUM_LIMIT_MG:
             findings[(sid, "sodium_level")] = (f"{sodium:g} mg sodium per 100 g", f"{sodium:g} mg")
+        # Energy fits the macros at any water content, so that check cannot see a dish left at dry weight
+        if sid.startswith("INDB:") and COOKED_DISH.search(f["name"]):
+            water = estimated_water(f, carbohydrate_has_fibre=True)
+            if water < COOKED_DISH_MIN_WATER_G:
+                findings[(sid, "cooked_dish_water")] = (f"{water:.1f} g water per 100 g by difference", f"{water:.1f} g")
         weight = values["servingWeightG"]
         if f["servingUnit"].strip() and weight:
             per_unit = weight / (quantity or 1.0)

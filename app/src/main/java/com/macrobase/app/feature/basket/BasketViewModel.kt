@@ -2,6 +2,7 @@ package com.macrobase.app.feature.basket
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.macrobase.app.core.util.PendingDelete
 import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.model.Serving
 import com.macrobase.app.domain.model.basket.BasketItem
@@ -112,7 +113,9 @@ class BasketViewModel(
         }
         _typedInvalidIds.update { it - itemId }
 
-        val newNutrition = calculateNutritionForServingUseCase(item.food, item.serving, parsedQty)
+        // The item's own values scale, so an item copied from an entry keeps what was logged (BUG-008)
+        val newNutrition = item.calculatedNutrition.rescaled(item.quantity, parsedQty)
+            ?: calculateNutritionForServingUseCase(item.food, item.serving, parsedQty)
         val updatedItem = item.copy(
             quantity = parsedQty,
             calculatedNutrition = newNutrition
@@ -161,6 +164,13 @@ class BasketViewModel(
         if (_revealedItemId.value == itemId) {
             _revealedItemId.value = null
         }
+    }
+
+    /** Set while "Clear" waits for the user to confirm. */
+    val pendingClear = PendingDelete<Unit>()
+
+    fun confirmClear() {
+        if (pendingClear.confirm() != null) clearBasket()
     }
 
     fun clearBasket() {

@@ -81,6 +81,13 @@ data class Nutrition(
     }
 
     /**
+     * This nutrition, which is for [fromQuantity] of a serving, for [toQuantity] of that serving.
+     * Null when [fromQuantity] gives nothing to scale from, such as an amount of 0.
+     */
+    fun rescaled(fromQuantity: Double, toQuantity: Double): Nutrition? =
+        if (fromQuantity.isFinite() && fromQuantity > 0.0) scale(toQuantity / fromQuantity) else null
+
+    /**
      * Sums two nutrition objects.
      */
     operator fun plus(other: Nutrition): Nutrition {

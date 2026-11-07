@@ -71,6 +71,7 @@ import com.macrobase.app.domain.model.MealType
 import com.macrobase.app.domain.model.state.FoodSearchUiState
 import com.macrobase.app.domain.repository.FoodRepository
 import com.macrobase.app.domain.usecase.SearchFoodsUseCase
+import com.macrobase.app.feature.dashboard.mealForTime
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,10 +83,12 @@ import java.time.LocalDate
 
 class SearchViewModel(
     private val searchFoodsUseCase: SearchFoodsUseCase,
-    private val foodRepository: FoodRepository
+    private val foodRepository: FoodRepository,
+    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(FoodSearchUiState())
+    // A search opened without a meal starts on the meal for the time (BUG-003)
+    private val _uiState = MutableStateFlow(FoodSearchUiState(targetMealType = mealForTime(java.time.LocalTime.now(clock))))
     val uiState: StateFlow<FoodSearchUiState> = _uiState.asStateFlow()
 
     private var targetDate: LocalDate = LocalDate.now()

@@ -7,6 +7,8 @@ import com.macrobase.app.domain.model.scanner.NutritionBasis
 import com.macrobase.app.domain.model.scanner.RowBoundaryDebug
 import com.macrobase.app.domain.model.scanner.ScannerDebugData
 import com.macrobase.app.domain.model.scanner.TokenDebugItem
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.Locale
 import java.util.regex.Pattern
 import kotlin.math.abs
@@ -29,8 +31,18 @@ class SpatialTableDetector {
         val centerX: Float,
         val headerText: String,
         /** The bottom edge of the header row; rows above it are not nutrient rows. */
-        val headerBottomY: Int = 0
-    )
+        val headerBottomY: Int = 0,
+        /** The X range of the header cell, words beside the anchor included ("Per serving (30g)"). */
+        val cellLeft: Float = centerX,
+        val cellRight: Float = centerX
+    ) {
+        /** How far [x] is from this column's header cell; 0 under it. */
+        fun distanceTo(x: Float): Float = when {
+            x < cellLeft -> cellLeft - x
+            x > cellRight -> x - cellRight
+            else -> 0f
+        }
+    }
 
     data class PhysicalRow(
         val nutrientKey: String,
@@ -65,6 +77,9 @@ class SpatialTableDetector {
     )
 
     companion object {
+        /** How far above the "100g" word a header split over several lines can reach, in line heights. */
+        private const val HEADER_LINES_ABOVE = 2.5
+
         private val NUTRIENT_ROW_DEFINITIONS = listOf(
             Pair("calories", listOf("energy", "energie", "calories", "calorie", "kcal", "cal")),
             Pair("protein", listOf("protein", "proteins", "proteine", "proteines", "total protein")),
@@ -132,7 +147,7 @@ class SpatialTableDetector {
         val detectedRows = detectNutrientRows(tableLines, allElements, detectedColumns, logLines)
 
         // 4. Grid Cell Token Assignment (X in Column, Y in Row)
-        val cells = assignTokensToCells(allElements, detectedColumns, detectedRows, logLines, LabelRowFilters.numbersBeforePercentSign(ocrResult.lines))
+        val cells = assignTokensToCells(allElements, tableLines, detectedColumns, detectedRows, logLines, LabelRowFilters.numbersBeforePercentSign(ocrResult.lines))
 
         // 5. Cross-Column Decimal Recovery & Relationship Validation
         val adjustedCells = reconcileCells(cells, servingInfo.grams, warnings, logLines)
@@ -289,12 +304,16 @@ class SpatialTableDetector {
     ): List<PhysicalColumn> {
         val detected = mutableListOf<PhysicalColumn>()
 
+        val packWords = lines.flatMapTo(Collections.newSetFromMap(IdentityHashMap<OcrElement, Boolean>())) {
+            LabelRowFilters.servingPhraseWords(it.elements)
+        }
+
         // Search top 15 lines for table header elements
-        val headerElements = elements.filter { elem ->
+        val headerElements = LabelRowFilters.withSplitAmountsJoined(elements.filterNot { it in packWords }).filter { elem ->
             val text = elem.text.lowercase(Locale.ROOT)
             val sBox = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox)
             sBox != null && (
-                text.contains("100g") || text.contains("100 g") || text.contains("100gm") ||
+                isPer100Header(text) ||
                 text.contains("per") || text.contains("serve") || text.contains("serving") ||
                 text.contains("rda") || text.contains("%") || text.contains("qty") || text.contains("30g")
             )
@@ -305,7 +324,19 @@ class SpatialTableDetector {
         var elemServ: OcrElement? = null
         var elemRda: OcrElement? = null
 
-        for (elem in headerElements) {
+        // The anchors come from the header: the topmost "100g" word's row and the lines just above
+        // it, for a header split over two lines. A matching word anywhere else in the image is not
+        // a column, and it used to invert them (BUG-015)
+        fun boxOf(elem: OcrElement) = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox)
+        val per100Box = headerElements.filter { headerKind(it, servingGrams) == ColumnType.PER_100G }
+            .mapNotNull(::boxOf)
+            .minByOrNull { it.top }
+        val anchorWords = if (per100Box == null) headerElements else headerElements.filter { elem ->
+            val box = boxOf(elem)
+            box != null && box.top < per100Box.bottom && per100Box.top - box.top <= per100Box.height * HEADER_LINES_ABOVE
+        }
+
+        for (elem in anchorWords) {
             val text = elem.text.lowercase(Locale.ROOT)
             val sBox = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox) ?: continue
 
@@ -316,11 +347,18 @@ class SpatialTableDetector {
                 if (elemRda == null || sBox.centerX > (elemRda.spatialBounds?.centerX ?: 0)) {
                     elemRda = elem
                 }
-            } else if (text.contains("100g") || text.contains("100 g") || text.contains("100gm")) {
+            } else if (isPer100Header(text)) {
                 elem100 = elem
             } else if (text.contains("serving") || text.contains("serve") || (servingGrams != null && text.contains("${servingGrams.toInt()}g"))) {
                 elemServ = elem
             }
+        }
+
+        // A table can print "%" only in its rows: the rightmost one still marks the column
+        if (elemRda == null) {
+            elemRda = headerElements
+                .filter { headerKind(it, servingGrams) == ColumnType.RDA }
+                .maxByOrNull { boxOf(it)?.centerX ?: 0 }
         }
 
         // If elements found, define physical column centers
@@ -414,8 +452,49 @@ class SpatialTableDetector {
             topmostBottom { headerKind(it, servingGrams) == ColumnType.PER_SERVING },
             topmostBottom { headerKind(it, servingGrams) == ColumnType.RDA && it.text.any { c -> c.isLetter() } }
         ).maxOrNull() ?: 0
-        return detected.map { it.copy(headerBottomY = headerBottom) }
+        val words = LabelRowFilters.withSplitAmountsJoined(elements.filterNot { it in packWords })
+        val anchors = mapOf(ColumnType.PER_100G to elem100, ColumnType.PER_SERVING to elemServ, ColumnType.RDA to elemRda)
+        return detected.map { column ->
+            val cell = anchors[column.type]?.let { headerCellRange(it, words, servingGrams) }
+            column.copy(
+                headerBottomY = headerBottom,
+                cellLeft = cell?.start ?: column.centerX,
+                cellRight = cell?.endInclusive ?: column.centerX
+            )
+        }
     }
+
+    /**
+     * The X range of the header cell [anchor] sits in: the words printed right beside it on its row
+     * ("Per", "serving", "(30g)"), up to the next column's header. A column's values sit under that
+     * cell, wherever in it they are aligned (BUG-016).
+     */
+    private fun headerCellRange(anchor: OcrElement, words: List<OcrElement>, servingGrams: Double?): ClosedFloatingPointRange<Float>? {
+        fun boxOf(elem: OcrElement) = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox)
+        val box = boxOf(anchor) ?: return null
+        val row = words
+            .filter { word -> boxOf(word)?.let { abs(it.centerY - box.centerY) < box.height / 2 } == true }
+            .sortedBy { boxOf(it)?.left ?: 0 }
+        val at = row.indexOfFirst { boxOf(it) == box }
+        if (at < 0) return box.left.toFloat()..box.right.toFloat()
+        val kind = headerKind(anchor, servingGrams)
+        fun sameCell(word: OcrElement) = headerKind(word, servingGrams).let { it == null || it == kind }
+        fun beside(left: OcrElement, right: OcrElement): Boolean {
+            val gap = (boxOf(right)?.left ?: 0) - (boxOf(left)?.right ?: 0)
+            return gap <= box.height
+        }
+        var first = at
+        while (first > 0 && sameCell(row[first - 1]) && beside(row[first - 1], row[first])) first--
+        var last = at
+        // "Per" opens the next column's header
+        while (last < row.lastIndex && sameCell(row[last + 1]) && !row[last + 1].text.equals("per", ignoreCase = true) &&
+            beside(row[last], row[last + 1])
+        ) last++
+        return (boxOf(row[first])?.left ?: box.left).toFloat()..(boxOf(row[last])?.right ?: box.right).toFloat()
+    }
+
+    private fun isPer100Header(text: String): Boolean =
+        text.contains("100g") || text.contains("100 g") || text.contains("100gm") || text.contains("100ml") || text.contains("100 ml")
 
     /** The column header [elem] would anchor, by the same tests the anchors use, or null. */
     private fun headerKind(elem: OcrElement, servingGrams: Double?): ColumnType? {
@@ -423,7 +502,7 @@ class SpatialTableDetector {
         return when {
             text.contains("size") || text.contains("total") -> null
             text.contains("rda") || text.contains("%") -> ColumnType.RDA
-            text.contains("100g") || text.contains("100 g") || text.contains("100gm") -> ColumnType.PER_100G
+            isPer100Header(text) -> ColumnType.PER_100G
             text.contains("serving") || text.contains("serve") ||
                 (servingGrams != null && text.contains("${servingGrams.toInt()}g")) -> ColumnType.PER_SERVING
             else -> null
@@ -513,8 +592,28 @@ class SpatialTableDetector {
         return rows.sortedBy { it.centerY }
     }
 
+    /**
+     * Where lines that name a row sit, modelled or not: one starts with a word left of the columns.
+     * A label this table has no row for still owns the numbers beside it (BUG-016).
+     */
+    private fun rowLabelCenters(lines: List<OcrLine>, columns: List<PhysicalColumn>): List<Float> {
+        val firstColumnLeft = columns.minOfOrNull { it.cellLeft } ?: return emptyList()
+        return lines.mapNotNull { line ->
+            val box = line.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(line.boundingBox)
+            box?.takeIf { it.left < firstColumnLeft && line.text.trimStart().firstOrNull()?.isLetter() == true }?.centerY?.toFloat()
+        }.sorted()
+    }
+
+    /** The usual distance between neighbouring rows, or null with too few rows to tell. */
+    private fun rowPitch(centers: List<Float>): Float? =
+        centers.zipWithNext { above, below -> below - above }
+            .filter { it > 1f }
+            .sorted()
+            .let { it.getOrNull(it.size / 2) }
+
     private fun assignTokensToCells(
         elements: List<OcrElement>,
+        lines: List<OcrLine>,
         columns: List<PhysicalColumn>,
         rows: List<PhysicalRow>,
         logLines: MutableList<String>,
@@ -524,20 +623,33 @@ class SpatialTableDetector {
 
         // Group elements by row
         val elementsByRow = mutableMapOf<PhysicalRow, MutableList<Pair<OcrElement, List<NutritionNumericParser.ParsedNumericToken>>>>()
+        val headerBottomY = columns.maxOfOrNull { it.headerBottomY } ?: 0
+        val labelCenters = rowLabelCenters(lines, columns)
+        val halfPitch = rowPitch(labelCenters)?.div(2f)
+        // The word after each one on its line, for a unit printed apart from its number
+        val unitAfter = IdentityHashMap<OcrElement, String>()
+        for (line in lines) line.elements.zipWithNext { current, next -> unitAfter[current] = next.text }
 
         for (elem in elements) {
             val sBox = elem.spatialBounds ?: NutritionLabelParser.SpatialBox.fromAndroidRect(elem.boundingBox) ?: continue
+            // The header's own "100" and "30" are never cells, however close the first row sits
+            if (sBox.centerY <= headerBottomY) continue
             // "7" "%" printed as two words is a %DV figure, not a value (BUG-041)
             val tokens = NutritionNumericParser.extractTokens(elem.text)
                 .map { if (elem in beforePercentSign) it.copy(isPercent = true) else it }
+                .map { if (it.unit == null) it.copy(unit = NutritionUnitParser.massUnitOf(unitAfter[elem])) else it }
             if (tokens.isEmpty()) continue
 
+            val y = sBox.centerY.toFloat()
             val matchedRow = rows.minByOrNull { row ->
-                abs(sBox.centerY.toFloat() - row.centerY)
+                abs(y - row.centerY)
             }?.takeIf { row ->
-                abs(sBox.centerY.toFloat() - row.centerY) <= (row.height * 0.95f) &&
+                abs(y - row.centerY) <= minOf(row.height * 0.95f, halfPitch ?: Float.MAX_VALUE) &&
                 sBox.centerX > (row.labelRight - 15f)
             } ?: continue
+            // Beside a label of its own, this number is that row's even if the table has no such row
+            val nearestLabel = labelCenters.minByOrNull { abs(y - it) }
+            if (nearestLabel != null && abs(nearestLabel - matchedRow.centerY) > 1f) continue
 
             elementsByRow.getOrPut(matchedRow) { mutableListOf() }.add(Pair(elem, tokens))
         }
@@ -563,57 +675,43 @@ class SpatialTableDetector {
                 if (row.nutrientKey == "calories") kcalTokens(row, tokens, elements, logLines) else tokens
             }
 
-            // Assign RDA token
-            if (rdaCol != null && rdaTokens.isNotEmpty()) {
-                val rdaTok = rdaTokens.first()
+            fun addCell(token: Pair<NutritionNumericParser.ParsedNumericToken, NutritionLabelParser.SpatialBox>, column: ColumnType) {
                 cells.add(
                     TableCell(
                         nutrientKey = row.nutrientKey,
-                        columnType = ColumnType.RDA,
-                        rawToken = rdaTok.first,
-                        bounds = rdaTok.second,
+                        columnType = column,
+                        rawToken = token.first,
+                        bounds = token.second,
                         confidence = 0.95f
                     )
                 )
-                logLines.add("Token Assigned: '${rdaTok.first.rawText}' -> [${row.nutrientKey}, RDA]")
+                logLines.add("Token Assigned: '${token.first.rawText}' -> [${row.nutrientKey}, $column]")
             }
 
+            // Each number goes to the column it sits under, so a missed cell leaves a gap instead
+            // of moving the row left, and a bare %RDA figure stays out of the value columns (BUG-016)
+            val allCols = valueCols + listOfNotNull(rdaCol)
+            val byColumn = valueTokens.groupBy { token ->
+                val x = token.second.centerX.toFloat()
+                allCols.minByOrNull { it.distanceTo(x) }
+            }
+            val underValueCols = valueTokens.filter { token -> byColumn.any { (col, tokens) -> col?.type != ColumnType.RDA && token in tokens } }
+
+            // Assign RDA token
+            val rdaTok = rdaTokens.firstOrNull() ?: byColumn[rdaCol]?.firstOrNull()
+            if (rdaCol != null && rdaTok != null) addCell(rdaTok, ColumnType.RDA)
+
             // Assign value tokens to value columns
-            if (valueCols.size >= 2 && valueTokens.size >= 2) {
-                val tok0 = valueTokens[0]
-                val tok1 = valueTokens[1]
-                cells.add(
-                    TableCell(
-                        nutrientKey = row.nutrientKey,
-                        columnType = valueCols[0].type,
-                        rawToken = tok0.first,
-                        bounds = tok0.second,
-                        confidence = 0.95f
-                    )
-                )
-                cells.add(
-                    TableCell(
-                        nutrientKey = row.nutrientKey,
-                        columnType = valueCols[1].type,
-                        rawToken = tok1.first,
-                        bounds = tok1.second,
-                        confidence = 0.95f
-                    )
-                )
-                logLines.add("Tokens Assigned: '${tok0.first.rawText}' -> [${row.nutrientKey}, ${valueCols[0].type}], '${tok1.first.rawText}' -> [${row.nutrientKey}, ${valueCols[1].type}]")
-            } else if (valueTokens.isNotEmpty() && valueCols.isNotEmpty()) {
-                val tok = valueTokens[0]
-                val closestCol = valueCols.minByOrNull { abs(tok.second.centerX - it.centerX) } ?: valueCols.first()
-                cells.add(
-                    TableCell(
-                        nutrientKey = row.nutrientKey,
-                        columnType = closestCol.type,
-                        rawToken = tok.first,
-                        bounds = tok.second,
-                        confidence = 0.95f
-                    )
-                )
-                logLines.add("Token Assigned: '${tok.first.rawText}' -> [${row.nutrientKey}, ${closestCol.type}]")
+            val filledCols = valueCols.filter { !byColumn[it].isNullOrEmpty() }
+            if (valueCols.size >= 2 && underValueCols.size >= 2 && filledCols.size < 2) {
+                // All under one header: this table is not aligned to its header, so reading order decides
+                addCell(underValueCols[0], valueCols[0].type)
+                addCell(underValueCols[1], valueCols[1].type)
+            } else {
+                for (column in filledCols) {
+                    val closest = byColumn.getValue(column).minByOrNull { abs(it.second.centerX - column.centerX) } ?: continue
+                    addCell(closest, column.type)
+                }
             }
         }
 

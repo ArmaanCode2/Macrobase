@@ -38,3 +38,13 @@ INDB:0991,sodium_level,11873.6 mg,accepted,Chaat masala is a spice blend made wi
 INDB:1008,sodium_level,7559.38 mg,accepted,Salt-preserved pickle.
 INDB:0983,sodium_level,3429.94 mg,accepted,Salt-preserved pickle.
 INDB:0985,sodium_level,6415.9 mg,accepted,Salt-preserved pickle.
+INDB:0091,cooked_dish_water,42.6 g,accepted,"A griddled flatbread, not a dish cooked in water: a paratha is this dry."
+INDB:0100,cooked_dish_water,25.0 g,accepted,Fried bread: its water is the poori class in corrections.csv.
+INDB:0277,cooked_dish_water,30.0 g,accepted,A sweet boiled down until dry.
+INDB:0674,cooked_dish_water,40.5 g,accepted,Fried: its water is the vada class in corrections.csv.
+INDB:0675,cooked_dish_water,40.5 g,accepted,Fried: its water is the vada class in corrections.csv.
+INDB:0893,cooked_dish_water,4.1 g,accepted,A fried crisp snack: its water is the sev class in corrections.csv.
+INDB:0452,cooked_dish_water,39.2 g,fix,"Poha looks too dry, but no measured dish in the repository is made this way, so the right water is not known."
+INDB:0776,cooked_dish_water,25.3 g,fix,"A cooked wheat dish near dry weight. The repository holds no measured cooked wheat dish, only raw semolina and bulgur."
+INDB:0777,cooked_dish_water,26.9 g,fix,"A cooked wheat dish near dry weight. The repository holds no measured cooked wheat dish, only raw semolina and bulgur."
+INDB:0426,cooked_dish_water,10.5 g,fix,"Puranpoli looks too dry for a griddled flatbread, but the repository holds no measured one."

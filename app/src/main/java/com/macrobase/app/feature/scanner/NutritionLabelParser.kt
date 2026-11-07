@@ -119,7 +119,9 @@ class NutritionLabelParser {
         val columns = analyzeColumns(spatialRows)
 
         val basis = when {
-            spatialResult.columns.any { it.type == ColumnType.PER_100G } -> NutritionBasis.PER_100_G
+            // A drink's column is per 100 ml, which stays what the label says it is
+            spatialResult.columns.any { it.type == ColumnType.PER_100G } ->
+                if (rawBasis == NutritionBasis.PER_100_ML) NutritionBasis.PER_100_ML else NutritionBasis.PER_100_G
             // A "100 g" column header without "per" ("Typical values 100 g  Serving 30 g") still
             // says what the first column is; it only decides when the wording did not
             rawBasis == NutritionBasis.UNKNOWN && columns.columns.any { it.type == ColumnType.PER_100G } ->
@@ -128,16 +130,23 @@ class NutritionLabelParser {
             else -> rawBasis
         }
 
-        // Filter sections (Stop at Amino Acid Profile or Ingredients ONLY if encountered after table header)
+        // Filter sections: Amino Acid Profile or Ingredients end the table only once a nutrient row
+        // with its number has been read. Above that they are text printed before the table (BUG-012)
         val filteredRows = mutableListOf<SpatialRow>()
         var foundTableOrNutrient = false
-        for (row in spatialRows) {
+        var nutrientRowSeen = false
+        // A claim above the table ("High Protein Bar 20g Protein") is not the nutrient's row. Those
+        // rows are only a last resort, for a label that prints its header below its values (BUG-013)
+        val tableStart = tableStartIndex(spatialRows)
+        val rowsAboveTable = spatialRows.take(tableStart).filterNot { isIngredientText(it.text.lowercase(Locale.ROOT)) }
+        for (row in spatialRows.drop(tableStart)) {
             val lower = row.text.lowercase(Locale.ROOT)
             if (lower.contains("nutrition") || lower.contains("nutrients") || lower.contains("100g") || lower.contains("energy") || lower.contains("protein")) {
                 foundTableOrNutrient = true
             }
-            if (foundTableOrNutrient && (lower.contains("amino acid profile") || lower.contains("typical amino acid") || lower.contains("ingredients") || lower.contains("allergens"))) {
-                break
+            if (isIngredientText(lower)) {
+                if (nutrientRowSeen) break
+                continue
             }
             // The %DV footnote and its reference rows ("Total Fat Less than 65g 80g") end the
             // table: their figures are never this food's values (BUG-045)
@@ -145,6 +154,7 @@ class NutritionLabelParser {
                 break
             }
             filteredRows.add(row)
+            if (ALL_NUTRIENT_WORDS.containsMatchIn(lower) && row.elements.any(::holdsValue)) nutrientRowSeen = true
         }
 
         val effectiveServingGrams = servingInfo.servingGrams ?: spatialResult.servingMassG
@@ -167,8 +177,9 @@ class NutritionLabelParser {
             if (spatialResult.columns.isNotEmpty()) {
                 val cellGroup = spatialResult.cellsByNutrient[key]
                 if (cellGroup != null) {
-                val cell100 = cellGroup[ColumnType.PER_100G]
-                val cellServ = cellGroup[ColumnType.PER_SERVING]
+                val labelUnit = spatialResult.rows.firstOrNull { it.nutrientKey == key }?.labelText?.let(NutritionUnitParser::labelUnitOf)
+                val cell100 = cellGroup[ColumnType.PER_100G]?.inUnit(unit, labelUnit)
+                val cellServ = cellGroup[ColumnType.PER_SERVING]?.inUnit(unit, labelUnit)
                 val cellRda = cellGroup[ColumnType.RDA]
 
                 if (cellRda != null) {
@@ -236,6 +247,7 @@ class NutritionLabelParser {
         }
 
         return extractNutrient(filteredRows, patterns, unit, columns, basis, effectiveServingGrams, key, per100gMap, perServingMap, rdaMap)
+            ?: extractNutrient(rowsAboveTable, patterns, unit, columns, basis, effectiveServingGrams, key, per100gMap, perServingMap, rdaMap)
     }
 
         var calories = if (spatialResult.columns.isNotEmpty()) {
@@ -285,6 +297,7 @@ class NutritionLabelParser {
 
         if (calories == null) {
             calories = extractEnergy(filteredRows, normalizedFullText, columns, basis, effectiveServingGrams, per100gMap, perServingMap, rdaMap)
+                ?: extractEnergy(rowsAboveTable, normalizedFullText, columns, basis, effectiveServingGrams, per100gMap, perServingMap, rdaMap)
         }
         val caloriesKj = extractKjEnergy(filteredRows, normalizedFullText, columns, basis, per100gMap, perServingMap)
         var protein = resolveNutrient("protein", PROTEIN_PATTERNS, "g")
@@ -922,14 +935,15 @@ class NutritionLabelParser {
         for (row in rows.take(15)) {
             val rowTextLower = row.text.lowercase(Locale.ROOT)
             val isHeaderCandidate = rowTextLower.contains("100g") || rowTextLower.contains("100 g") ||
-                    rowTextLower.contains("100ml") || rowTextLower.contains("serve") ||
+                    rowTextLower.contains("100ml") || rowTextLower.contains("100 ml") || rowTextLower.contains("serve") ||
                     rowTextLower.contains("serving") || rowTextLower.contains("rda") ||
                     rowTextLower.contains("%")
 
             if (!isHeaderCandidate) continue
 
             // 1. Check individual elements
-            for (element in row.elements) {
+            val packWords = LabelRowFilters.servingPhraseWords(row.elements)
+            for (element in LabelRowFilters.withSplitAmountsJoined(row.elements.filterNot { it in packWords })) {
                 val text = element.text.lowercase(Locale.ROOT)
                 val sBox = element.spatialBounds ?: SpatialBox.fromAndroidRect(element.boundingBox)
                 if (sBox != null) {
@@ -956,7 +970,7 @@ class NutritionLabelParser {
 
             // 2. If row elements were merged into a single element or line
             val sBox = row.bounds
-            if (sBox != null && detectedCols.map { it.type }.distinct().size < 2) {
+            if (sBox != null && packWords.isEmpty() && detectedCols.map { it.type }.distinct().size < 2) {
                 val text = rowTextLower
                 val charW = sBox.width.toFloat() / max(1, text.length)
 
@@ -1133,12 +1147,15 @@ class NutritionLabelParser {
             }
             if (matchedKeyword.isEmpty()) continue
 
+            // A printed line can hold several nutrients: only the numbers beside this one's word (BUG-001)
+            val segment = segmentFor(row, Regex("""\b$matchedKeyword\b"""))
+            val labelUnit = NutritionUnitParser.labelUnitOf(row.text)
             val rowTokens = mutableListOf<RowToken>()
             val energyNumbers = mutableListOf<NutritionNumericParser.EnergyNumber>()
             val isEnergyRow = nutrientKey == "calories"
-            val elementTexts = row.elements.map { it.text }
+            val elementTexts = segment.elements.map { it.text }
             var pendingOp = ComparisonOperator.EXACT
-            for ((index, element) in row.elements.withIndex()) {
+            for ((index, element) in segment.elements.withIndex()) {
                 // Commas stay as printed: "1,580mg" is 1580 mg, not 1.58 (BUG-022)
                 val normalizedText = normalizeOcrMisreads(element.text)
                 // "7 %" read as two words is a %DV figure too, never a value (BUG-041)
@@ -1160,7 +1177,14 @@ class NutritionLabelParser {
                         else -> pendingOp
                     }
                     for ((tokenIndex, token) in wordTokens.withIndex()) {
-                        rowTokens.add(RowToken(token.numericValue, op, isPercent, element.text.trim(), cX))
+                        // The unit printed with the number counts, not only the unit this row usually has
+                        val inExpectedUnit = if (isEnergyRow || isPercent) {
+                            token.numericValue
+                        } else {
+                            val printed = token.unit ?: NutritionUnitParser.massUnitOf(elementTexts.getOrNull(index + 1))
+                            NutritionUnitParser.toExpectedUnit(token.numericValue, printed ?: labelUnit, expectedUnit) ?: continue
+                        }
+                        rowTokens.add(RowToken(inExpectedUnit, op, isPercent, element.text.trim(), cX))
                         energyNumbers.add(
                             NutritionNumericParser.EnergyNumber(
                                 unit = token.unit,
@@ -1274,6 +1298,9 @@ class NutritionLabelParser {
                 }
             }
 
+            // Only a percentage here ("100% Whey Protein"): the nutrient's row is further down (BUG-013)
+            if (per100g == null && perServing == null) continue
+
             val extracted = NutrientRowExtraction(
                 keywordMatch = matchedKeyword,
                 per100g = per100g,
@@ -1327,9 +1354,98 @@ class NutritionLabelParser {
                 }
             }
 
-            return reconcileNutrient(extracted, servingGrams, expectedUnit, basis, row.text)
+            val reconciled = reconcileNutrient(extracted, servingGrams, expectedUnit, basis, row.text)
+            // Telling a shared line's numbers apart is a judgement, so the user checks it
+            return if (segment.sharedLine) reconciled?.copy(needsReview = true, confidence = ConfidenceLevel.MEDIUM) else reconciled
         }
         return null
+    }
+
+    /** This cell with its number in [expectedUnit], or null when it cannot be (BUG-017). */
+    private fun SpatialTableDetector.TableCell.inUnit(expectedUnit: String, labelUnit: String?): SpatialTableDetector.TableCell? {
+        val value = NutritionUnitParser.toExpectedUnit(rawToken.numericValue, rawToken.unit ?: labelUnit, expectedUnit) ?: return null
+        return copy(rawToken = rawToken.copy(numericValue = value))
+    }
+
+    private fun isIngredientText(lower: String): Boolean =
+        lower.contains("amino acid profile") || lower.contains("typical amino acid") || lower.contains("ingredients") || lower.contains("allergens")
+
+    /** The row the nutrition table starts on: its header, or the first energy row with a number. */
+    private fun tableStartIndex(rows: List<SpatialRow>): Int {
+        val header = rows.indexOfFirst { row ->
+            val lower = row.text.lowercase(Locale.ROOT)
+            TABLE_HEADER.containsMatchIn(lower) && !isIngredientText(lower)
+        }
+        if (header >= 0) return header
+        val energyRow = rows.indexOfFirst { row ->
+            ENERGY_WORD.containsMatchIn(normalizeOcrMisreads(row.text).lowercase(Locale.ROOT)) && row.elements.any(::holdsValue)
+        }
+        return maxOf(energyRow, 0)
+    }
+
+    /** The words of a printed line that belong to one nutrient; [sharedLine] when it names others too. */
+    private class RowSegment(val elements: List<OcrElement>, val sharedLine: Boolean)
+
+    /**
+     * The part of [row] for the nutrient [keyword] names: from its word up to the next nutrient's
+     * word, or, when nothing there is a value, what is printed just before it ("Includes 10g Added
+     * Sugars"). Words split across an element are clipped, so a whole line read as one element works too.
+     */
+    private fun segmentFor(row: SpatialRow, keyword: Regex): RowSegment {
+        val words = row.elements.map { normalizeOcrMisreads(it.text).trim().lowercase(Locale.ROOT) }
+        val text = words.joinToString(" ")
+        val spans = ALL_NUTRIENT_WORDS.findAll(text).map { it.range }.toList()
+        val matches = keyword.findAll(text).map { it.range }.toList()
+        // "Fat" must be the word itself, not the end of "Saturated Fat", when the line has both
+        val own = matches.firstOrNull { it in spans } ?: matches.firstOrNull() ?: return RowSegment(row.elements, false)
+        val ownSpan = spans.firstOrNull { own.first in it } ?: own
+
+        fun clipped(from: Int, until: Int): List<OcrElement> {
+            val kept = mutableListOf<OcrElement>()
+            var start = 0
+            for ((i, word) in words.withIndex()) {
+                val end = start + word.length
+                val clipStart = maxOf(start, from)
+                val clipEnd = minOf(end, until)
+                if (clipStart < clipEnd) {
+                    kept.add(if (clipEnd - clipStart == word.length) row.elements[i] else row.elements[i].copy(text = word.substring(clipStart - start, clipEnd - start)))
+                }
+                start = end + 1
+            }
+            return kept
+        }
+
+        val nextStart = spans.firstOrNull { it.first > ownSpan.last }?.first ?: text.length
+        val after = withoutBracketedLabelNumbers(clipped(ownSpan.last + 1, nextStart))
+        val previousEnd = spans.lastOrNull { it.last < ownSpan.first }?.let { it.last + 1 } ?: 0
+        val before = clipped(previousEnd, ownSpan.first)
+        val elements = if (after.none(::holdsValue) && before.any(::holdsValue)) before else after
+        return RowSegment(elements, sharedLine = spans.size > 1)
+    }
+
+    /** A number that is not a percentage. */
+    private fun holdsValue(element: OcrElement): Boolean =
+        NutritionNumericParser.extractTokens(normalizeOcrMisreads(element.text)).any { !it.isPercent }
+
+    /**
+     * Without a bracket in the label ("Protein (N x 6.25) 12.0g"), whose number is not the value.
+     * A bracket holding the only number is the value ("Sodium (120mg)").
+     */
+    private fun withoutBracketedLabelNumbers(elements: List<OcrElement>): List<OcrElement> {
+        val outside = mutableListOf<OcrElement>()
+        var depth = 0
+        var labelEnded = false
+        for (element in elements) {
+            val opens = element.text.count { it == '(' }
+            val closes = element.text.count { it == ')' }
+            if (labelEnded || (depth == 0 && opens == 0)) {
+                outside.add(element)
+                if (holdsValue(element)) labelEnded = true
+            } else {
+                depth = maxOf(0, depth + opens - closes)
+            }
+        }
+        return if (outside.any(::holdsValue)) outside else elements
     }
 
     private fun reconcileNutrient(
@@ -1472,6 +1588,20 @@ class NutritionLabelParser {
     private val IRON_PATTERNS = listOf(
         "iron", "hierro"
     )
+
+    private val ENERGY_WORD = Regex("""\b(?:${ENERGY_PATTERNS.joinToString("|")})\b""")
+
+    private val TABLE_HEADER = Regex(
+        """\bnutrition(?:al)?\s+(?:facts|information|info|values?|declaration|per)\b|\bnutrients\b|""" +
+            """\bper\s*100\s*(?:g|gm|ml)\b|\bamount\s+per\s+serving\b|\btypical\s+(?:values?|composition)\b|\bserving\s+size\b"""
+    )
+
+    /** Any nutrient's word, longest first; "includes" opens the added sugars of a US label. */
+    private val ALL_NUTRIENT_WORDS: Regex = (
+        ENERGY_PATTERNS + PROTEIN_PATTERNS + CARBS_PATTERNS + FAT_PATTERNS + SAT_FAT_PATTERNS + TRANS_FAT_PATTERNS +
+            CHOLESTEROL_PATTERNS + FIBER_PATTERNS + SUGAR_PATTERNS + ADDED_SUGAR_PATTERNS.filterNot { it.contains(".*") } +
+            SODIUM_PATTERNS + SALT_PATTERNS + POTASSIUM_PATTERNS + CALCIUM_PATTERNS + IRON_PATTERNS + "includes"
+        ).sortedByDescending { it.length }.let { words -> Regex(words.joinToString("|", prefix = """\b(?:""", postfix = """)\b""")) }
 
     private fun normalizeOcrMisreads(text: String): String {
         var normalized = NutritionDigitCorrector.correctRowText(text)

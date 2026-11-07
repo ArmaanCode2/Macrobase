@@ -20,6 +20,8 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import com.macrobase.app.feature.foods.FOODS_VIEW_RECIPES
 import com.macrobase.app.feature.foods.FOODS_VIEW_CUSTOM
 import com.macrobase.app.feature.foods.FOODS_VIEW_KEY
+import com.macrobase.app.feature.foods.RECIPE_LOG_DAY_KEY
+import com.macrobase.app.feature.foods.RECIPE_LOG_MEAL_KEY
 import com.macrobase.app.feature.foods.FoodsScreen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -180,7 +182,7 @@ fun NavGraph(
             HomeScreen(
                 viewModel = homeViewModel,
                 basketCount = basketItems.size,
-                onOpenSearch = { navController.navigate(Screen.Search.createRoute()) },
+                onOpenSearch = { navController.navigate(homeViewModel.logContext().searchRoute) },
                 onScanLabel = {
                     // The scan fills a new custom food form: the form opens first, so the result lands in it
                     navController.navigate(Screen.EditCustomFood.createRoute())
@@ -328,11 +330,7 @@ fun NavGraph(
             val dateEpochDayArg = backStackEntry.arguments?.getString("dateEpochDay")?.toLongOrNull()
             val openLog = backStackEntry.arguments?.getBoolean("openLog") ?: false
             val viewModel: WeightViewModel = koinViewModel()
-            androidx.compose.runtime.LaunchedEffect(dateEpochDayArg) {
-                if (dateEpochDayArg != null) {
-                    viewModel.onSelectDate(LocalDate.ofEpochDay(dateEpochDayArg))
-                }
-            }
+            ApplyRouteDateOnce(dateEpochDayArg, viewModel::onSelectDate)
             WeightScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() },
@@ -354,11 +352,7 @@ fun NavGraph(
         ) { backStackEntry ->
             val dateEpochDayArg = backStackEntry.arguments?.getString("dateEpochDay")?.toLongOrNull()
             val viewModel: WaterViewModel = koinViewModel()
-            androidx.compose.runtime.LaunchedEffect(dateEpochDayArg) {
-                if (dateEpochDayArg != null) {
-                    viewModel.onSelectDate(LocalDate.ofEpochDay(dateEpochDayArg))
-                }
-            }
+            ApplyRouteDateOnce(dateEpochDayArg, viewModel::onSelectDate)
             WaterScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
@@ -511,6 +505,21 @@ fun NavGraph(
 }
 
 /**
+ * A day passed in the route is applied once. Rotation or a process restart must not put a tracker
+ * back on it after the user moved on or the day rolled over (BUG-006).
+ */
+@Composable
+private fun ApplyRouteDateOnce(dateEpochDayArg: Long?, select: (LocalDate) -> Unit) {
+    var appliedDateArg by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(dateEpochDayArg) {
+        if (dateEpochDayArg != null && dateEpochDayArg != appliedDateArg) {
+            appliedDateArg = dateEpochDayArg
+            select(LocalDate.ofEpochDay(dateEpochDayArg))
+        }
+    }
+}
+
+/**
  * The Foods views on [backStackEntry]: the chosen view lives in its saved state, so the "+" sheet's
  * "Log a recipe" can open the tab on Recipes.
  */
@@ -524,6 +533,8 @@ private fun FoodsDestination(
     val customFoodsViewModel: CustomFoodsViewModel = koinViewModel()
     val recipesViewModel: RecipesViewModel = koinViewModel()
     val selectedView by backStackEntry.savedStateHandle.getStateFlow(FOODS_VIEW_KEY, initialView).collectAsState()
+    val recipeLogMeal by backStackEntry.savedStateHandle.getStateFlow<String?>(RECIPE_LOG_MEAL_KEY, null).collectAsState()
+    val recipeLogDay by backStackEntry.savedStateHandle.getStateFlow<Long?>(RECIPE_LOG_DAY_KEY, null).collectAsState()
     FoodsScreen(
         selectedView = selectedView,
         onSelectView = { backStackEntry.savedStateHandle[FOODS_VIEW_KEY] = it },
@@ -544,6 +555,8 @@ private fun FoodsDestination(
         recipes = {
             RecipesScreen(
                 viewModel = recipesViewModel,
+                logMeal = recipeLogMeal?.let { name -> MealType.entries.firstOrNull { it.name == name } },
+                logDate = recipeLogDay?.let { LocalDate.ofEpochDay(it) },
                 onCreateClick = { navController.navigate(Screen.EditRecipe.createRoute()) },
                 onEditClick = { recipeId -> navController.navigate(Screen.EditRecipe.createRoute(recipeId)) },
                 // Back to the existing dashboard rather than stacking a second one on top

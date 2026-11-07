@@ -9,6 +9,7 @@ import com.macrobase.app.core.designsystem.components.MbScanButton
 import com.macrobase.app.core.designsystem.components.MbFilledPlusButton
 import com.macrobase.app.core.designsystem.components.MbTextField
 import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbButton
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbRowTile
@@ -86,6 +87,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
@@ -97,6 +100,7 @@ import com.macrobase.app.core.designsystem.components.EmptyStateCard
 import com.macrobase.app.core.designsystem.components.PrimaryButton
 import com.macrobase.app.domain.model.CustomFood
 import com.macrobase.app.domain.model.Food
+import com.macrobase.app.core.util.PendingDelete
 import com.macrobase.app.core.util.hasThousandsSeparator
 import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.feature.detail.formatQuantityForInput
@@ -122,8 +126,33 @@ data class CustomFoodsListUiState(
 )
 
 class CustomFoodsViewModel(
-    private val foodRepository: FoodRepository
+    private val foodRepository: FoodRepository,
+    private val savedState: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
+
+    /** The edit screen's form; see [CustomFoodForm]. */
+    val form: StateFlow<CustomFoodForm> = savedState.getStateFlow(FORM_KEY, CustomFoodForm())
+
+    private val _existingFood = MutableStateFlow<CustomFood?>(null)
+    /** The stored food the form edits; null for a new one, and until it has loaded. */
+    val existingFood: StateFlow<CustomFood?> = _existingFood.asStateFlow()
+
+    fun updateForm(change: (CustomFoodForm) -> CustomFoodForm) {
+        savedState[FORM_KEY] = change(form.value)
+    }
+
+    /** Loads the food to edit, once. A form brought back after the app was closed keeps what was typed. */
+    fun openForEdit(foodId: Long) {
+        if (foodId <= 0L || _existingFood.value != null) return
+        viewModelScope.launch {
+            val found = foodRepository.getCustomFood(foodId) ?: return@launch
+            _existingFood.value = found
+            if (form.value == CustomFoodForm()) savedState[FORM_KEY] = CustomFoodForm.from(found)
+        }
+    }
+
+    /** True when leaving now would lose something the user entered. */
+    fun hasUnsavedChanges(): Boolean = form.value != (_existingFood.value?.let { CustomFoodForm.from(it) } ?: CustomFoodForm())
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -158,8 +187,10 @@ class CustomFoodsViewModel(
         initialValue = CustomFoodsListUiState(isLoading = true)
     )
 
+    /** Fills the form. The draft stays for the review banner until the form is saved or it is dismissed. */
     fun setScannedDraft(draft: NutritionLabelDraft) {
         _scannedDraft.value = draft
+        updateForm { it.withDraft(draft) }
     }
 
     fun clearScannedDraft() {
@@ -229,14 +260,22 @@ class CustomFoodsViewModel(
 
     private var saveInFlight = false
 
-    /** Loads the stored custom food, including fields the list model does not carry. */
-    suspend fun getCustomFood(id: Long): CustomFood? = foodRepository.getCustomFood(id)
+    /** The food a delete button asked about, by row id. */
+    val pendingDelete = PendingDelete<Long>()
+
+    fun confirmDelete(onComplete: () -> Unit = {}) {
+        pendingDelete.confirm()?.let { deleteCustomFood(it, onComplete) }
+    }
 
     fun deleteCustomFood(id: Long, onComplete: () -> Unit) {
         viewModelScope.launch {
             foodRepository.deleteCustomFood(id)
             onComplete()
         }
+    }
+
+    private companion object {
+        const val FORM_KEY = "custom_food_form"
     }
 }
 
@@ -253,6 +292,7 @@ fun CustomFoodsScreen(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val listState = rememberLazyListState()
     ReportContentScrolled(listState.rememberIsScrolled())
+    ConfirmDeleteCustomFood(viewModel)
 
     Column(
         modifier = modifier
@@ -326,11 +366,26 @@ fun CustomFoodsScreen(
                         food = item,
                         onClick = { onFoodClick(item.id) },
                         onEdit = { onEditClick(item.id) },
-                        onDelete = { viewModel.deleteCustomFood(item.id) {} }
+                        onDelete = { viewModel.pendingDelete.ask(item.id, item.name) }
                     )
                 }
             }
         }
+    }
+}
+
+/** Asks before deleting what [CustomFoodsViewModel.pendingDelete] holds; [onDeleted] runs once it is gone. */
+@Composable
+private fun ConfirmDeleteCustomFood(viewModel: CustomFoodsViewModel, onDeleted: () -> Unit = {}) {
+    val request by viewModel.pendingDelete.request.collectAsState()
+    request?.let {
+        MbConfirmDialog(
+            title = "Delete ${it.label}?",
+            text = "This cannot be undone. Entries already in your diary stay as they are.",
+            confirmText = "Delete",
+            onConfirm = { viewModel.confirmDelete(onDeleted) },
+            onDismiss = { viewModel.pendingDelete.cancel() }
+        )
     }
 }
 
@@ -419,6 +474,9 @@ fun CustomFoodRow(
     }
 }
 
+/** Protein, carbohydrates and fat have no "not stated", so a blank one saves as 0 and the form says so (BUG-013). */
+internal fun blankMacroHelp(text: String): String? = if (text.isBlank()) "Left blank, this saves as 0 g" else null
+
 /** A number typed into the custom food form: its value, or why it was refused. Blank is neither. */
 internal data class FormNumber(val value: Double?, val error: String?)
 
@@ -444,87 +502,49 @@ fun EditCustomFoodScreen(
     onSaveSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var existingFood by remember { mutableStateOf<CustomFood?>(null) }
-    var name by remember { mutableStateOf("") }
-    var brand by remember { mutableStateOf("") }
-    var servingSize by remember { mutableStateOf("1") }
-    var selectedServingUnit by remember { mutableStateOf(ServingUnit.SERVING) }
-    var customUnitName by remember { mutableStateOf("") }
-    var calories by remember { mutableStateOf("") }
-    var protein by remember { mutableStateOf("") }
-    var carbs by remember { mutableStateOf("") }
-    var fat by remember { mutableStateOf("") }
-    var saturatedFat by remember { mutableStateOf("") }
-    var fiber by remember { mutableStateOf("") }
-    var sugar by remember { mutableStateOf("") }
-    var sodium by remember { mutableStateOf("") }
-
+    val form by viewModel.form.collectAsState()
+    val existingFood by viewModel.existingFood.collectAsState()
     val scannedDraft by viewModel.scannedDraft.collectAsState()
-    var activeDraftForBanner by remember { mutableStateOf<NutritionLabelDraft?>(null) }
+    var showDiscardPrompt by remember { mutableStateOf(false) }
 
-    LaunchedEffect(scannedDraft) {
-        scannedDraft?.let { draft ->
-            activeDraftForBanner = draft
-            if (!draft.foodName.isNullOrBlank()) name = draft.foodName
-            if (!draft.brand.isNullOrBlank()) brand = draft.brand
-            draft.servingSize?.let { servingSize = formatQuantityForInput(it) }
-            draft.servingUnit?.let { selectedServingUnit = it }
-            draft.calories?.let { calories = formatQuantityForInput(it.value) }
-            draft.protein?.let { protein = formatQuantityForInput(it.value) }
-            draft.carbs?.let { carbs = formatQuantityForInput(it.value) }
-            draft.fat?.let { fat = formatQuantityForInput(it.value) }
-            draft.saturatedFat?.let { saturatedFat = formatQuantityForInput(it.value) }
-            draft.fiber?.let { fiber = formatQuantityForInput(it.value) }
-            draft.sugar?.let { sugar = formatQuantityForInput(it.value) }
-            draft.sodium?.let { sodium = formatQuantityForInput(it.value) }
-            viewModel.clearScannedDraft()
-        }
-    }
+    LaunchedEffect(foodId) { viewModel.openForEdit(foodId) }
+    ConfirmDeleteCustomFood(viewModel, onDeleted = onSaveSuccess)
 
-    LaunchedEffect(foodId) {
-        if (foodId > 0L && existingFood == null) {
-            val found = viewModel.getCustomFood(foodId)
-            if (found != null) {
-                // Prefill the stored values exactly; saving unchanged must not alter the food
-                val nutrition = found.nutritionPerServing
-                existingFood = found
-                name = found.name
-                brand = found.brand ?: ""
-                servingSize = formatQuantityForInput(found.servingSize)
-                selectedServingUnit = found.servingUnit
-                customUnitName = found.customUnitName ?: ""
-                calories = formatQuantityForInput(nutrition.calories)
-                protein = formatQuantityForInput(nutrition.proteinGrams)
-                carbs = formatQuantityForInput(nutrition.carbsGrams)
-                fat = formatQuantityForInput(nutrition.fatGrams)
-                saturatedFat = nutrition.saturatedFatGrams?.let { formatQuantityForInput(it) } ?: ""
-                fiber = nutrition.fiberGrams?.let { formatQuantityForInput(it) } ?: ""
-                sugar = nutrition.sugarGrams?.let { formatQuantityForInput(it) } ?: ""
-                sodium = nutrition.sodiumMg?.let { formatQuantityForInput(it) } ?: ""
-            }
-        }
+    BackHandler(enabled = viewModel.hasUnsavedChanges()) { showDiscardPrompt = true }
+    if (showDiscardPrompt) {
+        MbConfirmDialog(
+            title = "Discard this food?",
+            text = "What you entered here has not been saved.",
+            confirmText = "Discard",
+            dismissText = "Keep editing",
+            onConfirm = {
+                showDiscardPrompt = false
+                onSaveSuccess()
+            },
+            onDismiss = { showDiscardPrompt = false }
+        )
     }
 
     val isEditing = foodId > 0L && existingFood != null
-    val servingSizeInput = readFormNumber(servingSize, largeAmount = true)
-    val caloriesInput = readFormNumber(calories, largeAmount = true)
-    val proteinInput = readFormNumber(protein)
-    val carbsInput = readFormNumber(carbs)
-    val fatInput = readFormNumber(fat)
+    val servingSizeInput = readFormNumber(form.servingSize, largeAmount = true)
+    val caloriesInput = readFormNumber(form.calories, largeAmount = true)
+    val proteinInput = readFormNumber(form.protein)
+    val carbsInput = readFormNumber(form.carbs)
+    val fatInput = readFormNumber(form.fat)
     // Saturated fat is part of total fat; more of it is a typo or a misread label
-    val saturatedFatInput = readFormNumber(saturatedFat).let { input ->
+    val saturatedFatInput = readFormNumber(form.saturatedFat).let { input ->
         val value = input.value
         if (value != null && value > (fatInput.value ?: 0.0)) FormNumber(null, "More than total fat") else input
     }
-    val fiberInput = readFormNumber(fiber)
-    val sugarInput = readFormNumber(sugar)
-    val sodiumInput = readFormNumber(sodium, largeAmount = true)
+    val fiberInput = readFormNumber(form.fiber)
+    val sugarInput = readFormNumber(form.sugar)
+    val sodiumInput = readFormNumber(form.sodium, largeAmount = true)
     val numberInputs = listOf(
         servingSizeInput, caloriesInput, proteinInput, carbsInput, fatInput,
         saturatedFatInput, fiberInput, sugarInput, sodiumInput
     )
-    val isCustomUnitValid = selectedServingUnit != ServingUnit.CUSTOM || customUnitName.isNotBlank()
-    val isFormValid = name.isNotBlank() && caloriesInput.value != null && (servingSizeInput.value ?: 0.0) > 0.0 &&
+    val isCustomUnitValid = form.servingUnit != ServingUnit.CUSTOM || form.customUnitName.isNotBlank()
+    val isFormValid = form.name.isNotBlank() && caloriesInput.value != null && (servingSizeInput.value ?: 0.0) > 0.0 &&
         numberInputs.none { it.error != null } && isCustomUnitValid
 
     val scrollState = rememberScrollState()
@@ -552,8 +572,8 @@ fun EditCustomFoodScreen(
         }
 
         // Detected values review banner
-        if (activeDraftForBanner != null && !isEditing) {
-            val draft = activeDraftForBanner!!
+        val draft = scannedDraft
+        if (draft != null && !isEditing) {
             MbPanel(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -570,7 +590,7 @@ fun EditCustomFoodScreen(
                     MbIconButton(
                         icon = Ph.X.light,
                         contentDescription = "Dismiss",
-                        onClick = { activeDraftForBanner = null },
+                        onClick = { viewModel.clearScannedDraft() },
                         size = 36.dp,
                         iconSize = 16.dp
                     )
@@ -616,14 +636,14 @@ fun EditCustomFoodScreen(
 
         FormSection("Required information") {
             MbTextField(
-                value = name,
-                onValueChange = { name = it },
+                value = form.name,
+                onValueChange = { text -> viewModel.updateForm { it.copy(name = text) } },
                 label = "Food Name *",
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = brand,
-                onValueChange = { brand = it },
+                value = form.brand,
+                onValueChange = { text -> viewModel.updateForm { it.copy(brand = text) } },
                 label = "Brand / Origin (Optional)",
                 modifier = Modifier.fillMaxWidth()
             )
@@ -632,30 +652,30 @@ fun EditCustomFoodScreen(
                 horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
             ) {
                 MbTextField(
-                    value = servingSize,
-                    onValueChange = { servingSize = it },
+                    value = form.servingSize,
+                    onValueChange = { text -> viewModel.updateForm { it.copy(servingSize = text) } },
                     label = "Serving Size *",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     errorText = servingSizeInput.error,
                     modifier = Modifier.weight(1f)
                 )
                 ServingUnitPicker(
-                    selected = selectedServingUnit,
-                    onSelect = { selectedServingUnit = it },
+                    selected = form.servingUnit,
+                    onSelect = { unit -> viewModel.updateForm { it.copy(servingUnit = unit) } },
                     modifier = Modifier.weight(1.5f)
                 )
             }
-            if (selectedServingUnit == ServingUnit.CUSTOM) {
+            if (form.servingUnit == ServingUnit.CUSTOM) {
                 MbTextField(
-                    value = customUnitName,
-                    onValueChange = { customUnitName = it },
+                    value = form.customUnitName,
+                    onValueChange = { text -> viewModel.updateForm { it.copy(customUnitName = text) } },
                     label = "Custom Unit Name * (e.g. roti, slice, bowl, scoop)",
                     modifier = Modifier.fillMaxWidth()
                 )
             }
             MbTextField(
-                value = calories,
-                onValueChange = { calories = it },
+                value = form.calories,
+                onValueChange = { text -> viewModel.updateForm { it.copy(calories = text) } },
                 label = "Calories (kcal) *",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = caloriesInput.error,
@@ -665,25 +685,28 @@ fun EditCustomFoodScreen(
 
         FormSection("Macronutrients (per serving)") {
             MbTextField(
-                value = protein,
-                onValueChange = { protein = it },
+                value = form.protein,
+                onValueChange = { text -> viewModel.updateForm { it.copy(protein = text) } },
                 label = "Protein (g)",
+                helpText = blankMacroHelp(form.protein),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = proteinInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = carbs,
-                onValueChange = { carbs = it },
+                value = form.carbs,
+                onValueChange = { text -> viewModel.updateForm { it.copy(carbs = text) } },
                 label = "Carbohydrates (g)",
+                helpText = blankMacroHelp(form.carbs),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = carbsInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = fat,
-                onValueChange = { fat = it },
+                value = form.fat,
+                onValueChange = { text -> viewModel.updateForm { it.copy(fat = text) } },
                 label = "Fat (g)",
+                helpText = blankMacroHelp(form.fat),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = fatInput.error,
                 modifier = Modifier.fillMaxWidth()
@@ -698,32 +721,32 @@ fun EditCustomFoodScreen(
                 color = AppColors.TextSecondary
             )
             MbTextField(
-                value = saturatedFat,
-                onValueChange = { saturatedFat = it },
+                value = form.saturatedFat,
+                onValueChange = { text -> viewModel.updateForm { it.copy(saturatedFat = text) } },
                 label = "Saturated Fat (g)",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = saturatedFatInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = fiber,
-                onValueChange = { fiber = it },
+                value = form.fiber,
+                onValueChange = { text -> viewModel.updateForm { it.copy(fiber = text) } },
                 label = "Dietary Fiber (g)",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = fiberInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = sugar,
-                onValueChange = { sugar = it },
+                value = form.sugar,
+                onValueChange = { text -> viewModel.updateForm { it.copy(sugar = text) } },
                 label = "Total Sugars (g)",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = sugarInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
             MbTextField(
-                value = sodium,
-                onValueChange = { sodium = it },
+                value = form.sodium,
+                onValueChange = { text -> viewModel.updateForm { it.copy(sodium = text) } },
                 label = "Sodium (mg)",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 errorText = sodiumInput.error,
@@ -740,11 +763,11 @@ fun EditCustomFoodScreen(
                 viewModel.saveCustomFood(
                     id = existingFood?.id ?: 0L,
                     uuid = existingFood?.uuid ?: UUID.randomUUID().toString(),
-                    name = name,
-                    brand = brand,
+                    name = form.name,
+                    brand = form.brand,
                     servingSize = servingSizeInput.value ?: 1.0,
-                    servingUnit = selectedServingUnit,
-                    customUnitName = if (selectedServingUnit == ServingUnit.CUSTOM) customUnitName else null,
+                    servingUnit = form.servingUnit,
+                    customUnitName = if (form.servingUnit == ServingUnit.CUSTOM) form.customUnitName else null,
                     calories = caloriesInput.value ?: 0.0,
                     protein = proteinInput.value ?: 0.0,
                     carbs = carbsInput.value ?: 0.0,
@@ -769,9 +792,7 @@ fun EditCustomFoodScreen(
             Spacer(modifier = Modifier.height(AppSpacing.md))
             MbButton(
                 text = "Delete Custom Food",
-                onClick = {
-                    viewModel.deleteCustomFood(existingFood!!.id, onComplete = onSaveSuccess)
-                },
+                onClick = { existingFood?.let { viewModel.pendingDelete.ask(it.id, it.name) } },
                 kind = MbButtonKind.Danger,
                 icon = Ph.Trash.light,
                 modifier = Modifier.fillMaxWidth()

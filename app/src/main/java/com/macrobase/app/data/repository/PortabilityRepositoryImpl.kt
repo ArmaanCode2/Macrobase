@@ -30,6 +30,7 @@ import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.repository.PortabilityRepository
 import com.macrobase.app.domain.repository.PreferencesRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
@@ -205,7 +206,9 @@ class PortabilityRepositoryImpl(
         BackupArchiveManager.extractAndValidateBackup(inputStream)
     }
 
-    override suspend fun importUserData(backupData: MacroBaseBackupData, mode: ImportMode): ImportResult = withContext(Dispatchers.IO) {
+    // Not tied to the screen: Room commits a running transaction even when its caller is cancelled,
+    // so leaving mid-restore would otherwise keep the records and skip the goals and profile (BUG-010)
+    override suspend fun importUserData(backupData: MacroBaseBackupData, mode: ImportMode): ImportResult = withContext(Dispatchers.IO + NonCancellable) {
         val result = try {
             var imported = 0
             var skipped = 0
@@ -383,7 +386,9 @@ class PortabilityRepositoryImpl(
                 }
 
                 // Merge keeps this phone's goals and profile. A backup only fills them on a phone
-                // where none were saved yet, such as a fresh install (BUG-016).
+                // where none were saved yet, such as a fresh install (BUG-016). Past days are
+                // different: the imported ones keep the goals they had, or they would leave the
+                // rank and be judged against a goal they never had (BUG-011).
                 var keptGoals = false
                 var keptProfile = false
                 val settingsNote = restoringSettings {
@@ -391,6 +396,7 @@ class PortabilityRepositoryImpl(
                         if (goalsRepository.hasSavedGoals()) {
                             keptGoals = true
                             skipped++
+                            goalsRepository.mergeGoalHistory(g)
                         } else {
                             goalsRepository.restoreGoalBackup(g)
                             imported++
@@ -428,6 +434,8 @@ class PortabilityRepositoryImpl(
             // Settings are written last and report their own failure, so this is the database step,
             // which a transaction rolls back
             ImportResult(isSuccess = false, mode = mode, errorMessage = PortabilityConfig.BACKUP_TOO_LARGE_FOR_DEVICE_MESSAGE)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             ImportResult(
                 isSuccess = false,

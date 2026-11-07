@@ -151,6 +151,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
+import com.macrobase.app.core.navigation.LogContext
 import com.macrobase.app.domain.model.MealConfiguration
 import androidx.compose.foundation.layout.defaultMinSize
 
@@ -297,6 +298,9 @@ class HomeViewModel(
      * screen left open overnight logs to the new day (BUG-040).
      */
     fun dateForNewLog(): LocalDate? = if (followsToday) null else _selectedDate.value
+
+    /** Where a new log from the dashboard goes: the day on screen, under [meal]. */
+    fun logContext(meal: MealType = currentMeal()): LogContext = LogContext(dateForNewLog(), meal)
 
     /** The app is in the foreground again: a dashboard left on today moves to the new day (BUG-040). */
     fun onAppResumed() {

@@ -14,6 +14,7 @@ import com.macrobase.app.domain.model.HeatmapWeek
 import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.Nutrition
 import com.macrobase.app.domain.model.Recipe
+import com.macrobase.app.domain.model.RecipeIngredient
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.model.WaterEntry
 import com.macrobase.app.domain.model.WeightEntry
@@ -96,6 +97,10 @@ class RecipeRepositoryImpl(
     override suspend fun getRecipeById(recipeId: Long): Recipe? {
         return getRecipes().firstOrNull { it.id == recipeId }
     }
+
+    override fun encodeIngredients(ingredients: List<RecipeIngredient>): String = RecipeIngredientsJson.encode(ingredients)
+
+    override fun decodeIngredients(text: String): List<RecipeIngredient> = RecipeIngredientsJson.decode(text) ?: emptyList()
 }
 
 class WeightRepositoryImpl(

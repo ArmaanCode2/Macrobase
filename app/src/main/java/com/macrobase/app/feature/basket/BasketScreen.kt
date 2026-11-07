@@ -9,6 +9,7 @@ import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.MbMotion
 import com.macrobase.app.core.designsystem.components.MbButtonKind
 import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbIconCircle
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.derivedStateOf
@@ -144,6 +145,17 @@ fun BasketScreen(
     val invalidQuantityIds by viewModel.invalidQuantityIds.collectAsState()
     val isSubmitting by viewModel.isSubmitting.collectAsState()
     val submitError by viewModel.submitError.collectAsState()
+    val clearRequest by viewModel.pendingClear.request.collectAsState()
+
+    if (clearRequest != null) {
+        MbConfirmDialog(
+            title = "Clear the basket?",
+            text = "Nothing in it has been logged yet, so these foods will be removed.",
+            confirmText = "Clear",
+            onConfirm = { viewModel.confirmClear() },
+            onDismiss = { viewModel.pendingClear.cancel() }
+        )
+    }
 
     Column(
         modifier = modifier
@@ -288,7 +300,7 @@ fun BasketScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        MbButton(text = "Clear", kind = MbButtonKind.Secondary, onClick = { viewModel.clearBasket() })
+                        MbButton(text = "Clear", kind = MbButtonKind.Secondary, onClick = { viewModel.pendingClear.ask(Unit, "basket") })
                         MbButton(
                             text = basketLogLabel(items.size),
                             onClick = {

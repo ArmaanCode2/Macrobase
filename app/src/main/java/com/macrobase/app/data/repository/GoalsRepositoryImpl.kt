@@ -508,21 +508,7 @@ class GoalsRepositoryImpl(
 
             // A backup that did not record history leaves this device's history alone
             val transitions = backup.transitions ?: return@edit
-            // Re-validated so a damaged record cannot break the "|"-separated history format;
-            // records with a date or strategy this version cannot read are left out
-            val history = transitions.mapNotNull { t ->
-                val date = runCatching { LocalDate.parse(t.effectiveDate) }.getOrNull() ?: return@mapNotNull null
-                val goal = knownFitnessGoal(t.fitnessGoal) ?: return@mapNotNull null
-                GoalTransitionRecord(
-                    effectiveDate = date.toString(),
-                    fitnessGoal = goal.name,
-                    maintenanceCalories = t.maintenanceCalories,
-                    dailyCalorieGoal = t.dailyCalorieGoal,
-                    carbPercentage = t.carbPercentage,
-                    proteinPercentage = t.proteinPercentage,
-                    fatPercentage = t.fatPercentage
-                )
-            }
+            val history = readableRecords(transitions)
             if (history.isEmpty()) {
                 prefs.remove(Keys.TRANSITIONS_HISTORY)
             } else {
@@ -531,6 +517,49 @@ class GoalsRepositoryImpl(
         }
         MacroBaseWidgetProvider.updateAllWidgets(context)
     }
+
+    override suspend fun mergeGoalHistory(backup: GoalBackupDto) {
+        val incoming = readableRecords(backup.transitions.orEmpty())
+        if (incoming.isEmpty()) return
+        val today = clock()
+        store.edit { prefs ->
+            // Saves today's goal first when no saved day tells where this device's own days start
+            promoteScheduledGoal(prefs, today)
+            recordLiveGoalIfMissing(prefs, today)
+            val history = parseTransitions(prefs[Keys.TRANSITIONS_HISTORY])
+            val firstSavedDay = history
+                .filter { it.effectiveDate != HISTORY_PLACEHOLDER_DATE }
+                .mapNotNull { runCatching { LocalDate.parse(it.effectiveDate) }.getOrNull() }
+                .filter { !it.isAfter(today) }
+                .minOrNull() ?: return@edit
+            // The backup's first record stands for the days before its first change, as this
+            // device's placeholder did, so it takes that place
+            val earlier = incoming.filter { LocalDate.parse(it.effectiveDate).isBefore(firstSavedDay) }
+            if (earlier.isEmpty()) return@edit
+            val own = history.filter { it.effectiveDate != HISTORY_PLACEHOLDER_DATE }
+            prefs[Keys.TRANSITIONS_HISTORY] = serializeTransitions((earlier + own).sortedBy { it.effectiveDate })
+        }
+    }
+
+    /**
+     * [transitions] as history records. Re-validated so a damaged record cannot break the
+     * "|"-separated history format; records with a date or strategy this version cannot read are
+     * left out.
+     */
+    private fun readableRecords(transitions: List<GoalTransitionBackupDto>): List<GoalTransitionRecord> =
+        transitions.mapNotNull { t ->
+            val date = runCatching { LocalDate.parse(t.effectiveDate) }.getOrNull() ?: return@mapNotNull null
+            val goal = knownFitnessGoal(t.fitnessGoal) ?: return@mapNotNull null
+            GoalTransitionRecord(
+                effectiveDate = date.toString(),
+                fitnessGoal = goal.name,
+                maintenanceCalories = t.maintenanceCalories,
+                dailyCalorieGoal = t.dailyCalorieGoal,
+                carbPercentage = t.carbPercentage,
+                proteinPercentage = t.proteinPercentage,
+                fatPercentage = t.fatPercentage
+            )
+        }
 
     /** The strategy named [name], or null for a name this version does not know (never a default). */
     private fun knownFitnessGoal(name: String?): FitnessGoal? =

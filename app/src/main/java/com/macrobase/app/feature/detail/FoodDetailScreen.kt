@@ -1,11 +1,13 @@
 package com.macrobase.app.feature.detail
 
 import com.macrobase.app.feature.basket.basketDateLabel
+import com.macrobase.app.feature.dashboard.mealForTime
 import com.macrobase.app.core.designsystem.components.MealAndDayPicker
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.MbHeader
 import com.macrobase.app.core.designsystem.components.MbDangerGhostButton
 import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbButton
 import com.macrobase.app.core.designsystem.components.MbChip
 import com.macrobase.app.core.designsystem.components.MbPanel
@@ -190,6 +192,20 @@ class FoodDetailViewModel(
     // The diary entry this screen loaded, to notice a newer save made elsewhere
     private var loadedEntry: DiaryEntry? = null
 
+    /** What a logged entry or basket item holds, so a new amount scales that and not the food as it is now. */
+    private data class LoggedBasis(val serving: Serving, val quantity: Double, val nutrition: Nutrition)
+
+    private var loggedBasis: LoggedBasis? = null
+
+    /**
+     * Nutrition for [quantity] of [serving]. The logged serving scales its logged values, so an edit
+     * never moves history to the food's new values (AGENTS.md 1.4, BUG-008). Another serving is a
+     * deliberate change and uses the food as it is now.
+     */
+    private fun nutritionFor(food: Food, serving: Serving, quantity: Double): Nutrition =
+        loggedBasis?.takeIf { it.serving == serving }?.let { it.nutrition.rescaled(it.quantity, quantity) }
+            ?: calculateNutritionForServingUseCase(food, serving, quantity)
+
     /**
      * True from the first tap of Log/Save/Keep/Delete/Remove until it fails; after success the
      * screen closes. Taps arrive on the main thread, so a second tap always sees it (BUG-011).
@@ -327,6 +343,7 @@ class FoodDetailViewModel(
                     val split = MacroCalorieSplit.fromNutrition(calculated)
                     val targetDate = diaryEntry.date
                     val targetMealType = diaryEntry.mealType
+                    loggedBasis = LoggedBasis(selectedServing, initialQty, calculated)
 
                     _uiState.update {
                         it.copy(
@@ -382,14 +399,16 @@ class FoodDetailViewModel(
             val defaultServing = basketItem?.serving ?: (servings.firstOrNull { it.isDefault } ?: servings.first())
             val initialQty = basketItem?.quantity ?: 1.0
             
-            val calculated = calculateNutritionForServingUseCase(item, defaultServing, initialQty)
+            loggedBasis = basketItem?.let { LoggedBasis(it.serving, it.quantity, it.calculatedNutrition) }
+            val calculated = nutritionFor(item, defaultServing, initialQty)
             val split = MacroCalorieSplit.fromNutrition(calculated)
             
             // Opened without a day (Track, the widget, a dashboard on today): it logs to today
             dateFollowsToday = basketItem == null && date == null
             loadedEntry = null
             val targetDate = basketItem?.date ?: (date ?: LocalDate.now(clock))
-            val targetMealType = basketItem?.mealType ?: (mealType ?: MealType.BREAKFAST)
+            // Opened without a meal (the Foods tab, a basket's search): the meal for the time (BUG-003)
+            val targetMealType = basketItem?.mealType ?: (mealType ?: mealForTime(java.time.LocalTime.now(clock)))
 
             _uiState.update {
                 it.copy(
@@ -421,6 +440,8 @@ class FoodDetailViewModel(
         val existingItem = getBasketItemsUseCase().value.firstOrNull { it.id == currentId }
         if (existingItem != null) {
             val updatedItem = existingItem.copy(
+                // The food these values came from, so the basket's own serving change agrees with them
+                food = food,
                 quantity = state.enteredQuantity,
                 serving = serving,
                 calculatedNutrition = state.calculatedNutrition,
@@ -441,7 +462,7 @@ class FoodDetailViewModel(
             return
         }
 
-        val calculated = calculateNutritionForServingUseCase(food, serving, qty)
+        val calculated = nutritionFor(food, serving, qty)
         val split = MacroCalorieSplit.fromNutrition(calculated)
 
         _uiState.update {
@@ -460,7 +481,7 @@ class FoodDetailViewModel(
         val food = _uiState.value.food ?: return
         val qty = _uiState.value.enteredQuantity
 
-        val calculated = calculateNutritionForServingUseCase(food, serving, qty)
+        val calculated = nutritionFor(food, serving, qty)
         val split = MacroCalorieSplit.fromNutrition(calculated)
 
         _uiState.update {
@@ -862,8 +883,21 @@ fun FoodDetailScreen(
                 ) {
                     when {
                         isDiaryEdit -> {
+                            var confirmingDelete by remember { mutableStateOf(false) }
+                            if (confirmingDelete) {
+                                MbConfirmDialog(
+                                    title = "Delete this entry?",
+                                    text = "It leaves this day's totals, and this cannot be undone.",
+                                    confirmText = "Delete",
+                                    onConfirm = {
+                                        confirmingDelete = false
+                                        viewModel.deleteEntry { onNavigateBack() }
+                                    },
+                                    onDismiss = { confirmingDelete = false }
+                                )
+                            }
                             MbDangerGhostButton(
-                                onClick = { viewModel.deleteEntry { onNavigateBack() } },
+                                onClick = { confirmingDelete = true },
                                 contentDescription = "Delete entry",
                                 enabled = !uiState.isSaving
                             )

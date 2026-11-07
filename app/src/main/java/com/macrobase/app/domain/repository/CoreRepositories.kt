@@ -5,6 +5,7 @@ import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.GoalBackupDto
 import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.Recipe
+import com.macrobase.app.domain.model.RecipeIngredient
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.model.WaterEntry
 import com.macrobase.app.domain.model.WeightEntry
@@ -24,6 +25,10 @@ interface RecipeRepository {
     fun observeRecipes(): Flow<List<Recipe>>
     suspend fun getRecipes(): List<Recipe>
     suspend fun getRecipeById(recipeId: Long): Recipe?
+
+    /** [ingredients] as text and back, so a half-built recipe outlives the app being closed (BUG-002). */
+    fun encodeIngredients(ingredients: List<RecipeIngredient>): String = ""
+    fun decodeIngredients(text: String): List<RecipeIngredient> = emptyList()
 }
 
 /**
@@ -111,6 +116,13 @@ interface GoalsRepository {
             )
         )
     }
+
+    /**
+     * For a Merge that keeps this device's goals: a backup's days keep the goals they had, from its
+     * history records dated before this device's first saved day (BUG-011). This device's goal, and
+     * its records from that day on, stay. A repository without history has nothing to merge.
+     */
+    suspend fun mergeGoalHistory(backup: GoalBackupDto) {}
 
     /** False on a device where goals were never saved, such as right after installing. */
     suspend fun hasSavedGoals(): Boolean = true

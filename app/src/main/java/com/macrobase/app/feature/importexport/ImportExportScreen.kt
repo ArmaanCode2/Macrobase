@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.PortabilityConfig
@@ -489,7 +490,21 @@ fun ImportExportScreen(
         )
     }
 
-    // 3. Import Result Dialog
+    // 3. Restore in progress: it blocks Back and the header arrow, so the result below is always
+    // seen. A restore that is left anyway still finishes in the repository (BUG-010)
+    if (uiState.isImporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(text = "Restoring your data", style = AppTypography.Header1) },
+            text = { BusyRow(label = "Keep MacroBase open until this finishes.") },
+            confirmButton = {},
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
+        )
+    }
+
+    // 4. Import Result Dialog
     uiState.importResult?.let { result ->
         AlertDialog(
             onDismissRequest = { viewModel.dismissResult() },

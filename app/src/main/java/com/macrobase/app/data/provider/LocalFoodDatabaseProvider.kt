@@ -53,21 +53,40 @@ class LocalFoodDatabaseProvider(
         val words = searchWords(trimmed)
         if (words.isEmpty()) return@withContext emptyList()
 
-        val hits = searchCatalog(databaseManager.getDatabase(), words, trimmed, limit).toMutableList()
-        // Branded products rank among the catalog's foods by how well they match, after them on a tie,
-        // so "parle g" finds Parle-G first and "biscuit" the plain biscuits
+        var hits = searchBothCatalogs { db -> searchCatalog(db, words, trimmed, limit) }
+        // No food holds every word (BUG-004), so what the query can still say is tried, once neither
+        // catalog has a full match: a catalog that lacks "parle" must not answer "parle g" with "g"
+        if (hits.isEmpty()) {
+            val meaningful = words.filterNot { it in CONNECTOR_WORDS }
+            if (meaningful.isNotEmpty() && meaningful.size < words.size) {
+                hits = searchBothCatalogs { db -> searchCatalog(db, meaningful, meaningful.joinToString(" "), limit) }
+            }
+            if (hits.isEmpty() && meaningful.size > 1) {
+                hits = searchBothCatalogs { db -> searchAnyWord(db, meaningful.map(::singularOf).distinct(), limit) }
+            }
+        }
+        val foods = hits.sortedBy { it.tier }.take(limit).map { it.food }
+        android.util.Log.d("LocalFoodDb", "Query '$trimmed' matched ${foods.size} foods")
+        foods
+    }
+
+    /**
+     * [search] over the catalog, then the branded products. Branded products rank among the catalog's
+     * foods by how well they match, after them on a tie, so "parle g" finds Parle-G first and
+     * "biscuit" the plain biscuits.
+     */
+    private suspend fun searchBothCatalogs(search: (SQLiteDatabase) -> List<Hit>): List<Hit> {
+        val hits = search(databaseManager.getDatabase()).toMutableList()
         branded()?.let { branded ->
             try {
-                hits += searchCatalog(branded.getDatabase(), words, trimmed, limit)
+                hits += search(branded.getDatabase())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 noteReadFailure(branded, e)
             }
         }
-        val foods = hits.sortedBy { it.tier }.take(limit).map { it.food }
-        android.util.Log.d("LocalFoodDb", "Query '$trimmed' matched ${foods.size} foods")
-        foods
+        return hits
     }
 
     /** One catalog's matches for [words], best first, each with its servings. */
@@ -76,6 +95,18 @@ class LocalFoodDatabaseProvider(
         val hits = queryHits(db, wordSearchSql(words.size), wordSearchArgs(words, limit)) { cursor ->
             matchTier(cursor.getStringOrNull("search_names"), cursor.getStringOrNull("search_terms"), words)
         }.toMutableList()
+        // A plural of a food the catalog holds in the singular: "apples" finds Apple, and "tomatoes"
+        // finds Tomato as well as Stuffed tomatoes. Word starts count only when nothing else was
+        // found, or "peas" would bring in peanuts beside the peas (BUG-004)
+        val singular = words.map(::singularOf).distinct()
+        if (singular != words) {
+            val found = hits.mapTo(HashSet()) { it.food.id }
+            queryHits(db, wordSearchSql(singular.size), wordSearchArgs(singular, limit)) { cursor ->
+                matchTier(cursor.getStringOrNull("search_names"), cursor.getStringOrNull("search_terms"), singular)
+            }
+                .filter { it.food.id !in found && (found.isEmpty() || it.tier < WORD_START_TIER) }
+                .forEach { hits.add(it) }
+        }
         // Then names holding the query inside a word: a fragment ("ancake" in "pancake", "nut" in
         // "peanut") or a script the catalog does not use (BUG-054), after every word match
         if (hits.size < limit) {
@@ -85,9 +116,21 @@ class LocalFoodDatabaseProvider(
                 .take(limit - hits.size)
                 .forEach { hits.add(it) }
         }
-        if (hits.isEmpty()) return hits
+        return withServings(db, hits)
+    }
 
-        // Batch load servings for all matched foods
+    /** One catalog's foods holding some of [words], those with the most first, after every full match. */
+    private fun searchAnyWord(db: SQLiteDatabase, words: List<String>, limit: Int): List<Hit> =
+        withServings(
+            db,
+            queryHits(db, anyWordSearchSql(words.size), anyWordSearchArgs(words, limit)) { cursor ->
+                ANY_WORD_TIER + words.size - cursor.getInt(cursor.getColumnIndexOrThrow("words_matched"))
+            }
+        )
+
+    /** [hits] with their servings, batch loaded. */
+    private fun withServings(db: SQLiteDatabase, hits: List<Hit>): List<Hit> {
+        if (hits.isEmpty()) return hits
         val servingsMap = loadServingsForFoodIds(db, hits.map { it.food.id })
         return hits.map { it.copy(food = it.food.copy(servings = servingsMap[it.food.id] ?: emptyList())) }
     }
@@ -305,8 +348,26 @@ class LocalFoodDatabaseProvider(
         private val JOINED_INSIDE_WORDS = Regex("['\u2019\u200C\u200D]")
         // Words past this many are ignored, so a pasted paragraph stays a small query
         private const val MAX_SEARCH_WORDS = 8
+        // matchTier of word starts only
+        private const val WORD_START_TIER = 2
         // matchTier of a name that only holds the query inside a word
         private const val SUBSTRING_TIER = 3
+        // Foods holding only some of the query's words, below every full match
+        private const val ANY_WORD_TIER = 4
+        // Words a phrase can do without, once no food holds all of it ("dal and rice")
+        private val CONNECTOR_WORDS = setOf("a", "an", "and", "aur", "for", "in", "n", "of", "on", "or", "plus", "the", "with")
+        // Plurals the endings below get wrong
+        private val IRREGULAR_PLURALS = mapOf(
+            "brownies" to "brownie",
+            "cookies" to "cookie",
+            "leaves" to "leaf",
+            "loaves" to "loaf",
+            "pies" to "pie",
+            "smoothies" to "smoothie",
+            "veggies" to "veggie"
+        )
+        private val ES_PLURAL_ENDINGS = listOf("ches", "shes", "sses", "xes", "oes")
+        private val NOT_PLURAL_ENDINGS = listOf("ss", "us")
 
         private const val SEARCH_COLUMNS = """SELECT f.id, f.uuid, f.source_id, f.name, f.normalized_name, f.brand, f.food_type, f.serving_basis,
                    f.calories, f.protein, f.carbohydrates, f.fat, f.fiber, f.sugar,
@@ -383,6 +444,46 @@ class LocalFoodDatabaseProvider(
             names != null && names.contains("|${words.joinToString(" ")}|") -> 0
             terms != null && words.all { terms.contains(" $it ") } -> 1
             else -> 2
+        }
+
+        /**
+         * [word] without a plural ending, or [word] itself. A stored word starts every form of it, so
+         * this finds foods a plural cannot: "apples" is longer than the stored "apple" (BUG-004).
+         * Short words are left alone ("gas", "dal"), and so are "hummus" and "swiss".
+         */
+        internal fun singularOf(word: String): String {
+            IRREGULAR_PLURALS[word]?.let { return it }
+            return when {
+                word.length <= 3 || !word.endsWith("s") || NOT_PLURAL_ENDINGS.any { word.endsWith(it) } -> word
+                word.endsWith("ies") -> word.dropLast(3) + "y"
+                ES_PLURAL_ENDINGS.any { word.endsWith(it) } -> word.dropLast(2)
+                else -> word.dropLast(1)
+            }
+        }
+
+        /**
+         * Foods with a word starting with any of [wordCount] query words, for a phrase no food holds
+         * all of. Those holding the most come first, then those holding the last word, which names
+         * the dish: "egg fried rice" is a rice before it is an egg. Takes [anyWordSearchArgs].
+         */
+        internal fun anyWordSearchSql(wordCount: Int): String {
+            val matched = List(wordCount) { "(s.terms LIKE ? ESCAPE '/')" }.joinToString(" + ")
+            return """
+                $SEARCH_COLUMNS, $matched AS words_matched
+                FROM food_search s
+                JOIN foods f ON f.id = s.food_id
+                LEFT JOIN categories c ON f.category_id = c.id
+                WHERE words_matched > 0 AND f.is_active = 1
+                ORDER BY words_matched DESC, CASE WHEN s.terms LIKE ? ESCAPE '/' THEN 0 ELSE 1 END,
+                         s.priority DESC, length(f.name), f.name
+                LIMIT ?
+            """.trimIndent()
+        }
+
+        /** The arguments of [anyWordSearchSql] for [words]. */
+        internal fun anyWordSearchArgs(words: List<String>, limit: Int): Array<String> {
+            val wordStarts = words.map { "% ${escapeLikeWildcards(it)}%" }
+            return (wordStarts + wordStarts.last() + limit.toString()).toTypedArray()
         }
 
         /**

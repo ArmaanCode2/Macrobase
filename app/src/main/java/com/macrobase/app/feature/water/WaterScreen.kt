@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
@@ -51,6 +52,7 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Ph
 import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbIconButton
 import com.macrobase.app.core.designsystem.components.MbPanel
@@ -60,6 +62,8 @@ import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.hasThousandsSeparator
+import com.macrobase.app.core.util.PendingDelete
+import com.macrobase.app.core.util.TrackedDay
 import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.feature.detail.formatQuantityForInput
 import com.macrobase.app.domain.model.UnitConversions
@@ -73,10 +77,8 @@ import com.macrobase.app.domain.usecase.GetWaterEntriesUseCase
 import com.macrobase.app.domain.usecase.GetWaterForDateUseCase
 import com.macrobase.app.domain.usecase.UpdateWaterEntryUseCase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -114,13 +116,14 @@ class WaterViewModel(
     private val addWaterEntryUseCase: AddWaterEntryUseCase,
     private val updateWaterEntryUseCase: UpdateWaterEntryUseCase,
     private val deleteWaterEntryUseCase: DeleteWaterEntryUseCase,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
 ) : ViewModel() {
 
-    private val _selectedDate = MutableStateFlow(LocalDate.now())
-    val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
+    private val day = TrackedDay(clock)
+    val selectedDate: StateFlow<LocalDate> = day.selected
 
-    val uiState: StateFlow<WaterUiState> = _selectedDate.flatMapLatest { date ->
+    val uiState: StateFlow<WaterUiState> = day.selected.flatMapLatest { date ->
         combine(
             getWaterForDateUseCase(date),
             getWaterEntriesUseCase(date),
@@ -141,22 +144,21 @@ class WaterViewModel(
         initialValue = WaterUiState()
     )
 
-    fun onSelectDate(date: LocalDate) {
-        _selectedDate.value = date
-    }
+    fun onSelectDate(date: LocalDate) = day.select(date)
 
-    fun onPreviousDay() {
-        _selectedDate.value = _selectedDate.value.minusDays(1)
-    }
+    fun onPreviousDay() = day.shift(-1)
 
-    fun onNextDay() {
-        _selectedDate.value = _selectedDate.value.plusDays(1)
-    }
+    fun onNextDay() = day.shift(1)
+
+    /** The screen is shown again: left on today, it moves to the new day (BUG-006). */
+    fun refreshDay() = day.refresh()
 
     fun addWater(amountMl: Double) {
         if (amountMl <= 0.0) return
+        day.refresh()
+        val date = day.selected.value
         viewModelScope.launch {
-            addWaterEntryUseCase(_selectedDate.value, amountMl)
+            addWaterEntryUseCase(date, amountMl)
         }
     }
 
@@ -165,6 +167,13 @@ class WaterViewModel(
         viewModelScope.launch {
             updateWaterEntryUseCase(entry)
         }
+    }
+
+    /** The entry a delete button asked about, by row id. */
+    val pendingDelete = PendingDelete<Long>()
+
+    fun confirmDelete() {
+        pendingDelete.confirm()?.let { deleteWaterEntry(it) }
     }
 
     fun deleteWaterEntry(entryId: Long) {
@@ -188,6 +197,22 @@ fun WaterScreen(
     val uiState by viewModel.uiState.collectAsState()
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, MM/dd") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("hh:mm a") }
+
+    LifecycleResumeEffect(viewModel) {
+        viewModel.refreshDay()
+        onPauseOrDispose { }
+    }
+
+    val deleteRequest by viewModel.pendingDelete.request.collectAsState()
+    deleteRequest?.let {
+        MbConfirmDialog(
+            title = "Delete ${it.label}?",
+            text = "This cannot be undone.",
+            confirmText = "Delete",
+            onConfirm = { viewModel.confirmDelete() },
+            onDismiss = { viewModel.pendingDelete.cancel() }
+        )
+    }
 
     var showCustomAmountDialog by remember { mutableStateOf(false) }
     var entryToEdit by remember { mutableStateOf<WaterEntry?>(null) }
@@ -330,7 +355,7 @@ fun WaterScreen(
                                 MbIconButton(
                                     icon = Ph.Trash.light,
                                     contentDescription = "Delete $entryAmountDisplay at $entryTime",
-                                    onClick = { viewModel.deleteWaterEntry(entry.id) },
+                                    onClick = { viewModel.pendingDelete.ask(entry.id, "$entryAmountDisplay at $entryTime") },
                                     iconSize = 19.dp,
                                     tint = AppColors.Error
                                 )

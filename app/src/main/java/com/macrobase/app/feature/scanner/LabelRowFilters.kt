@@ -91,6 +91,84 @@ object LabelRowFilters {
     private val FROM_WORD = Regex("""\bfrom\b""")
 
     /**
+     * The words of "Serving Size: 30g", "Total Servings : 16", "Servings per pack" and "Serving
+     * suggestion", which describe the pack and are never a column header. ML Kit reports one word
+     * per element, so "Serving" alone looks like a column (BUG-015). A phrase ends at the next
+     * column header's word or at the wide gap before it. Matched by identity, like
+     * [numbersBeforePercentSign].
+     */
+    fun servingPhraseWords(elements: List<OcrElement>): Set<OcrElement> {
+        val phrase = Collections.newSetFromMap(IdentityHashMap<OcrElement, Boolean>())
+        var i = 0
+        while (i < elements.size) {
+            val current = bareWord(elements[i])
+            val next = elements.getOrNull(i + 1)?.let(::bareWord).orEmpty()
+            val starts = current == "servings" || (current == "serving" && (next == "size" || next == "suggestion")) ||
+                (current == "total" && next.startsWith("serving"))
+            if (!starts) {
+                i++
+                continue
+            }
+            phrase.add(elements[i])
+            i++
+            while (i < elements.size && !isColumnWord(bareWord(elements[i])) && !isColumnGap(elements[i - 1], elements[i])) {
+                phrase.add(elements[i])
+                i++
+            }
+        }
+        return phrase
+    }
+
+    private fun bareWord(element: OcrElement) = word(element).trim(':', '.', ',', '(', ')', '*')
+
+    private fun isColumnWord(word: String) = word == "per" || word.startsWith("100") || word.contains("rda") || word.contains("%")
+
+    private fun isColumnGap(left: OcrElement, right: OcrElement): Boolean {
+        val first = left.spatialBounds ?: return false
+        val second = right.spatialBounds ?: return false
+        return second.left - first.right > 2 * first.height
+    }
+
+    /**
+     * [elements] in reading order, with an amount and the unit after it read as one word: ML Kit
+     * reports "100 ml" as "100" and "ml", which no test of a single word can recognise (BUG-014).
+     */
+    fun withSplitAmountsJoined(elements: List<OcrElement>): List<OcrElement> {
+        val joined = mutableListOf<OcrElement>()
+        var i = 0
+        while (i < elements.size) {
+            val current = elements[i]
+            val next = elements.getOrNull(i + 1)
+            if (next != null && isSplitAmount(current, next)) {
+                joined.add(current.copy(text = current.text.trim() + next.text.trim(), spatialBounds = boundsOf(current, next)))
+                i += 2
+            } else {
+                joined.add(current)
+                i++
+            }
+        }
+        return joined
+    }
+
+    private fun isSplitAmount(amount: OcrElement, unit: OcrElement): Boolean {
+        if (!AMOUNT_WORD.matches(amount.text.trim()) || !AMOUNT_UNIT_WORD.matches(unit.text.trim().lowercase(Locale.ROOT))) return false
+        val first = amount.spatialBounds ?: return true
+        val second = unit.spatialBounds ?: return true
+        // Reading order runs on to the next line, whose first word starts back at the left
+        val sameLine = kotlin.math.abs(first.centerY - second.centerY) < first.height / 2
+        return sameLine && second.left - first.right <= first.height
+    }
+
+    private fun boundsOf(first: OcrElement, second: OcrElement): NutritionLabelParser.SpatialBox? {
+        val a = first.spatialBounds ?: return second.spatialBounds
+        val b = second.spatialBounds ?: return a
+        return NutritionLabelParser.SpatialBox(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom))
+    }
+
+    private val AMOUNT_WORD = Regex("""\(?[0-9]+(?:\.[0-9]+)?""")
+    private val AMOUNT_UNIT_WORD = Regex("""(?:g|gm|gms|ml)\)?:?""")
+
+    /**
      * Words followed by a separate "%" word ("7" "%"): those numbers are %DV or %RI figures,
      * never values (BUG-041). Matched by identity, since two words can read the same.
      */

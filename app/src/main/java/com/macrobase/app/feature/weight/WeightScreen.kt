@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
@@ -62,6 +63,7 @@ import com.macrobase.app.core.designsystem.AppSpacing
 import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Ph
 import com.macrobase.app.core.designsystem.components.MbButton
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbChip
 import com.macrobase.app.core.designsystem.components.MbChipRow
 import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
@@ -73,6 +75,8 @@ import com.macrobase.app.core.designsystem.components.MbTextField
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.ReportContentScrolled
+import com.macrobase.app.core.util.PendingDelete
+import com.macrobase.app.core.util.TrackedDay
 import com.macrobase.app.core.util.formatDecimalInput
 import com.macrobase.app.core.util.parseDecimalInput
 import com.macrobase.app.domain.model.UnitConversions
@@ -159,8 +163,8 @@ class WeightViewModel(
     private val clock: java.time.Clock = com.macrobase.app.core.util.DeviceClock
 ) : ViewModel() {
 
-    private val _selectedDate = MutableStateFlow(LocalDate.now())
-    val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
+    private val day = TrackedDay(clock)
+    val selectedDate: StateFlow<LocalDate> = day.selected
 
     private val _selectedInterval = MutableStateFlow(WeightTimeInterval.LAST_30_DAYS)
     val selectedInterval: StateFlow<WeightTimeInterval> = _selectedInterval.asStateFlow()
@@ -168,16 +172,17 @@ class WeightViewModel(
     private val _customFromDate = MutableStateFlow(windowStart(LocalDate.now(clock), 30))
     val customFromDate: StateFlow<LocalDate> = _customFromDate.asStateFlow()
 
-    private val _customToDate = MutableStateFlow(LocalDate.now())
+    private val _customToDate = MutableStateFlow(LocalDate.now(clock))
     val customToDate: StateFlow<LocalDate> = _customToDate.asStateFlow()
 
     val uiState: StateFlow<WeightUiState> = combine(
-        _selectedDate,
+        day.selected,
         _selectedInterval,
         _customFromDate,
-        _customToDate
-    ) { selDate, interval, customFrom, customTo ->
-        val (from, to) = calculateDateRange(interval, customFrom, customTo)
+        _customToDate,
+        day.today
+    ) { selDate, interval, customFrom, customTo, today ->
+        val (from, to) = interval.dateRange(today, customFrom, customTo)
         DateRangeParams(selDate, interval, from, to)
     }.flatMapLatest { params ->
         combine(
@@ -214,12 +219,6 @@ class WeightViewModel(
         val toDate: LocalDate
     )
 
-    private fun calculateDateRange(
-        interval: WeightTimeInterval,
-        customFrom: LocalDate,
-        customTo: LocalDate
-    ): Pair<LocalDate, LocalDate> = interval.dateRange(LocalDate.now(clock), customFrom, customTo)
-
     private fun calculateMetrics(entries: List<WeightEntry>, targetWeightKg: Double?): WeightMetrics {
         if (entries.isEmpty()) {
             return WeightMetrics(targetWeightKg = targetWeightKg)
@@ -240,17 +239,11 @@ class WeightViewModel(
         )
     }
 
-    fun onSelectDate(date: LocalDate) {
-        _selectedDate.value = date
-    }
+    fun onSelectDate(date: LocalDate) = day.select(date)
 
-    fun onPreviousDay() {
-        _selectedDate.value = _selectedDate.value.minusDays(1)
-    }
+    fun onPreviousDay() = day.shift(-1)
 
-    fun onNextDay() {
-        _selectedDate.value = _selectedDate.value.plusDays(1)
-    }
+    fun onNextDay() = day.shift(1)
 
     fun onSelectInterval(interval: WeightTimeInterval) {
         _selectedInterval.value = interval
@@ -262,10 +255,20 @@ class WeightViewModel(
         _selectedInterval.value = WeightTimeInterval.CUSTOM
     }
 
+    /** The screen is shown again: left on today, it moves to the new day, and so does its range (BUG-006). */
+    fun refreshDay() = day.refresh()
+
     fun logWeight(date: LocalDate, weightKg: Double, note: String? = null) {
         viewModelScope.launch {
             addWeightEntryUseCase(date, weightKg, note)
         }
+    }
+
+    /** The weigh-in a delete button asked about, by its day. */
+    val pendingDelete = PendingDelete<LocalDate>()
+
+    fun confirmDelete() {
+        pendingDelete.confirm()?.let { deleteWeight(it) }
     }
 
     fun deleteWeight(date: LocalDate) {
@@ -308,6 +311,22 @@ fun WeightScreen(
 
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, MM/dd") }
     val shortDateFormatter = remember { DateTimeFormatter.ofPattern("MMM dd") }
+
+    LifecycleResumeEffect(viewModel) {
+        viewModel.refreshDay()
+        onPauseOrDispose { }
+    }
+
+    val deleteRequest by viewModel.pendingDelete.request.collectAsState()
+    deleteRequest?.let {
+        MbConfirmDialog(
+            title = "Delete ${it.label}?",
+            text = "It also leaves your trend graph, and this cannot be undone.",
+            confirmText = "Delete",
+            onConfirm = { viewModel.confirmDelete() },
+            onDismiss = { viewModel.pendingDelete.cancel() }
+        )
+    }
 
     var showLogDialog by remember { mutableStateOf(false) }
 
@@ -435,7 +454,11 @@ fun WeightScreen(
         val hasSelectedDateWeight = uiState.selectedDateWeight != null
         MbButton(
             text = if (hasSelectedDateWeight) "Edit Today" else "Log Weight",
-            onClick = { showLogDialog = true },
+            // Midnight fires nothing on an open screen, so the dialog opens on the day it will save to
+            onClick = {
+                viewModel.refreshDay()
+                showLogDialog = true
+            },
             icon = if (hasSelectedDateWeight) Ph.PencilSimple.regular else Ph.Plus.regular,
             modifier = margin
                 .fillMaxWidth()
@@ -466,7 +489,7 @@ fun WeightScreen(
                                 MbIconButton(
                                     icon = Ph.Trash.light,
                                     contentDescription = "Delete $displayWeight on $displayDate",
-                                    onClick = { viewModel.deleteWeight(entry.date) },
+                                    onClick = { viewModel.pendingDelete.ask(entry.date, "$displayWeight on $displayDate") },
                                     iconSize = 19.dp,
                                     tint = AppColors.Error
                                 )

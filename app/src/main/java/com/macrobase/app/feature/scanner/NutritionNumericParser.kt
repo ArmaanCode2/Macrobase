@@ -29,7 +29,7 @@ object NutritionNumericParser {
 
     // Micro sign and Greek mu written as escapes so the source stays ASCII (AGENTS.md 3.2)
     private val NUMERIC_REGEX = Regex(
-        """([<>]?)\s*($NUMBER_PATTERN)\s*(%|kcal|kj|cal|mg|mcg|\u00B5g|\u03BCg|gms|gm|g|ml)?""",
+        """([<>]?)\s*($NUMBER_PATTERN)\s*(%|kcal|kj|cal|mg|mcg|\u00B5g|\u03BCg|ug|gms|gm|g|ml)?""",
         RegexOption.IGNORE_CASE
     )
 

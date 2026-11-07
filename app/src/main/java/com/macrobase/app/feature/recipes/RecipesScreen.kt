@@ -10,6 +10,7 @@ import com.macrobase.app.core.designsystem.components.MealAndDayPicker
 import com.macrobase.app.core.designsystem.components.MbSheet
 import com.macrobase.app.core.designsystem.components.MbTextField
 import com.macrobase.app.core.designsystem.components.MbButtonKind
+import com.macrobase.app.core.designsystem.components.MbConfirmDialog
 import com.macrobase.app.core.designsystem.components.MbButton
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbRowTile
@@ -83,6 +84,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.designsystem.AppColors
@@ -93,6 +96,7 @@ import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.core.designsystem.components.EmptyStateCard
 import com.macrobase.app.core.designsystem.components.FoodResultItem
 import com.macrobase.app.core.designsystem.components.PrimaryButton
+import com.macrobase.app.core.util.PendingDelete
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.Food
 import com.macrobase.app.domain.model.MealType
@@ -107,10 +111,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import com.macrobase.app.feature.basket.basketDateLabel
+import com.macrobase.app.feature.dashboard.mealForTime
 import com.macrobase.app.feature.detail.QUANTITY_INPUT_ERROR
 import com.macrobase.app.feature.detail.parsePositiveQuantity
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -118,6 +125,16 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+
+/**
+ * The recipe form, as typed. It lives in the screen's ViewModel and saved state, not in the
+ * composition, so rotation and the app being closed keep a half-built recipe (BUG-002).
+ */
+data class RecipeForm(
+    val name: String = "",
+    val servingsProduced: String = "4",
+    val ingredients: List<RecipeIngredient> = emptyList()
+)
 
 data class RecipesListUiState(
     val isLoading: Boolean = true,
@@ -129,8 +146,49 @@ class RecipesViewModel(
     private val foodRepository: com.macrobase.app.domain.repository.FoodRepository,
     private val addFoodToBasketUseCase: com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase,
     private val commitSingleBasketItemUseCase: com.macrobase.app.domain.usecase.basket.CommitSingleBasketItemUseCase,
-    private val removeBasketItemUseCase: com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase
+    private val removeBasketItemUseCase: com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase,
+    private val savedState: SavedStateHandle = SavedStateHandle()
 ) : ViewModel() {
+
+    private val _form = MutableStateFlow(
+        RecipeForm(
+            name = savedState[FORM_NAME_KEY] ?: "",
+            servingsProduced = savedState[FORM_SERVINGS_KEY] ?: "4",
+            ingredients = savedState.get<String>(FORM_INGREDIENTS_KEY)?.let { recipeRepository.decodeIngredients(it) } ?: emptyList()
+        )
+    )
+    /** The edit screen's form; see [RecipeForm]. */
+    val form: StateFlow<RecipeForm> = _form.asStateFlow()
+
+    private val _existingRecipe = MutableStateFlow<Recipe?>(null)
+    /** The stored recipe the form edits; null for a new one, and until it has loaded. */
+    val existingRecipe: StateFlow<Recipe?> = _existingRecipe.asStateFlow()
+
+    fun updateForm(change: (RecipeForm) -> RecipeForm) {
+        val before = _form.value
+        val after = change(before)
+        _form.value = after
+        savedState[FORM_NAME_KEY] = after.name
+        savedState[FORM_SERVINGS_KEY] = after.servingsProduced
+        if (after.ingredients != before.ingredients) {
+            savedState[FORM_INGREDIENTS_KEY] = recipeRepository.encodeIngredients(after.ingredients)
+        }
+    }
+
+    /** Loads the recipe to edit, once. A form brought back after the app was closed keeps what was typed. */
+    fun openForEdit(recipeId: Long) {
+        if (recipeId <= 0L || _existingRecipe.value != null) return
+        viewModelScope.launch {
+            val found = recipeRepository.getRecipeById(recipeId) ?: return@launch
+            _existingRecipe.value = found
+            if (!savedState.contains(FORM_NAME_KEY)) updateForm { found.toForm() }
+        }
+    }
+
+    private fun Recipe.toForm() = RecipeForm(name, servingsProduced.toString(), ingredients)
+
+    /** True when leaving now would lose something the user entered. */
+    fun hasUnsavedChanges(): Boolean = _form.value != (_existingRecipe.value?.toForm() ?: RecipeForm())
 
     val uiState: StateFlow<RecipesListUiState> = recipeRepository.observeRecipes().map { list ->
         RecipesListUiState(
@@ -167,15 +225,19 @@ class RecipesViewModel(
         }
     }
 
+    /** The recipe a delete button asked about, by row id. */
+    val pendingDelete = PendingDelete<Long>()
+
+    fun confirmDelete() {
+        pendingDelete.confirm()?.let { deleteRecipe(it) {} }
+    }
+
     fun deleteRecipe(recipeId: Long, onComplete: () -> Unit) {
         viewModelScope.launch {
             recipeRepository.deleteRecipe(recipeId)
             onComplete()
         }
     }
-
-    /** Loads a saved recipe straight from storage (the list flow may not be collected yet). */
-    suspend fun getRecipe(recipeId: Long): Recipe? = recipeRepository.getRecipeById(recipeId)
 
     suspend fun searchFoodsForIngredient(query: String): List<Food> {
         return foodRepository.searchFoods(query, limit = 20)
@@ -230,6 +292,12 @@ class RecipesViewModel(
         stageRecipe(recipe, mealType, date, servings)
         onComplete()
     }
+
+    private companion object {
+        const val FORM_NAME_KEY = "recipe_form_name"
+        const val FORM_SERVINGS_KEY = "recipe_form_servings"
+        const val FORM_INGREDIENTS_KEY = "recipe_form_ingredients"
+    }
 }
 
 @Composable
@@ -238,7 +306,10 @@ fun RecipesScreen(
     onCreateClick: () -> Unit,
     onEditClick: (Long) -> Unit,
     onLogSuccess: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** The meal and day this screen was opened for; otherwise the meal for the time, today. */
+    logMeal: MealType? = null,
+    logDate: LocalDate? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var recipeToLog by remember { mutableStateOf<Recipe?>(null) }
@@ -246,6 +317,17 @@ fun RecipesScreen(
     val snackbarScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     ReportContentScrolled(listState.rememberIsScrolled())
+
+    val deleteRequest by viewModel.pendingDelete.request.collectAsState()
+    deleteRequest?.let {
+        MbConfirmDialog(
+            title = "Delete ${it.label}?",
+            text = "Its ingredient list goes with it, and this cannot be undone. Entries already in your diary stay as they are.",
+            confirmText = "Delete",
+            onConfirm = { viewModel.confirmDelete() },
+            onDismiss = { viewModel.pendingDelete.cancel() }
+        )
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         if (uiState.isLoading) {
@@ -284,7 +366,7 @@ fun RecipesScreen(
                         recipe = recipe,
                         onLogClick = { recipeToLog = recipe },
                         onEditClick = { onEditClick(recipe.id) },
-                        onDeleteClick = { viewModel.deleteRecipe(recipe.id) {} }
+                        onDeleteClick = { viewModel.pendingDelete.ask(recipe.id, recipe.name) }
                     )
                 }
                 item(key = "create") {
@@ -321,6 +403,8 @@ fun RecipesScreen(
         LogRecipeSheet(
             recipe = recipe,
             viewModel = viewModel,
+            logMeal = logMeal,
+            logDate = logDate,
             onDismiss = { recipeToLog = null },
             onLogged = {
                 recipeToLog = null
@@ -335,19 +419,22 @@ fun RecipesScreen(
 }
 
 /**
- * The recipe's log sheet: the meal (the log is always today), the number of servings, then "Add to
- * basket" or "Log to diary". It stays open while logging, so a failure is shown here rather than lost.
+ * The recipe's log sheet: the meal, the number of servings, then "Add to basket" or "Log to diary".
+ * The log goes to [logDate], or to today when it has none. It stays open while logging, so a failure
+ * is shown here rather than lost.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LogRecipeSheet(
     recipe: Recipe,
     viewModel: RecipesViewModel,
+    logMeal: MealType?,
+    logDate: LocalDate?,
     onDismiss: () -> Unit,
     onLogged: () -> Unit,
     onAddedToBasket: (String) -> Unit
 ) {
-    var selectedMeal by remember { mutableStateOf(MealType.LUNCH) }
+    var selectedMeal by remember { mutableStateOf(logMeal ?: mealForTime(LocalTime.now())) }
     var servingsCount by remember { mutableStateOf("1") }
     var submitted by remember { mutableStateOf(false) }
     var logError by remember { mutableStateOf<String?>(null) }
@@ -373,7 +460,7 @@ private fun LogRecipeSheet(
                     if (submitted || qty == null) return@MbButton
                     submitted = true
                     val recipeName = recipe.name
-                    viewModel.addRecipeToBasket(recipe, selectedMeal, LocalDate.now(), qty) {
+                    viewModel.addRecipeToBasket(recipe, selectedMeal, logDate ?: LocalDate.now(), qty) {
                         onAddedToBasket(recipeName)
                     }
                 }
@@ -390,7 +477,7 @@ private fun LogRecipeSheet(
                     viewModel.logRecipeToDiary(
                         recipe = recipe,
                         mealType = selectedMeal,
-                        date = LocalDate.now(),
+                        date = logDate ?: LocalDate.now(),
                         servingsToLog = qty,
                         onComplete = onLogged,
                         onError = { message ->
@@ -410,11 +497,11 @@ private fun LogRecipeSheet(
         )
         MealAndDayPicker(
             selectedMeal = selectedMeal,
-            selectedDate = today,
+            selectedDate = logDate ?: today,
             today = today,
             onMealSelected = { selectedMeal = it },
             onDateSelected = {},
-            header = "Log to ${mealLabel(selectedMeal)}, Today",
+            header = "Log to ${mealLabel(selectedMeal)}, ${basketDateLabel(logDate ?: today, today)}",
             showDays = false
         )
         Spacer(modifier = Modifier.height(AppSpacing.lg))
@@ -509,23 +596,30 @@ fun EditRecipeScreen(
     onSaveSuccess: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var name by remember { mutableStateOf("") }
-    var servingsProduced by remember { mutableStateOf("4") }
-    var ingredients by remember { mutableStateOf<List<RecipeIngredient>>(emptyList()) }
-    var existingRecipe by remember { mutableStateOf<Recipe?>(null) }
+    val form by viewModel.form.collectAsState()
+    val existingRecipe by viewModel.existingRecipe.collectAsState()
+    val name = form.name
+    val servingsProduced = form.servingsProduced
+    val ingredients = form.ingredients
 
     var showAddIngredientDialog by remember { mutableStateOf(false) }
+    var showDiscardPrompt by remember { mutableStateOf(false) }
 
-    LaunchedEffect(recipeId) {
-        if (recipeId > 0L) {
-            val found = viewModel.getRecipe(recipeId)
-            if (found != null) {
-                existingRecipe = found
-                name = found.name
-                servingsProduced = found.servingsProduced.toString()
-                ingredients = found.ingredients
-            }
-        }
+    LaunchedEffect(recipeId) { viewModel.openForEdit(recipeId) }
+
+    BackHandler(enabled = viewModel.hasUnsavedChanges()) { showDiscardPrompt = true }
+    if (showDiscardPrompt) {
+        MbConfirmDialog(
+            title = "Discard this recipe?",
+            text = "What you entered here has not been saved.",
+            confirmText = "Discard",
+            dismissText = "Keep editing",
+            onConfirm = {
+                showDiscardPrompt = false
+                onSaveSuccess()
+            },
+            onDismiss = { showDiscardPrompt = false }
+        )
     }
 
     val servingsCount = (servingsProduced.toIntOrNull() ?: 1).coerceAtLeast(1)
@@ -556,7 +650,7 @@ fun EditRecipeScreen(
 
         MbTextField(
             value = name,
-            onValueChange = { name = it },
+            onValueChange = { text -> viewModel.updateForm { it.copy(name = text) } },
             label = "Recipe Name *",
             modifier = Modifier.fillMaxWidth()
         )
@@ -564,7 +658,7 @@ fun EditRecipeScreen(
 
         MbTextField(
             value = servingsProduced,
-            onValueChange = { servingsProduced = it },
+            onValueChange = { text -> viewModel.updateForm { it.copy(servingsProduced = text) } },
             label = "Servings Produced *",
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
@@ -647,7 +741,7 @@ fun EditRecipeScreen(
                         MbIconButton(
                             icon = Ph.X.light,
                             contentDescription = "Remove",
-                            onClick = { ingredients = ingredients.filterIndexed { i, _ -> i != index } },
+                            onClick = { viewModel.updateForm { it.copy(ingredients = it.ingredients.filterIndexed { i, _ -> i != index }) } },
                             size = 40.dp,
                             iconSize = 18.dp
                         )
@@ -749,7 +843,7 @@ fun EditRecipeScreen(
                                 serving = selectedServing!!,
                                 quantity = q
                             )
-                            ingredients = ingredients + ing
+                            viewModel.updateForm { it.copy(ingredients = it.ingredients + ing) }
                             showAddIngredientDialog = false
                         }
                     )

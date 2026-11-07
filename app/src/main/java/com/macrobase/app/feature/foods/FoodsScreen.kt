@@ -13,6 +13,10 @@ import com.macrobase.app.core.designsystem.components.MbViewSwitch
 import com.macrobase.app.core.navigation.DeclareDockViews
 
 /** The saved-state key of the Foods tab's view: 0 Custom foods, 1 Recipes. */
+/** The meal name and epoch day "Log a recipe" was started for, in the entry's saved state (BUG-003). */
+const val RECIPE_LOG_MEAL_KEY = "recipe_log_meal"
+const val RECIPE_LOG_DAY_KEY = "recipe_log_day"
+
 const val FOODS_VIEW_KEY = "foods_view"
 const val FOODS_VIEW_CUSTOM = 0
 const val FOODS_VIEW_RECIPES = 1

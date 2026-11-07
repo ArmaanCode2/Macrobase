@@ -128,6 +128,9 @@ class GetGoalsUseCase(
         return goalsRepository.observeGoals()
     }
 
+    /** False until goals are saved for the first time, so the strategy is still the untouched default. */
+    suspend fun hasSaved(): Boolean = goalsRepository.hasSavedGoals()
+
     suspend fun snapshot(): Goal {
         return goalsRepository.getGoals()
     }

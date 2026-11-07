@@ -124,7 +124,7 @@ data class PreferencesFormState(
     val selectedGoal: FitnessGoal = FitnessGoal.MAINTAINING,
     /** A strategy was picked by hand, so weight edits no longer change it. */
     val isManuallyOverridden: Boolean = false,
-    /** The strategy follows the typed weights (after a weight edit, or "Auto-match"). */
+    /** The strategy follows the typed weights (after "Auto-match", or a weight edit before goals were ever saved). */
     val followsWeights: Boolean = false,
     val isSaving: Boolean = false,
     val saveError: String? = null,
@@ -171,10 +171,16 @@ class PreferencesViewModel(
     // The active maintenance the form put in when the user went back to the active strategy
     private var filledMaintenance: TypedNumber? = null
 
+    // Nothing was ever saved, so no strategy was chosen and a weight edit may pick one
+    private var goalsNeverSaved = false
+
     init {
         viewModelScope.launch {
             combine(preferencesRepository.observePreferences(), getGoalsUseCase()) { prefs, goals -> prefs to goals }
-                .collect { (prefs, goals) -> refresh(prefs, goals) }
+                .collect { (prefs, goals) ->
+                    goalsNeverSaved = !getGoalsUseCase.hasSaved()
+                    refresh(prefs, goals)
+                }
         }
     }
 
@@ -220,10 +226,12 @@ class PreferencesViewModel(
 
     /**
      * Whether the strategy follows the typed weights. A weight edit alone never replaces a change
-     * waiting for tomorrow; only a strategy the user chose does (BUG-031).
+     * waiting for tomorrow; only a strategy the user chose does (BUG-031). With a weight missing
+     * there is nothing to match, which never means Maintaining (BUG-007).
      */
     private fun autoMatches(form: PreferencesFormState, goals: Goal): Boolean =
-        form.followsWeights && (ProfileField.STRATEGY in form.profileEdited || goals.scheduledFitnessGoal == null)
+        form.followsWeights && (ProfileField.STRATEGY in form.profileEdited || goals.scheduledFitnessGoal == null) &&
+            check(form).let { it.value(PreferenceField.WEIGHT) != null && it.value(PreferenceField.TARGET_WEIGHT) != null }
 
     private fun autoDetected(form: PreferencesFormState): FitnessGoal {
         val check = check(form)
@@ -265,11 +273,13 @@ class PreferencesViewModel(
         updateForm { it.copy(timeZone = text, profileEdited = it.profileEdited + ProfileField.TIME_ZONE) }
 
     fun onFieldChanged(field: PreferenceField, text: String) = updateForm { form ->
+        // Recording a weight never replaces a strategy in force: a wrong one goes into the goal
+        // history and costs rank. The contradiction notice offers "Auto-match" instead (BUG-007)
         val weightEdit = field == PreferenceField.WEIGHT || field == PreferenceField.TARGET_WEIGHT
         render(
             form.copy(
                 typed = form.typed + (field to TypedNumber(text, form.unitSystem)),
-                followsWeights = form.followsWeights || (weightEdit && !form.isManuallyOverridden)
+                followsWeights = form.followsWeights || (weightEdit && !form.isManuallyOverridden && goalsNeverSaved)
             )
         )
     }
