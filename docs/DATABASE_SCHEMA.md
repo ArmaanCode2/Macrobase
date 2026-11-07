@@ -21,7 +21,7 @@ categories (1) ────< foods (N) ────< servings (N)
 
 ### 1.1. Core Tables
 
-Built by `tools/catalog/build_catalog.py` (see `tools/catalog/README.md`). Row counts are for catalog 2.4.0.
+Built by `tools/catalog/build_catalog.py` (see `tools/catalog/README.md`). Row counts are for catalog 2.5.0.
 
 - **`categories`** (15 rows): `id (PK)`, `name (UNIQUE)`, `description`, `display_order`
 - **`foods`** (977 rows: 738 INDB recipes, 190 foods from USDA FoodData Central and UK CoFID 2021, and 49 MacroBase standard recipes worked out from them): `id (PK)`, `uuid (UNIQUE)`, `source_id`, `source_name`, `original_food_id`, `name`, `normalized_name`, `brand`, `category_id (FK)`, `food_type`, `serving_basis`, `calories`, `protein`, `carbohydrates`, `fat`, `fiber`, `sugar`, `saturated_fat`, `trans_fat`, `cholesterol`, `sodium`, `potassium`, `calcium`, `iron`, `magnesium`, `phosphorus`, `zinc`, `vitamin_a_rae`, `vitamin_c`, `vitamin_d_mcg`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate_b9`, `vitamin_b12`, `water`, `is_active`
@@ -30,7 +30,7 @@ Built by `tools/catalog/build_catalog.py` (see `tools/catalog/README.md`). Row c
 - **`servings`** (1,831 rows): `id (PK)`, `food_id (FK)`, `description`, `unit_type`, `quantity`, `gram_weight`, `is_default`, `sequence`
 - **`food_aliases`** (721 rows): `id (PK)`, `food_id (FK)`, `alias`, `alias_type`
 - **`food_search`** (977 rows): `food_id (PK, FK)`, `terms`, `name_terms`, `names`, `priority`. The words search matches and ranks by; Android's SQLite has no FTS5, so the catalog has no full-text table.
-- **`database_metadata`** (14 rows): `key (PK)`, `value` (`database_version: 2.4.0`, `schema_version: 2`)
+- **`database_metadata`** (14 rows): `key (PK)`, `value` (`database_version: 2.5.0`, `schema_version: 2`)
 
 ### 1.2. Branded Products Database (`branded_foods.db`)
 
@@ -132,7 +132,7 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 ## 3. Versioning & Migration Strategy
 
 ### 3.1. Built-in Database Versioning
-- **Database Version**: Tracked in `database_metadata` (`database_version: 2.4.0`, `schema_version: 2`; the branded database `1.0.0`). `BuiltInDatabaseManager` replaces an installed catalog whose version differs from `EXPECTED_DATABASE_VERSION`, and the build refuses new content under a version already pinned in `tools/catalog/catalog_versions.csv`.
+- **Database Version**: Tracked in `database_metadata` (`database_version: 2.5.0`, `schema_version: 2`; the branded database `1.0.0`). `BuiltInDatabaseManager` replaces an installed catalog whose version differs from `EXPECTED_DATABASE_VERSION`, and the build refuses new content under a version already pinned in `tools/catalog/catalog_versions.csv`.
 - **Update Mechanism**: Asset database updates are handled atomically via `BuiltInDatabaseManager`. The database is opened strictly in read-only mode (`SQLiteDatabase.OPEN_READONLY`).
 
 ### 3.2. User Database Schema & Migration History

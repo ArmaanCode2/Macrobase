@@ -213,7 +213,8 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
 - **Diary Entries**: Matched by `uuid`. If exists $\rightarrow$ skipped. If absent $\rightarrow$ inserted.
 - **Weight Entries**: Matched by `dateEpochDay`. If exists $\rightarrow$ newer record (`createdAt`) wins. If absent $\rightarrow$ inserted.
 - **Water Logs**: Matched by `(dateEpochDay, timestamp, amountMl)`. Duplicate timestamps skipped; new logs inserted.
-- **Goals & Preferences**: Updated to backup configuration.
+- **Goals & Preferences**: This phone's are kept when it has saved any: its current goal, strategy, any scheduled change and its profile stay, and the result says so. On a phone that has saved none, such as a fresh install, the backup fills them.
+- **Goal History**: A merge that keeps this phone's goals still takes the backup's `transitions` dated before this phone's first saved day, so imported days keep the goals they had and count in the rank. The backup's `2000-01-01` record replaces this phone's, and records from the first saved day on stay this phone's. A backup without `transitions` changes nothing, and merging the same backup again changes nothing more.
 
 ### 5.2. OVERWRITE Mode (Destructive)
 - Requires explicit user confirmation via a prominent red warning dialog.
@@ -239,3 +240,4 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
 - **Before anything is written**, validation checks the manifest, every file's checksum, that all five data files are present, and that each file holds the record count the manifest lists.
 - **Restoration** runs the database step inside one Room transaction (`withTransaction`). Any error there rolls it back, so the diary is never left half restored.
 - **Goals and preferences** are written after that transaction commits. If writing them fails, the result says the records were restored but the settings were not saved.
+- **Leaving the screen does not stop a restore.** Room commits a running transaction even when its caller is cancelled, so `importUserData` runs under `NonCancellable`: the database, goals, preferences and widget refresh all finish together. While it runs, a dialog blocks Back and the header arrow, so the result is always shown.

@@ -99,6 +99,19 @@ vitamin D2 plus D3.
   A poori goes from 738 kcal per 100 g (921 kcal each) to 385 kcal (102 kcal each, 26.6 g). Banana chips keep more
   oil than the crisp snacks, and INDB's gulab jamun with milk powder uses evaporated milk for the powder, so both
   then take `values_from` measured foods; their frying correction still weighs the portion.
+- `cooked_water`. INDB adds up raw ingredients for griddled and boiled dishes too, so a dish with no pot of frying oil
+  to take out can sit near the dry weight of its ingredients: a plain dosa had 381 kcal per 100 g and weighed 36 g.
+  `water_g` is its water per 100 g as eaten, from a measured dish named in `reference`. 100 g of INDB's food becomes
+  m g: every nutrient is concentrated by 100 / m and the household portion becomes m% of its weight, so one dosa keeps
+  its energy and weighs 75 g. The build refuses a `water_g` the food already holds. With no measured dish in this
+  repository to cite, leave the food as a `fix` row in `data_exceptions.csv` rather than estimate the water.
+
+  | Kind | Water (g per 100 g) | Measured dish | Foods |
+  |---|---|---|---|
+  | Griddled batter | 57.0 | CoFID 2021 11-959, 11-1102, 11-1103 Pancakes, savoury | Plain dosa, jowar dosa, pesarattu, uttapam, besan bathua chilla |
+  | Boiled dal | 74.2 | CoFID 2021 15-780 Curry, pigeon pea dahl | Maa chaane ki dal |
+  | Cooked rice dishes | 66.9 | CoFID 2021 19-454 Biryani, chicken, takeaway | Tamarind rice |
+
 - `values_from` with `from`: the `columns` (all nutrient columns when blank) come from a reference row of an imported
   file, a `basic_foods.csv` row with `role` set to `reference`. Reference rows never ship as foods, and the build
   refuses one that no correction uses. A food's `values_from` runs after its frying correction.
@@ -184,6 +197,7 @@ These need a row in `data_exceptions.csv` when a food fails them:
 | `fat_level` | More than 45 g fat per 100 g |
 | `sodium_level` | More than 2,500 mg sodium per 100 g |
 | `portion_weight` | One unit of INDB's household portion is outside `PORTION_BOUNDS_G` for its unit (1 piece over 200 g, for example) |
+| `cooked_dish_water` | An INDB food named as a griddled or boiled dish (`COOKED_DISH`: dosa, cheela, chilla, uttapam, pesarattu, upma, daliya, poha, dal, rice) has under `COOKED_DISH_MIN_WATER_G` (45 g) of water per 100 g by difference. `energy_vs_macros` cannot see this, since a dish at dry weight still fits its macros. Breads, fried foods and sweets with those words in their names are `accepted` |
 
 An exception row records the `value` the check saw, so it stops covering the food when that value changes. Its
 `status` is `fix` for a known error still to correct, or `accepted` when the value is right; `note` says what is wrong
