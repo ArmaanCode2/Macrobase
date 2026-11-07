@@ -105,7 +105,8 @@ fun MacroBaseScaffold(
         navController.navigate(Screen.EditCustomFood.createRoute())
         navController.navigate(Screen.NutritionLabelScanner.route)
     }
-    val openBasket: () -> Unit = { navController.navigate(Screen.Basket.route) }
+    // Its route has no arguments, so a second tap reuses the Basket on top (BUG-023)
+    val openBasket: () -> Unit = { navController.navigate(Screen.Basket.route) { launchSingleTop = true } }
 
     CompositionLocalProvider(
         LocalScaffoldChrome provides chrome,

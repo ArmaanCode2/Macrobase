@@ -33,6 +33,18 @@ internal fun copyFromYesterdayLabel(meal: MealType): String {
     return "Copy $inSentence from yesterday"
 }
 
+/** Lets only the first tap act: the sheet's rows stay tappable while it slides away (BUG-023). */
+internal class FirstTapOnly {
+    private var used = false
+
+    /** True for the first call only. */
+    fun claim(): Boolean {
+        if (used) return false
+        used = true
+        return true
+    }
+}
+
 /**
  * C7 The "+" button's sheet: a meal chip row (starting on the meal for the time of day) that sets
  * the meal for the actions below it. Every action closes the sheet first. Copying yesterday's meal
@@ -59,8 +71,11 @@ fun AddFoodSheet(
     val yesterdayDiary by remember(yesterday) { homeViewModel.summaryFor(yesterday) }.collectAsState(initial = null)
     val yesterdayMealIsEmpty = yesterdayDiary?.meals?.firstOrNull { it.type == meal }?.entries.isNullOrEmpty()
 
-    // Slide the sheet away, then act
+    val firstTap = remember { FirstTapOnly() }
+
+    // Slide the sheet away, then act. Only the first tap acts: two taps copied a meal twice (BUG-023)
     fun go(action: () -> Unit) {
+        if (!firstTap.claim()) return
         scope.launch { sheetState.hide() }.invokeOnCompletion {
             onDismiss()
             action()

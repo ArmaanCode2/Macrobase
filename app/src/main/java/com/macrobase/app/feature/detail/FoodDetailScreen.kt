@@ -1054,7 +1054,7 @@ internal fun QuantityStepper(
 /** The serving as chips when there are up to 6, otherwise a dropdown. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ServingChoice(
+internal fun ServingChoice(
     food: Food,
     servings: List<Serving>,
     selected: Serving?,

@@ -188,7 +188,7 @@ fun NavGraph(
                     navController.navigate(Screen.EditCustomFood.createRoute())
                     navController.navigate(Screen.NutritionLabelScanner.route)
                 },
-                onOpenBasket = { navController.navigate(Screen.Basket.route) },
+                onOpenBasket = { navController.navigate(Screen.Basket.route) { launchSingleTop = true } },
                 onOpenProfile = { navController.navigateToTopLevel(Screen.Preferences, homeViewModel) },
                 onLogWeight = { dateEpochDay ->
                     navController.navigate(Screen.Weight.createRoute(dateEpochDay, openLog = true))

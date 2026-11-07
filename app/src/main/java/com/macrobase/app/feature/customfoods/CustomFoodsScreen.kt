@@ -483,12 +483,16 @@ internal data class FormNumber(val value: Double?, val error: String?)
 /**
  * Reads one number field of the custom food form. "1,5" reads as 1.5, as comma keyboards type it.
  * NaN, infinity and negative values are refused, since a stored NaN would break every later
- * backup. A [largeAmount] field refuses "2,000", which means 2000 there, rather than save 2.
+ * backup. A [largeAmount] field refuses "2,000", which means 2000 there, rather than save 2, unless
+ * the app wrote that text itself ([writtenByApp]): "4.125" from a scan is 4.125 (BUG-036).
  */
-internal fun readFormNumber(text: String, largeAmount: Boolean = false): FormNumber {
+internal fun readFormNumber(text: String, largeAmount: Boolean = false, writtenByApp: Boolean = false): FormNumber {
     val trimmed = text.trim()
     if (trimmed.isEmpty()) return FormNumber(null, null)
-    if (largeAmount && hasThousandsSeparator(trimmed)) return FormNumber(null, "Leave out the thousands separator")
+    // A leading 0 is never a thousands group: "0.125" is an eighth
+    if (largeAmount && !writtenByApp && !trimmed.startsWith("0") && hasThousandsSeparator(trimmed)) {
+        return FormNumber(null, "Leave out the thousands separator")
+    }
     val number = parseDecimalInput(trimmed) ?: return FormNumber(null, "Enter a number")
     if (number < 0.0) return FormNumber(null, "Cannot be negative")
     return FormNumber(number, null)
@@ -526,8 +530,8 @@ fun EditCustomFoodScreen(
     }
 
     val isEditing = foodId > 0L && existingFood != null
-    val servingSizeInput = readFormNumber(form.servingSize, largeAmount = true)
-    val caloriesInput = readFormNumber(form.calories, largeAmount = true)
+    val servingSizeInput = form.read(CustomFoodForm::servingSize, largeAmount = true)
+    val caloriesInput = form.read(CustomFoodForm::calories, largeAmount = true)
     val proteinInput = readFormNumber(form.protein)
     val carbsInput = readFormNumber(form.carbs)
     val fatInput = readFormNumber(form.fat)
@@ -538,10 +542,13 @@ fun EditCustomFoodScreen(
     }
     val fiberInput = readFormNumber(form.fiber)
     val sugarInput = readFormNumber(form.sugar)
-    val sodiumInput = readFormNumber(form.sodium, largeAmount = true)
+    val sodiumInput = form.read(CustomFoodForm::sodium, largeAmount = true)
+    val potassiumInput = form.read(CustomFoodForm::potassium, largeAmount = true)
+    val calciumInput = form.read(CustomFoodForm::calcium, largeAmount = true)
+    val ironInput = form.read(CustomFoodForm::iron)
     val numberInputs = listOf(
         servingSizeInput, caloriesInput, proteinInput, carbsInput, fatInput,
-        saturatedFatInput, fiberInput, sugarInput, sodiumInput
+        saturatedFatInput, fiberInput, sugarInput, sodiumInput, potassiumInput, calciumInput, ironInput
     )
     val isCustomUnitValid = form.servingUnit != ServingUnit.CUSTOM || form.customUnitName.isNotBlank()
     val isFormValid = form.name.isNotBlank() && caloriesInput.value != null && (servingSizeInput.value ?: 0.0) > 0.0 &&
@@ -752,6 +759,31 @@ fun EditCustomFoodScreen(
                 errorText = sodiumInput.error,
                 modifier = Modifier.fillMaxWidth()
             )
+            // A scanned label's minerals land here, where they can be checked (BUG-040)
+            MbTextField(
+                value = form.potassium,
+                onValueChange = { text -> viewModel.updateForm { it.copy(potassium = text) } },
+                label = "Potassium (mg)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = potassiumInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = form.calcium,
+                onValueChange = { text -> viewModel.updateForm { it.copy(calcium = text) } },
+                label = "Calcium (mg)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = calciumInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
+            MbTextField(
+                value = form.iron,
+                onValueChange = { text -> viewModel.updateForm { it.copy(iron = text) } },
+                label = "Iron (mg)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                errorText = ironInput.error,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(modifier = Modifier.height(AppSpacing.xl))
@@ -776,10 +808,9 @@ fun EditCustomFoodScreen(
                     fiber = fiberInput.value,
                     sugar = sugarInput.value,
                     sodium = sodiumInput.value,
-                    // Not editable in this form: carry the stored values through
-                    potassium = existingFood?.nutritionPerServing?.potassiumMg,
-                    calcium = existingFood?.nutritionPerServing?.calciumMg,
-                    iron = existingFood?.nutritionPerServing?.ironMg,
+                    potassium = potassiumInput.value,
+                    calcium = calciumInput.value,
+                    iron = ironInput.value,
                     onComplete = {
                         viewModel.clearScannedDraft()
                         onSaveSuccess()

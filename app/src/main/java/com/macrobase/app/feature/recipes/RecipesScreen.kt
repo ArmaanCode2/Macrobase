@@ -109,7 +109,16 @@ import com.macrobase.app.domain.usecase.LogFoodUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import com.macrobase.app.core.config.DatabaseConfig
+import com.macrobase.app.domain.model.ServingUnit
+import com.macrobase.app.feature.detail.ServingChoice
+import com.macrobase.app.feature.detail.gramsTotalLabel
+import com.macrobase.app.feature.detail.servingGrams
 import androidx.compose.runtime.rememberCoroutineScope
 import com.macrobase.app.feature.basket.basketDateLabel
 import com.macrobase.app.feature.dashboard.mealForTime
@@ -134,7 +143,60 @@ data class RecipeForm(
     val name: String = "",
     val servingsProduced: String = "4",
     val ingredients: List<RecipeIngredient> = emptyList()
-)
+) {
+    /** The servings as a whole number of at least 1, or null: blank, "0" and "2.5" are refused (BUG-018). */
+    val servingsCount: Int?
+        get() = servingsProduced.trim().toIntOrNull()?.takeIf { it > 0 }
+
+    val canSave: Boolean
+        get() = name.isNotBlank() && servingsCount != null && ingredients.isNotEmpty()
+}
+
+internal const val SERVINGS_INPUT_ERROR = "Enter a whole number of servings, 1 or more"
+
+/**
+ * The Add Ingredient dialog. It lives in the ViewModel, so rotation keeps a half-picked ingredient
+ * (BUG-019). No [food] yet means the search step.
+ */
+data class IngredientPicker(
+    val query: String = "",
+    val results: List<Food> = emptyList(),
+    val searchError: String? = null,
+    val food: Food? = null,
+    val serving: Serving? = null,
+    val quantityText: String = "1"
+) {
+    val servings: List<Serving>
+        get() = food?.let(::ingredientServings).orEmpty()
+
+    val quantity: Double?
+        get() = parsePositiveQuantity(quantityText)
+
+    /** Grams of what will be added, or null when the serving has no weight. */
+    val totalGrams: Double?
+        get() = quantity?.let { servingGrams(serving, it) }
+
+    /** The ingredient to add, or null until a food, a serving and a valid amount are chosen. */
+    fun ingredient(): RecipeIngredient? {
+        val chosen = food ?: return null
+        val portion = serving ?: return null
+        val amount = quantity ?: return null
+        return RecipeIngredient(food = chosen, serving = portion, quantity = amount)
+    }
+}
+
+/**
+ * The servings Add Ingredient offers: the food's own, and "1 g" ("1 ml" for a drink) when it has no
+ * single-unit serving and can scale one, so 250 g is typed as 250 (BUG-019).
+ */
+internal fun ingredientServings(food: Food): List<Serving> {
+    val own = food.servings.ifEmpty { listOf(Serving(description = "100 g", gramWeight = 100.0, isDefault = true)) }
+    // By name: "1 leaf" may weigh 1 g, but it does not read as grams
+    if (own.any { it.description.trim().lowercase(Locale.ROOT) in setOf("1 g", "1 ml") }) return own
+    val unit = if (food.servingBasis.contains("ml", ignoreCase = true)) ServingUnit.MILLILITERS else ServingUnit.GRAMS
+    val single = Serving(description = "1 ${unit.displayName}", unit = unit, gramWeight = 1.0)
+    return if (food.canScale(single)) own + single else own
+}
 
 data class RecipesListUiState(
     val isLoading: Boolean = true,
@@ -239,8 +301,60 @@ class RecipesViewModel(
         }
     }
 
-    suspend fun searchFoodsForIngredient(query: String): List<Food> {
-        return foodRepository.searchFoods(query, limit = 20)
+    private val _ingredientPicker = MutableStateFlow<IngredientPicker?>(null)
+    /** The Add Ingredient dialog, or null while it is closed. */
+    val ingredientPicker: StateFlow<IngredientPicker?> = _ingredientPicker.asStateFlow()
+
+    fun openIngredientPicker() {
+        _ingredientPicker.value = IngredientPicker()
+    }
+
+    private var ingredientSearch: Job? = null
+
+    fun closeIngredientPicker() {
+        ingredientSearch?.cancel()
+        _ingredientPicker.value = null
+    }
+
+    /** One search at a time, once typing pauses, as Search runs; a blank query clears the list (BUG-026). */
+    fun onIngredientQuery(query: String) {
+        _ingredientPicker.update { it?.copy(query = query) }
+        ingredientSearch?.cancel()
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) {
+            _ingredientPicker.update { it?.copy(results = emptyList(), searchError = null) }
+            return
+        }
+        ingredientSearch = viewModelScope.launch {
+            delay(DatabaseConfig.SEARCH_DEBOUNCE_MILLIS)
+            try {
+                val found = foodRepository.searchFoods(trimmed, limit = 20)
+                _ingredientPicker.update { it?.copy(results = found, searchError = null) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _ingredientPicker.update { it?.copy(results = emptyList(), searchError = "Failed to perform search.") }
+            }
+        }
+    }
+
+    fun selectIngredientFood(food: Food) {
+        _ingredientPicker.update { it?.copy(food = food, serving = food.defaultServing ?: ingredientServings(food).first()) }
+    }
+
+    fun selectIngredientServing(serving: Serving) {
+        _ingredientPicker.update { it?.copy(serving = serving) }
+    }
+
+    fun onIngredientQuantity(text: String) {
+        _ingredientPicker.update { it?.copy(quantityText = text) }
+    }
+
+    /** Adds the picked ingredient to the form and closes the dialog. */
+    fun addPickedIngredient() {
+        val ingredient = _ingredientPicker.value?.ingredient() ?: return
+        updateForm { it.copy(ingredients = it.ingredients + ingredient) }
+        closeIngredientPicker()
     }
 
     /** Puts [servings] of the recipe in the basket and returns the basket item id. */
@@ -602,7 +716,6 @@ fun EditRecipeScreen(
     val servingsProduced = form.servingsProduced
     val ingredients = form.ingredients
 
-    var showAddIngredientDialog by remember { mutableStateOf(false) }
     var showDiscardPrompt by remember { mutableStateOf(false) }
 
     LaunchedEffect(recipeId) { viewModel.openForEdit(recipeId) }
@@ -622,19 +735,20 @@ fun EditRecipeScreen(
         )
     }
 
-    val servingsCount = (servingsProduced.toIntOrNull() ?: 1).coerceAtLeast(1)
+    val servingsCount = form.servingsCount
     val tempRecipe = Recipe(
         id = existingRecipe?.id ?: 0L,
         uuid = existingRecipe?.uuid ?: UUID.randomUUID().toString(),
         name = name,
-        servingsProduced = servingsCount,
+        // An invalid count shows the live totals as for 1 serving; Save stays off until it is fixed
+        servingsProduced = servingsCount ?: 1,
         ingredients = ingredients,
         savedNutritionPerServing = existingRecipe?.savedNutritionPerServing
     )
 
     val totalNutr = tempRecipe.totalNutrition
     val perServingNutr = tempRecipe.nutritionPerServing
-    val isFormValid = name.isNotBlank() && servingsCount > 0 && ingredients.isNotEmpty()
+    val isFormValid = form.canSave
 
     val scrollState = rememberScrollState()
     ReportContentScrolled(scrollState.rememberIsScrolled())
@@ -660,6 +774,7 @@ fun EditRecipeScreen(
             value = servingsProduced,
             onValueChange = { text -> viewModel.updateForm { it.copy(servingsProduced = text) } },
             label = "Servings Produced *",
+            errorText = if (servingsCount == null) SERVINGS_INPUT_ERROR else null,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
@@ -711,7 +826,7 @@ fun EditRecipeScreen(
             Text(text = "Ingredients (${ingredients.size})", style = AppTypography.Header2)
             MbButton(
                 text = "+ Add Ingredient",
-                onClick = { showAddIngredientDialog = true },
+                onClick = { viewModel.openIngredientPicker() },
                 minHeight = 40.dp
             )
         }
@@ -762,45 +877,34 @@ fun EditRecipeScreen(
         Spacer(modifier = Modifier.height(AppSpacing.xxl))
     }
 
-    // Add Ingredient Dialog
-    if (showAddIngredientDialog) {
-        var query by remember { mutableStateOf("") }
-        var searchResults by remember { mutableStateOf<List<Food>>(emptyList()) }
-        var selectedFood by remember { mutableStateOf<Food?>(null) }
-        var selectedServing by remember { mutableStateOf<Serving?>(null) }
-        var qtyInput by remember { mutableStateOf("1") }
-
+    // Add Ingredient: the dialog's state is in the ViewModel, so rotation keeps it (BUG-019)
+    val picker by viewModel.ingredientPicker.collectAsState()
+    picker?.let { current ->
         AlertDialog(
-            onDismissRequest = { showAddIngredientDialog = false },
+            onDismissRequest = { viewModel.closeIngredientPicker() },
             title = { Text(text = "Add Ingredient", style = AppTypography.Header1) },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    if (selectedFood == null) {
+                    val chosen = current.food
+                    if (chosen == null) {
                         MbTextField(
-                            value = query,
-                            onValueChange = {
-                                query = it
-                                if (it.isNotBlank()) {
-                                    viewModel.viewModelScope.launch {
-                                        searchResults = viewModel.searchFoodsForIngredient(it)
-                                    }
-                                }
-                            },
+                            value = current.query,
+                            onValueChange = { viewModel.onIngredientQuery(it) },
                             placeholder = "Search ingredient...",
                             leadingIcon = Ph.MagnifyingGlass.light,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
+                        current.searchError?.let { error ->
+                            Text(text = error, style = AppTypography.Body2, color = AppColors.Error)
+                        }
 
                         LazyColumn(modifier = Modifier.height(220.dp)) {
-                            items(searchResults) { food ->
+                            items(current.results) { food ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .mbClickable(pressedScale = 0.98f) {
-                                            selectedFood = food
-                                            selectedServing = food.defaultServing ?: Serving(description = "100 g", gramWeight = 100.0)
-                                        }
+                                        .mbClickable(pressedScale = 0.98f) { viewModel.selectIngredientFood(food) }
                                         .padding(vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -811,46 +915,47 @@ fun EditRecipeScreen(
                             }
                         }
                     } else {
-                        Text(text = selectedFood!!.name, style = AppTypography.Header3)
+                        Text(text = chosen.name, style = AppTypography.Header3)
                         Spacer(modifier = Modifier.height(AppSpacing.md))
 
-                        val ingredientQtyValid = parsePositiveQuantity(qtyInput) != null
                         MbTextField(
-                            value = qtyInput,
-                            onValueChange = { qtyInput = it },
+                            value = current.quantityText,
+                            onValueChange = { viewModel.onIngredientQuantity(it) },
                             label = "Quantity",
-                            errorText = if (!ingredientQtyValid) QUANTITY_INPUT_ERROR else null,
+                            errorText = if (current.quantity == null) QUANTITY_INPUT_ERROR else null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.height(AppSpacing.sm))
-
-                        Text(text = "Serving: ${selectedServing?.description ?: "100 g"}", style = AppTypography.Body2)
+                        // The amount in grams, so 250 typed against "100 g" reads as 25000 g (BUG-019)
+                        current.totalGrams?.let { grams ->
+                            Text(
+                                text = gramsTotalLabel(grams),
+                                style = AppTypography.Body2,
+                                color = AppColors.TextSecondary,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                        ServingChoice(
+                            food = chosen,
+                            servings = current.servings,
+                            selected = current.serving,
+                            onSelect = { viewModel.selectIngredientServing(it) },
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
                     }
                 }
             },
             confirmButton = {
-                if (selectedFood != null) {
-                    val ingredientQty = parsePositiveQuantity(qtyInput)
+                if (current.food != null) {
                     MbButton(
                         text = "Add to Recipe",
-                        enabled = ingredientQty != null,
-                        onClick = {
-                            val q = ingredientQty ?: return@MbButton
-                            val ing = RecipeIngredient(
-                                id = 0L,
-                                food = selectedFood!!,
-                                serving = selectedServing!!,
-                                quantity = q
-                            )
-                            viewModel.updateForm { it.copy(ingredients = it.ingredients + ing) }
-                            showAddIngredientDialog = false
-                        }
+                        enabled = current.ingredient() != null,
+                        onClick = { viewModel.addPickedIngredient() }
                     )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddIngredientDialog = false }) {
+                TextButton(onClick = { viewModel.closeIngredientPicker() }) {
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
