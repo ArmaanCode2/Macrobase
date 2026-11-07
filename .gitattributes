@@ -1,0 +1,4 @@
+# The catalog's sha256 pins and fingerprints hash raw bytes, so a checkout must not write CRLF here
+*.csv text eol=lf
+*.fingerprint text eol=lf
+*.db binary

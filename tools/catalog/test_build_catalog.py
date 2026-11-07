@@ -3,6 +3,7 @@
 import hashlib
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 
@@ -506,6 +507,25 @@ class CurationFileTests(unittest.TestCase):
         with self.assertRaises(b.CatalogError) as raised:
             self.read("sourceId,reason\nINDB:0001,too specific, rare\n")
         self.assertIn("row 2 has more cells than the header", raised.exception.problems[0])
+
+
+class LineEndingTests(unittest.TestCase):
+    """BUG-053: pins and fingerprints hash raw bytes, so a checkout that wrote CRLF would fail them."""
+
+    def git(self, *args):
+        return subprocess.run(["git", *args], cwd=b.WORKSPACE_DIR, capture_output=True, text=True, check=True).stdout
+
+    def test_every_csv_and_fingerprint_stays_lf_on_any_checkout(self):
+        files = self.git("ls-files", "*.csv", "*.fingerprint").splitlines()
+
+        self.assertIn("tools/catalog/new_foods.csv", files)
+        self.assertEqual([], [line for line in self.git("check-attr", "eol", "--", *files).splitlines() if not line.endswith(": eol: lf")])
+
+    def test_the_databases_are_never_treated_as_text(self):
+        files = self.git("ls-files", "*.db").splitlines()
+
+        self.assertEqual(2, len(files))
+        self.assertEqual([], [line for line in self.git("check-attr", "text", "--", *files).splitlines() if not line.endswith(": text: unset")])
 
 
 class CommittedCatalogTests(unittest.TestCase):
