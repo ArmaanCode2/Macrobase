@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.recipes
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
+import com.macrobase.app.core.util.SafeWrites
 import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.core.navigation.ReportContentScrolled
@@ -266,24 +268,22 @@ class RecipesViewModel(
     val recipes: StateFlow<List<Recipe>> = recipeRepository.observeRecipes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
+
     /** Set from the first Save tap; a second tap must not create the recipe twice (BUG-011). */
     private var saveInFlight = false
 
     fun saveRecipe(recipe: Recipe, onComplete: () -> Unit) {
         if (saveInFlight) return
         saveInFlight = true
-        viewModelScope.launch {
-            try {
-                if (recipe.id > 0) {
-                    recipeRepository.updateRecipe(recipe)
-                } else {
-                    recipeRepository.createRecipe(recipe)
-                }
-            } catch (e: Exception) {
-                saveInFlight = false
-                throw e
+        // A failed save keeps the form and allows a retry, with a message (BUG-022)
+        writes.launch(onSaved = onComplete, onFailed = { saveInFlight = false }) {
+            if (recipe.id > 0) {
+                recipeRepository.updateRecipe(recipe)
+            } else {
+                recipeRepository.createRecipe(recipe)
             }
-            onComplete()
         }
     }
 
@@ -295,10 +295,7 @@ class RecipesViewModel(
     }
 
     fun deleteRecipe(recipeId: Long, onComplete: () -> Unit) {
-        viewModelScope.launch {
-            recipeRepository.deleteRecipe(recipeId)
-            onComplete()
-        }
+        writes.launch(onSaved = onComplete) { recipeRepository.deleteRecipe(recipeId) }
     }
 
     private val _ingredientPicker = MutableStateFlow<IngredientPicker?>(null)
@@ -432,6 +429,7 @@ fun RecipesScreen(
     val listState = rememberLazyListState()
     ReportContentScrolled(listState.rememberIsScrolled())
 
+    WriteFailedDialog(viewModel.writes)
     val deleteRequest by viewModel.pendingDelete.request.collectAsState()
     deleteRequest?.let {
         MbConfirmDialog(
@@ -719,6 +717,7 @@ fun EditRecipeScreen(
     var showDiscardPrompt by remember { mutableStateOf(false) }
 
     LaunchedEffect(recipeId) { viewModel.openForEdit(recipeId) }
+    WriteFailedDialog(viewModel.writes)
 
     BackHandler(enabled = viewModel.hasUnsavedChanges()) { showDiscardPrompt = true }
     if (showDiscardPrompt) {

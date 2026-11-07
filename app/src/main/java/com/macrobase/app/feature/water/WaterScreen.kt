@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.water
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
+import com.macrobase.app.core.util.SafeWrites
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -153,20 +155,19 @@ class WaterViewModel(
     /** The screen is shown again: left on today, it moves to the new day (BUG-006). */
     fun refreshDay() = day.refresh()
 
-    fun addWater(amountMl: Double) {
+    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
+
+    fun addWater(amountMl: Double, onSaved: () -> Unit = {}) {
         if (amountMl <= 0.0) return
         day.refresh()
         val date = day.selected.value
-        viewModelScope.launch {
-            addWaterEntryUseCase(date, amountMl)
-        }
+        writes.launch(onSaved) { addWaterEntryUseCase(date, amountMl) }
     }
 
-    fun updateWaterEntry(entry: WaterEntry) {
+    fun updateWaterEntry(entry: WaterEntry, onSaved: () -> Unit = {}) {
         if (entry.amountMl <= 0.0) return
-        viewModelScope.launch {
-            updateWaterEntryUseCase(entry)
-        }
+        writes.launch(onSaved) { updateWaterEntryUseCase(entry) }
     }
 
     /** The entry a delete button asked about, by row id. */
@@ -177,9 +178,7 @@ class WaterViewModel(
     }
 
     fun deleteWaterEntry(entryId: Long) {
-        viewModelScope.launch {
-            deleteWaterEntryUseCase(entryId)
-        }
+        writes.launch { deleteWaterEntryUseCase(entryId) }
     }
 }
 
@@ -203,6 +202,7 @@ fun WaterScreen(
         onPauseOrDispose { }
     }
 
+    WriteFailedDialog(viewModel.writes)
     val deleteRequest by viewModel.pendingDelete.request.collectAsState()
     deleteRequest?.let {
         MbConfirmDialog(
@@ -412,8 +412,7 @@ fun WaterScreen(
                             errorMessage = problem
                             return@MbButton
                         }
-                        viewModel.addWater(ml)
-                        showCustomAmountDialog = false
+                        viewModel.addWater(ml, onSaved = { showCustomAmountDialog = false })
                     }
                 )
             },
@@ -472,8 +471,7 @@ fun WaterScreen(
                             editErrorMessage = problem
                             return@MbButton
                         }
-                        viewModel.updateWaterEntry(entry.copy(amountMl = ml))
-                        entryToEdit = null
+                        viewModel.updateWaterEntry(entry.copy(amountMl = ml), onSaved = { entryToEdit = null })
                     }
                 )
             },

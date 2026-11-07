@@ -72,6 +72,7 @@ import com.macrobase.app.domain.usecase.ImportUserDataUseCase
 import com.macrobase.app.domain.usecase.ValidateBackupUseCase
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -114,37 +115,43 @@ class ImportExportViewModel(
     fun exportBackup(outputStreamSupplier: () -> OutputStream?, discardOutput: () -> Boolean = { false }) {
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true, exportSuccessMessage = null, exportErrorMessage = null) }
-            var writeStarted = false
-            try {
-                val archive = ByteArrayOutputStream().also { exportUserDataUseCase.writeBackupArchive(it) }.toByteArray()
-                val stream = outputStreamSupplier()
-                if (stream == null) {
-                    _uiState.update { it.copy(isExporting = false, exportErrorMessage = "Failed to open destination file.") }
-                    return@launch
-                }
-                withContext(Dispatchers.IO) {
+            // Leaving the screen does not stop the export, as with a restore: the file was created
+            // when its place was picked, and a stopped export left it empty (BUG-048)
+            withContext(Dispatchers.IO + NonCancellable) {
+                var writeStarted = false
+                try {
+                    val archive = ByteArrayOutputStream().also { exportUserDataUseCase.writeBackupArchive(it) }.toByteArray()
+                    val stream = outputStreamSupplier()
+                    if (stream == null) {
+                        _uiState.update { it.copy(isExporting = false, exportErrorMessage = "Failed to open destination file.") }
+                        return@withContext
+                    }
                     stream.use { out ->
                         writeStarted = true
                         out.write(archive)
                     }
-                }
-                _uiState.update {
-                    it.copy(
-                        isExporting = false,
-                        exportSuccessMessage = "Backup exported successfully!"
-                    )
-                }
-            } catch (e: CancellationException) {
-                // Leaving the screen is not a failure; an unfinished file fails validation on restore
-                throw e
-            } catch (e: Exception) {
-                val deleted = writeStarted && discardOutput()
-                val note = if (deleted) " The incomplete file was deleted." else ""
-                _uiState.update {
-                    it.copy(
-                        isExporting = false,
-                        exportErrorMessage = "Export failed: ${e.message ?: "Unknown error"}.$note"
-                    )
+                    _uiState.update {
+                        it.copy(
+                            isExporting = false,
+                            exportSuccessMessage = "Backup exported successfully!"
+                        )
+                    }
+                } catch (e: OutOfMemoryError) {
+                    // More data than this phone's memory holds: a message, not a crash (BUG-049)
+                    val deleted = writeStarted && discardOutput()
+                    val note = if (deleted) " The incomplete file was deleted." else ""
+                    _uiState.update {
+                        it.copy(isExporting = false, exportErrorMessage = PortabilityConfig.BACKUP_TOO_LARGE_TO_EXPORT_MESSAGE + note)
+                    }
+                } catch (e: Exception) {
+                    val deleted = writeStarted && discardOutput()
+                    val note = if (deleted) " The incomplete file was deleted." else ""
+                    _uiState.update {
+                        it.copy(
+                            isExporting = false,
+                            exportErrorMessage = "Export failed: ${e.message ?: "Unknown error"}.$note"
+                        )
+                    }
                 }
             }
         }
@@ -485,6 +492,20 @@ fun ImportExportScreen(
                     Text("Cancel", color = AppColors.TextSecondary)
                 }
             },
+            containerColor = AppColors.SheetFill,
+            shape = AppShapes.Dialog
+        )
+    }
+
+    // Export in progress: it blocks Back and the header arrow, so its result is seen. An export
+    // that is left anyway still finishes (BUG-048)
+    if (uiState.isExporting) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(text = "Exporting your data", style = AppTypography.Header1) },
+            text = { BusyRow(label = "Keep MacroBase open until this finishes.") },
+            confirmButton = {},
+            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
             containerColor = AppColors.SheetFill,
             shape = AppShapes.Dialog
         )

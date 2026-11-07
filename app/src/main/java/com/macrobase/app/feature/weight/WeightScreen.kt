@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.weight
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
+import com.macrobase.app.core.util.SafeWrites
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -262,10 +264,12 @@ class WeightViewModel(
     /** The screen is shown again: left on today, it moves to the new day, and so does its range (BUG-006). */
     fun refreshDay() = day.refresh()
 
-    fun logWeight(date: LocalDate, weightKg: Double, note: String? = null) {
-        viewModelScope.launch {
-            addWeightEntryUseCase(date, weightKg, note)
-        }
+    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
+
+    /** [onSaved] runs once the weigh-in is stored, so its dialog stays open if it was not (BUG-022). */
+    fun logWeight(date: LocalDate, weightKg: Double, note: String? = null, onSaved: () -> Unit = {}) {
+        writes.launch(onSaved) { addWeightEntryUseCase(date, weightKg, note) }
     }
 
     /** The weigh-in a delete button asked about, by its day. */
@@ -276,15 +280,11 @@ class WeightViewModel(
     }
 
     fun deleteWeight(date: LocalDate) {
-        viewModelScope.launch {
-            deleteWeightEntryUseCase(date)
-        }
+        writes.launch { deleteWeightEntryUseCase(date) }
     }
 
     fun deleteWeightById(id: Long) {
-        viewModelScope.launch {
-            deleteWeightEntryUseCase(id)
-        }
+        writes.launch { deleteWeightEntryUseCase(id) }
     }
 }
 
@@ -325,6 +325,7 @@ fun WeightScreen(
         onPauseOrDispose { }
     }
 
+    WriteFailedDialog(viewModel.writes)
     val deleteRequest by viewModel.pendingDelete.request.collectAsState()
     deleteRequest?.let {
         MbConfirmDialog(
@@ -571,8 +572,7 @@ fun WeightScreen(
                             errorMessage = "Weight must be between 20.0 kg and 500.0 kg"
                             return@MbButton
                         }
-                        viewModel.logWeight(uiState.selectedDate, kg)
-                        showLogDialog = false
+                        viewModel.logWeight(uiState.selectedDate, kg, onSaved = { showLogDialog = false })
                     }
                 )
             },
@@ -629,8 +629,7 @@ fun WeightScreen(
                             editError = "Weight must be between 20.0 kg and 500.0 kg"
                             return@MbButton
                         }
-                        viewModel.logWeight(entry.date, kg)
-                        entryToEdit = null
+                        viewModel.logWeight(entry.date, kg, onSaved = { entryToEdit = null })
                     }
                 )
             },

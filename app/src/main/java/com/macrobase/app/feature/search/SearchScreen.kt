@@ -156,6 +156,9 @@ class SearchViewModel(
                             isInitialLoading = false
                         )
                     }
+                    // A custom food made from "No Foods Found" shows in the results it was made for (BUG-025)
+                    val query = _uiState.value.searchQuery
+                    if (query.isNotBlank()) onQueryChange(query)
                 }
             } catch (e: CancellationException) {
                 throw e

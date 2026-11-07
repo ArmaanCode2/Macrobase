@@ -8,7 +8,10 @@ import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.WeightStatistics
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.StatisticsRepository
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
@@ -81,7 +84,17 @@ class FiguresCache(
             val watching = Watching(SharingStarted.WhileSubscribed(KEEP_WARM_MS))
             val shared = flow {
                 store?.read(key, codec)?.let { emit(it.value) }
-                emitAll(source().onEach { value -> store?.write(key, "", value, codec) })
+                // A source that fails is tried again a little later, as the rank's replay is, so
+                // these figures never stop updating for good (BUG-051)
+                emitAll(
+                    flow { emitAll(source()) }
+                        .onEach { value -> store?.write(key, "", value, codec) }
+                        .retryWhen { cause, attempt ->
+                            Log.w(TAG, "Figures $key failed, trying again: ${cause.message}")
+                            delay(RETRY_DELAY_MS * (attempt + 1))
+                            true
+                        }
+                )
             }
                 .distinctUntilChanged()
                 .shareIn(CoroutineScope(scope.coroutineContext + job), watching, replay = 1)
@@ -111,6 +124,11 @@ class FiguresCache(
     companion object {
         /** How long figures are kept up to date after the last screen showing them closes. */
         const val KEEP_WARM_MS = 10 * 60 * 1000L
+
+        private const val TAG = "FiguresCache"
+
+        /** The first wait before a failed source is tried again; each later try waits longer. */
+        private const val RETRY_DELAY_MS = 5_000L
 
         /** The rank's snapshot, kept apart: it carries its own check of the data it was worked out from. */
         const val RANK_SNAPSHOT_KEY = "rank"

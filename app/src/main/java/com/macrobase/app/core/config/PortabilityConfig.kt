@@ -24,6 +24,9 @@ object PortabilityConfig {
     const val BACKUP_OVER_LIMIT_MESSAGE = "This backup is larger than MacroBase can restore."
     const val BACKUP_TOO_LARGE_FOR_DEVICE_MESSAGE = "This backup is too large to open on this device."
 
+    // An export that ran out of this phone's memory (BUG-049)
+    const val BACKUP_TOO_LARGE_TO_EXPORT_MESSAGE = "Your data is too large to export on this device."
+
     const val BACKUP_ZIP_FILENAME_PREFIX = "MacroBase_Backup_"
     const val BACKUP_FILE_EXTENSION = ".zip"
     const val BACKUP_MIME_TYPE = "application/zip"

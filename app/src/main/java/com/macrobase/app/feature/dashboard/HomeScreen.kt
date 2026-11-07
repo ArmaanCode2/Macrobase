@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.dashboard
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
+import com.macrobase.app.core.util.SafeWrites
 import kotlin.math.abs
 import com.macrobase.app.core.designsystem.components.rememberReducedMotion
 import com.macrobase.app.core.designsystem.components.mbDockPill
@@ -250,14 +252,14 @@ class HomeViewModel(
      * Logs the quick-add amount of water to the day on screen, through the same use case as the
      * Water screen. [onAdded] runs once it is saved.
      */
+    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
+
     fun quickAddWater(onAdded: () -> Unit = {}) {
         val addWater = addWaterEntryUseCase ?: return
         val date = _selectedDate.value
         val amountMl = quickAddWaterMl(homeProfile.value.unitSystem)
-        viewModelScope.launch {
-            addWater(date, amountMl)
-            onAdded()
-        }
+        writes.launch(onSaved = onAdded) { addWater(date, amountMl) }
     }
 
     /**
@@ -319,14 +321,12 @@ class HomeViewModel(
 
     fun deleteEntry(entryId: Long) {
         _revealedEntryId.value = null
-        viewModelScope.launch {
-            deleteDiaryEntryUseCase(entryId)
-        }
+        writes.launch { deleteDiaryEntryUseCase(entryId) }
     }
 
     fun copyEntry(entry: DiaryEntry) {
         _revealedEntryId.value = null
-        viewModelScope.launch { addToBasket(entry) }
+        writes.launch { addToBasket(entry) }
     }
 
     /**
@@ -335,7 +335,7 @@ class HomeViewModel(
      */
     fun copyMeal(meal: Meal) {
         _revealedEntryId.value = null
-        viewModelScope.launch { meal.entries.forEach { addToBasket(it) } }
+        writes.launch { meal.entries.forEach { addToBasket(it) } }
     }
 
     /** The meal to log to now, by this ViewModel's clock. */
@@ -351,11 +351,10 @@ class HomeViewModel(
      */
     fun copyMealFrom(date: LocalDate, meal: MealType, toMeal: MealType = meal, onDone: () -> Unit = {}) {
         _revealedEntryId.value = null
-        viewModelScope.launch {
+        writes.launch(onSaved = onDone) {
             val entries = getDailyDiaryUseCase(date).first().meals.firstOrNull { it.type == meal }?.entries.orEmpty()
             val today = today()
             entries.forEach { addToBasket(it, date = today, mealType = toMeal) }
-            onDone()
         }
     }
 
@@ -365,7 +364,7 @@ class HomeViewModel(
         val entryIds = meal.entries.map { it.id }
         if (entryIds.isEmpty()) return
         _revealedEntryId.value = null
-        viewModelScope.launch { move(entryIds, date, mealType) }
+        writes.launch { move(entryIds, date, mealType) }
     }
 
     /** Deletes every food of [meal]. */
@@ -373,7 +372,7 @@ class HomeViewModel(
         val entryIds = meal.entries.map { it.id }
         if (entryIds.isEmpty()) return
         _revealedEntryId.value = null
-        viewModelScope.launch { deleteDiaryEntryUseCase(entryIds) }
+        writes.launch { deleteDiaryEntryUseCase(entryIds) }
     }
 
     private suspend fun addToBasket(entry: DiaryEntry, date: LocalDate = entry.date, mealType: MealType = entry.mealType) {
@@ -423,6 +422,7 @@ fun HomeScreen(
     val summary by viewModel.dailySummary.collectAsState()
     val profile by viewModel.homeProfile.collectAsState()
     val revealedEntryId by viewModel.revealedEntryId.collectAsState()
+    WriteFailedDialog(viewModel.writes)
 
     var selectedMealForInfo by remember { mutableStateOf<Meal?>(null) }
     var showDailySummary by remember { mutableStateOf(false) }

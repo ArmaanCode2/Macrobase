@@ -1,5 +1,7 @@
 package com.macrobase.app.feature.customfoods
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
+import com.macrobase.app.core.util.SafeWrites
 import com.macrobase.app.core.designsystem.components.MbDelayedProgress
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
@@ -225,7 +227,8 @@ class CustomFoodsViewModel(
         // A second Save tap must not create the food twice (each call gets a new uuid, BUG-011)
         if (saveInFlight) return
         saveInFlight = true
-        viewModelScope.launch {
+        // A failed save keeps the form and allows a retry, with a message (BUG-022)
+        writes.launch(onSaved = onComplete, onFailed = { saveInFlight = false }) {
             val customFood = CustomFood(
                 id = id,
                 uuid = uuid,
@@ -248,17 +251,14 @@ class CustomFoodsViewModel(
                     ironMg = iron
                 )
             )
-            try {
-                foodRepository.saveCustomFood(customFood)
-            } catch (e: Exception) {
-                saveInFlight = false
-                throw e
-            }
-            onComplete()
+            foodRepository.saveCustomFood(customFood)
         }
     }
 
     private var saveInFlight = false
+
+    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
 
     /** The food a delete button asked about, by row id. */
     val pendingDelete = PendingDelete<Long>()
@@ -268,10 +268,7 @@ class CustomFoodsViewModel(
     }
 
     fun deleteCustomFood(id: Long, onComplete: () -> Unit) {
-        viewModelScope.launch {
-            foodRepository.deleteCustomFood(id)
-            onComplete()
-        }
+        writes.launch(onSaved = onComplete) { foodRepository.deleteCustomFood(id) }
     }
 
     private companion object {
@@ -293,6 +290,7 @@ fun CustomFoodsScreen(
     val listState = rememberLazyListState()
     ReportContentScrolled(listState.rememberIsScrolled())
     ConfirmDeleteCustomFood(viewModel)
+    WriteFailedDialog(viewModel.writes)
 
     Column(
         modifier = modifier
@@ -513,6 +511,7 @@ fun EditCustomFoodScreen(
 
     LaunchedEffect(foodId) { viewModel.openForEdit(foodId) }
     ConfirmDeleteCustomFood(viewModel, onDeleted = onSaveSuccess)
+    WriteFailedDialog(viewModel.writes)
 
     BackHandler(enabled = viewModel.hasUnsavedChanges()) { showDiscardPrompt = true }
     if (showDiscardPrompt) {
