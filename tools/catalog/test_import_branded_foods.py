@@ -1,6 +1,7 @@
 """Tests for import_branded_foods.py and build_branded.py. Run with: python -m unittest discover tools/catalog"""
 
 import os
+import sqlite3
 import tempfile
 import unittest
 
@@ -74,6 +75,24 @@ class BuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             summary = build_branded.build([row], self.curation([row]), os.path.join(tmp, "branded.db"))
         self.assertEqual(1, summary["foods"])
+
+    # In the main catalog "Chapati/Roti" names one food twice; a product's slash lists what it is for, so
+    # "Idli/Dosa" chutney powder must not take "dosa" as its name (BUG-046)
+    def test_a_slash_in_a_product_name_is_not_a_list_of_its_names(self):
+        row, _ = imp.product_row(product(name="Idli/Dosa/Chilly Chutney Powder", brands=("MTR",), quantity="100 g"), HEADER)
+        rows = [row]
+        self.assertEqual("MTR Idli/Dosa/Chilly Chutney Powder", row["name"])
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "branded.db")
+            build_branded.build(rows, self.curation(rows), target)
+            con = sqlite3.connect(target)
+            try:
+                names = con.execute("SELECT names FROM food_search").fetchone()[0]
+                aliases = con.execute("SELECT alias FROM food_aliases").fetchall()
+            finally:
+                con.close()
+        self.assertEqual("|mtr idli dosa chilly chutney powder|", names)
+        self.assertEqual([], aliases)
 
     def test_an_id_the_main_catalog_uses_is_refused(self):
         rows = self.rows()

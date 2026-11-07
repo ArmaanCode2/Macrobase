@@ -140,3 +140,55 @@ class PluralAndPhraseSearchTests {
         forms.forEach { (word, singular) -> assertEquals(word, singular, LocalFoodDatabaseProvider.singularOf(word)) }
     }
 }
+
+/**
+ * BUG-046: the branded products merge into every search by match tier alone, so a product holding the
+ * query word whole beat the catalog's food named by its plural ("pistachio" found a pistachio biscuit
+ * before Pistachios), and a slash in a product's name made each part an exact name of it.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class BrandedRankingTests {
+
+    private lateinit var provider: LocalFoodDatabaseProvider
+
+    @Before
+    fun setUp() {
+        val context = RuntimeEnvironment.getApplication()
+        for (name in listOf(DatabaseConfig.BUILT_IN_FOODS_DB_NAME, DatabaseConfig.BRANDED_FOODS_DB_NAME)) {
+            val installed = context.getDatabasePath(name)
+            installed.parentFile?.mkdirs()
+            listOf(File("src/main/assets/databases/$name"), File("app/src/main/assets/databases/$name"))
+                .first { it.isFile }
+                .copyTo(installed, overwrite = true)
+        }
+        provider = LocalFoodDatabaseProvider(
+            BuiltInDatabaseManager(context),
+            BuiltInDatabaseManager(context, BuiltInDatabaseManager.Catalog.BRANDED)
+        )
+    }
+
+    private fun search(query: String): List<String> = runBlocking { provider.searchFoods(query, 30).map { it.name } }
+
+    @Test
+    fun aFoodNamedByThePluralHoldsTheWordWhole() {
+        assertEquals(1, LocalFoodDatabaseProvider.matchTier(null, " pistachios pista ", listOf("pistachio")))
+        assertEquals(1, LocalFoodDatabaseProvider.matchTier(null, " momos veg steamed ", listOf("momo")))
+        assertEquals(1, LocalFoodDatabaseProvider.matchTier(null, " mario pistachio biscuit ", listOf("pistachio")))
+        // A longer word is still only a word start
+        assertEquals(2, LocalFoodDatabaseProvider.matchTier(null, " peanut chikki ", listOf("pea")))
+        assertEquals(2, LocalFoodDatabaseProvider.matchTier(null, " pistachios pista ", listOf("pist")))
+    }
+
+    // Before the fix the powder's "Dosa" part was an exact name, so it came second, above Masala dosa
+    @Test
+    fun aProductForSeveralDishesDoesNotTakeTheirNames() {
+        val found = search("dosa")
+        val powder = found.indexOf("MTR Idli/Dosa/Chilly Chutney Powder")
+
+        assertTrue(found.toString(), powder >= 0)
+        listOf("Plain dosa", "Masala dosa", "Moong bean dosa (Pesarattu)", "Semolina dosa (Suji/Rava dosa)", "Jowar dosa").forEach {
+            assertTrue("$it before the powder in $found", found.indexOf(it) in 0 until powder)
+        }
+    }
+}

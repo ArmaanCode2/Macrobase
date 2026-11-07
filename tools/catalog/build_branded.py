@@ -49,6 +49,8 @@ def curation(rows):
         "overrides": [], "aliases": [], "exceptions": [], "corrections": [], "recipes": [], "recipe_ingredients": [],
         # The main catalog's spellings, so "biskut" finds what "biscuit" does; not every group has a product
         "synonyms": catalog.read_curation("synonyms.csv"), "every_synonym_used": False,
+        # "MTR Idli/Dosa/Chilly Chutney Powder" is one product for several dishes, not a powder named "Dosa"
+        "split_slash_names": False,
         "common_foods": [{"sourceId": r["sourceId"], "food": r["name"], "priority": str(popularity(int(r["scans"] or 0)))}
                          for r in rows if popularity(int(r["scans"] or 0))],
     }

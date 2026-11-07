@@ -438,12 +438,20 @@ class LocalFoodDatabaseProvider(
         /**
          * How well a word search result matched, as [wordSearchSql] ranks first: 0 for its name or an
          * alias typed in full ([names] from food_search.names), 1 for every query word whole ([terms]),
-         * 2 for word starts only. Results from the two catalogs merge by it.
+         * 2 for word starts only. Results from the two catalogs merge by it, the catalog first on a tie.
+         * A word's plural counts as the word (BUG-046): the catalog names many foods in the plural, so
+         * "pistachio" must find Pistachios before a branded pistachio biscuit.
          */
         internal fun matchTier(names: String?, terms: String?, words: List<String>): Int = when {
             names != null && names.contains("|${words.joinToString(" ")}|") -> 0
-            terms != null && words.all { terms.contains(" $it ") } -> 1
+            terms != null && holdsEveryWordWhole(terms, words) -> 1
             else -> 2
+        }
+
+        private fun holdsEveryWordWhole(terms: String, words: List<String>): Boolean {
+            if (words.all { terms.contains(" $it ") }) return true
+            val singulars = terms.split(' ').filter { it.isNotEmpty() }.mapTo(HashSet(), ::singularOf)
+            return words.all { terms.contains(" $it ") || it in singulars }
         }
 
         /**

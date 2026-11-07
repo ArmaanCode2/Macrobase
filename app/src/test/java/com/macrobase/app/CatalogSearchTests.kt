@@ -32,13 +32,19 @@ class CatalogSearchTests {
     @Before
     fun setUp() {
         val context = RuntimeEnvironment.getApplication()
-        // Installed the way a phone has it, so the manager opens it instead of copying from assets
-        val installed = context.getDatabasePath(DatabaseConfig.BUILT_IN_FOODS_DB_NAME)
-        installed.parentFile?.mkdirs()
-        val catalog = listOf(File("src/main/assets/databases/built_in_foods.db"), File("app/src/main/assets/databases/built_in_foods.db"))
-            .first { it.isFile }
-        catalog.copyTo(installed, overwrite = true)
-        provider = LocalFoodDatabaseProvider(BuiltInDatabaseManager(context))
+        // Both catalogs, installed the way a phone has them, so the managers open them instead of
+        // copying from assets: the app merges the branded products into every search (BUG-046)
+        for (name in listOf(DatabaseConfig.BUILT_IN_FOODS_DB_NAME, DatabaseConfig.BRANDED_FOODS_DB_NAME)) {
+            val installed = context.getDatabasePath(name)
+            installed.parentFile?.mkdirs()
+            listOf(File("src/main/assets/databases/$name"), File("app/src/main/assets/databases/$name"))
+                .first { it.isFile }
+                .copyTo(installed, overwrite = true)
+        }
+        provider = LocalFoodDatabaseProvider(
+            BuiltInDatabaseManager(context),
+            BuiltInDatabaseManager(context, BuiltInDatabaseManager.Catalog.BRANDED)
+        )
     }
 
     @Test

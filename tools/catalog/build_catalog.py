@@ -426,8 +426,9 @@ def load_curation(directory=CATALOG_DIR):
     }
 
 
-def extract_aliases_from_name(name):
-    """Search names inside a food name: "Almond biscuit (Badam ke biscuit)" gives "Badam ke biscuit"."""
+def extract_aliases_from_name(name, split_slashes=True):
+    """Search names inside a food name: "Almond biscuit (Badam ke biscuit)" gives "Badam ke biscuit".
+    Without [split_slashes], a slash outside brackets joins words of one name instead of naming the food twice."""
     aliases = []
     for m in re.findall(r'\((.*?)\)', name):
         for p in re.split(r'[/,;]', m):
@@ -435,7 +436,7 @@ def extract_aliases_from_name(name):
             if clean and len(clean) > 1 and clean.lower() != name.lower():
                 aliases.append(clean)
     # "Chapati/Roti" gives "Chapati" and "Roti"
-    if '/' in name and '(' not in name:
+    if split_slashes and '/' in name and '(' not in name:
         for p in name.split('/'):
             clean = p.strip()
             if clean and len(clean) > 1:
@@ -588,7 +589,7 @@ def apply_curation(rows, curation):
                 next_serving_id += 1
 
     for food in kept:
-        food["_aliases"] = extract_aliases_from_name(food["name"])
+        food["_aliases"] = extract_aliases_from_name(food["name"], curation.get("split_slash_names", True))
         food["_curated_aliases"] = []
         food["_alias_kinds"] = {}
     for a in curation["aliases"]:
