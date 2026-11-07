@@ -5,6 +5,7 @@ import com.macrobase.app.domain.model.scanner.NutritionLabelDraft
 import com.macrobase.app.feature.scanner.WordLevelOcr.at
 import com.macrobase.app.feature.scanner.WordLevelOcr.line
 import com.macrobase.app.feature.scanner.WordLevelOcr.lines
+import com.macrobase.app.feature.scanner.WordLevelOcr.linesPerCell
 import com.macrobase.app.feature.scanner.WordLevelOcr.ocr
 import com.macrobase.app.feature.scanner.WordLevelOcr.table
 import org.junit.Assert.assertEquals
@@ -832,5 +833,70 @@ class AuditScannerTests {
 
         assertValue(36.0, draft.perServingValues["sodium"]?.value, "sodium per serving")
         assertValue(120.0, draft.sodium?.value, "sodium per 100 g")
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-033: a decimal comma in the serving ("12,5 g") was read as 5 g
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun aServingSizeWithADecimalCommaIsReadWhole() {
+        val draft = parse(lines("Serving size 12,5 g", "Energy 20 kcal", "Protein 2 g", "Carbohydrate 2 g"))
+
+        assertValue(12.5, draft.servingGrams, "serving grams")
+        assertValue(160.0, draft.calories?.value, "calories per 100 g")
+        assertValue(16.0, draft.protein?.value, "protein per 100 g")
+    }
+
+    @Test
+    fun aPortionWithADecimalCommaIsReadWhole() {
+        val draft = parse(lines("Per portion (12,5 g)", "Energy 20 kcal", "Protein 2 g", "Carbohydrate 2 g"))
+
+        assertValue(12.5, draft.servingGrams, "serving grams")
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-032: a kJ-only label printed per serving first took the serving's energy as per 100 g
+    // ---------------------------------------------------------------------------------------
+
+    private val kilojouleRows = listOf(
+        listOf("Energy", "680 kJ", "1700 kJ"),
+        listOf("Protein", "3.2 g", "8.0 g"),
+        listOf("Fat", "4.8 g", "12.0 g"),
+        listOf("Carbohydrate", "24.0 g", "60.0 g")
+    )
+
+    @Test
+    fun aKilojouleLabelPrintedPerServingFirstReadsEachColumn() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving size: 40 g" at 20),
+                    line(50, "Quantity per Serving" at 360, "Quantity per 100 g" at 620)
+                ) + table(listOf(20, 360, 620), kilojouleRows, firstTop = 90)
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_100_G, draft.detectedBasis)
+        assertEquals(406.3, draft.calories!!.value, 0.1)
+        assertEquals(162.5, draft.perServingValues["calories"]!!.value, 0.1)
+        assertValue(8.0, draft.protein?.value, "protein")
+    }
+
+    // ML Kit often gives each cell of a wide table its own line
+    @Test
+    fun aKilojouleLabelReadAsOneLinePerCellReadsEachColumn() {
+        val draft = parse(
+            ocr(
+                listOf(line(10, "Serving size: 40 g" at 20)) +
+                    linesPerCell(50, "Quantity per Serving" at 360, "Quantity per 100 g" at 620) +
+                    kilojouleRows.flatMapIndexed { i, row ->
+                        linesPerCell(90 + i * WordLevelOcr.PITCH, row[0] at 20, row[1] at 360, row[2] at 620)
+                    }
+            )
+        )
+
+        assertEquals(406.3, draft.calories!!.value, 0.1)
+        assertValue(8.0, draft.protein?.value, "protein")
     }
 }

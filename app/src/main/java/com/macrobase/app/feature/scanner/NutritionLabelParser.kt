@@ -852,6 +852,9 @@ class NutritionLabelParser {
         return NutritionBasis.UNKNOWN
     }
 
+    /** A serving's number, with "." or "," as its decimal point ("12,5 g") (BUG-033). */
+    private fun servingNumber(text: String?): Double? = text?.let { NutritionDigitCorrector.parseDecimal(it, "g") }
+
     private data class ServingInfo(
         val servingSize: Double?,
         val servingUnit: ServingUnit?,
@@ -866,7 +869,7 @@ class NutritionLabelParser {
         var desc: String? = null
 
         val pattern = Pattern.compile(
-            """(?:serving\s*size|per\s*serve|per\s*portion|approx\.?\s*serving)[:\s]*([0-9]+\/[0-9]+|[0-9]+(?:\.[0-9]+)?)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:\.[0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
+            """(?:serving\s*size|per\s*serve|per\s*portion|approx\.?\s*serving)[:\s]*([0-9]+\/[0-9]+|[0-9]+(?:[.,][0-9]+)?)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
             Pattern.CASE_INSENSITIVE
         )
 
@@ -880,10 +883,10 @@ class NutritionLabelParser {
                     val den = parts[1].toDoubleOrNull() ?: 1.0
                     if (den != 0.0) num / den else null
                 } else {
-                    q1Str?.toDoubleOrNull()
+                    servingNumber(q1Str)
                 }
                 val u1 = matcher.group(2)?.trim()?.lowercase(Locale.ROOT)
-                val q2 = matcher.group(3)?.toDoubleOrNull()
+                val q2 = servingNumber(matcher.group(3))
                 val u2 = matcher.group(4)?.trim()?.lowercase(Locale.ROOT)
 
                 desc = line.text.trim()
@@ -908,7 +911,7 @@ class NutritionLabelParser {
         // Header naming one unit of the food: "Per bar (40g)", "Per 1 cup (250 mL)" (BUG-020)
         if (size == null) {
             val perUnitPattern = Pattern.compile(
-                """\bper\s+([0-9]+/[0-9]+|[0-9]+(?:\.[0-9]+)?)?\s*([a-z]+)\s*\(\s*([0-9]+(?:\.[0-9]+)?)\s*(g|gm|gms|grams|ml)\s*\)""",
+                """\bper\s+([0-9]+/[0-9]+|[0-9]+(?:[.,][0-9]+)?)?\s*([a-z]+)\s*\(\s*([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\s*\)""",
                 Pattern.CASE_INSENSITIVE
             )
             for (line in lines) {
@@ -920,9 +923,9 @@ class NutritionLabelParser {
                     val den = parts[1].toDoubleOrNull()
                     if (den != null && den != 0.0) (parts[0].toDoubleOrNull() ?: 1.0) / den else null
                 } else {
-                    qtyText?.toDoubleOrNull()
+                    servingNumber(qtyText)
                 }
-                val weight = matcher.group(3)?.toDoubleOrNull()
+                val weight = servingNumber(matcher.group(3))
                 val weightUnit = matcher.group(4)?.lowercase(Locale.ROOT)
                 size = qty ?: 1.0
                 unit = parseServingUnit(matcher.group(2))
@@ -934,7 +937,8 @@ class NutritionLabelParser {
         }
 
         if (grams == null) {
-            val gramPattern = Pattern.compile("""\b([0-9]+(?:\.[0-9]+)?)\s*(?:g|gm|gms|grams)\b""", Pattern.CASE_INSENSITIVE)
+            // Not after a digit or separator, so "12,5 g" is never read as "5 g"
+            val gramPattern = Pattern.compile("""(?<![0-9.,])([0-9]+(?:[.,][0-9]+)?)\s*(?:g|gm|gms|grams)\b""", Pattern.CASE_INSENSITIVE)
             for (line in lines) {
                 val t = line.text.lowercase(Locale.ROOT)
                 if ((t.contains("serving") || t.contains("serve") || t.contains("portion")) &&
@@ -942,7 +946,7 @@ class NutritionLabelParser {
                 ) {
                     val m = gramPattern.matcher(line.text)
                     while (m.find()) {
-                        val gVal = m.group(1)?.toDoubleOrNull()
+                        val gVal = servingNumber(m.group(1))
                         // Ignore 100g if it appears next to "per 100" or is the 100g column header
                         if (gVal == 100.0 && (t.contains("100g") || t.contains("100 g") || t.contains("100gm") || t.contains("per 100"))) {
                             continue

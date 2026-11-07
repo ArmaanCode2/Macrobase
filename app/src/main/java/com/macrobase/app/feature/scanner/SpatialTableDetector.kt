@@ -234,7 +234,7 @@ class SpatialTableDetector {
 
         // 1. Check for standard "Serving Size : 30g" or "Serving Size : 1 Scoop (36g)"
         val pattern = Pattern.compile(
-            """(?:serving\s*size|per\s*serve|per\s*portion|serve\s*size)[:\s]*([0-9]+(?:\.[0-9]+)?|[0-9]+\/[0-9]+)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:\.[0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
+            """(?:serving\s*size|per\s*serve|per\s*portion|serve\s*size)[:\s]*([0-9]+(?:[.,][0-9]+)?|[0-9]+\/[0-9]+)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
             Pattern.CASE_INSENSITIVE
         )
 
@@ -248,9 +248,10 @@ class SpatialTableDetector {
             val matcher = pattern.matcher(text)
             if (matcher.find()) {
                 val q1Str = matcher.group(1)?.trim()
-                val q1 = q1Str?.toDoubleOrNull()
+                // A decimal comma ("12,5 g") reads as one number (BUG-033)
+                val q1 = q1Str?.let { NutritionDigitCorrector.parseDecimal(it, "g") }
                 val u1 = matcher.group(2)?.trim()?.lowercase(Locale.ROOT)
-                val q2 = matcher.group(3)?.toDoubleOrNull()
+                val q2 = matcher.group(3)?.let { NutritionDigitCorrector.parseDecimal(it, "g") }
                 val q2Unit = matcher.group(4)?.lowercase(Locale.ROOT)
 
                 if (q2 != null && q2Unit == "ml") {
@@ -276,11 +277,11 @@ class SpatialTableDetector {
         }
 
         // 2. Cross-check against header text like "Per Serving (30g)"
-        val headerServingPattern = Pattern.compile("""per\s*(?:serving|serve)\s*\(([0-9]+(?:\.[0-9]+)?)\s*(?:g|gm|gms|grams)\)""", Pattern.CASE_INSENSITIVE)
+        val headerServingPattern = Pattern.compile("""per\s*(?:serving|serve)\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(?:g|gm|gms|grams)\)""", Pattern.CASE_INSENSITIVE)
         for (line in lines.take(12)) {
             val m = headerServingPattern.matcher(line.text)
             if (m.find()) {
-                val headerGrams = m.group(1)?.toDoubleOrNull()
+                val headerGrams = m.group(1)?.let { NutritionDigitCorrector.parseDecimal(it, "g") }
                 if (headerGrams != null && headerGrams > 0.0) {
                     if (grams == null) {
                         grams = headerGrams
