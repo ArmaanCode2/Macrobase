@@ -32,8 +32,14 @@ data class ScannerUiState(
     val qualityError: ImageQualityChecker.QualityCheckResult.Fail? = null,
     val metadata: ScanMetadata = ScanMetadata(),
     val currentProcessingStep: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val cameraUnavailable: Boolean = false
 ) {
+    /** A modal is on screen, so the camera controls beneath must not act (BUG-037). */
+    val hasOpenModal: Boolean
+        get() = qualityError != null || errorMessage != null || draft != null ||
+            state is ScannerState.NoTextDetected || state is ScannerState.ParseFailed
+
     val isAnalyzing: Boolean
         get() = state is ScannerState.Capturing ||
                 state is ScannerState.ProcessingImage ||
@@ -82,6 +88,12 @@ class NutritionLabelScannerViewModel(
         if (_uiState.value.state == ScannerState.Idle) {
             _uiState.value = _uiState.value.copy(state = ScannerState.CameraReady)
         }
+    }
+
+    /** The camera could not start (no back camera, or CameraX failed); photos still work (BUG-038). */
+    fun onCameraBindFailed(reason: String) {
+        android.util.Log.w("MacroBaseScanner", "Camera bind failed: $reason")
+        _uiState.value = _uiState.value.copy(cameraUnavailable = true)
     }
 
     fun onPermissionDenied() {

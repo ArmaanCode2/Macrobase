@@ -6,6 +6,11 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.content.Intent
+import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,6 +90,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.BoxScope
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -95,6 +103,22 @@ import com.macrobase.app.core.designsystem.AppTypography
 import com.macrobase.app.core.designsystem.Dimensions
 import com.macrobase.app.domain.model.scanner.NutritionLabelDraft
 
+
+/**
+ * Whether the shutter can take a picture now: only once the camera is bound (BUG-038), and never
+ * behind a modal (BUG-037).
+ */
+internal fun shutterEnabled(state: ScannerUiState, cameraBound: Boolean, captureInProgress: Boolean): Boolean =
+    cameraBound && !state.cameraUnavailable && !state.isAnalyzing && !captureInProgress && !state.hasOpenModal
+
+internal enum class PermissionButton { REQUEST, OPEN_SETTINGS }
+
+/**
+ * What the denied screen's button does. Once Android has said no and shows no rationale, it will
+ * not ask again ("Don't ask again", or a second denial), so the button opens Settings (BUG-039).
+ */
+internal fun permissionButton(deniedOnce: Boolean, showRationale: Boolean): PermissionButton =
+    if (deniedOnce && !showRationale) PermissionButton.OPEN_SETTINGS else PermissionButton.REQUEST
 
 @Composable
 fun NutritionLabelScannerScreen(
@@ -120,10 +144,20 @@ fun NutritionLabelScannerScreen(
         )
     }
 
+    // Set once Android has said no, to tell "not asked yet" from "will not ask again" (BUG-039)
+    var cameraPermissionDenied by rememberSaveable { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
+        if (!isGranted) cameraPermissionDenied = true
+    }
+
+    // Granted in Settings while away: the camera opens on return (BUG-039)
+    LifecycleResumeEffect(Unit) {
+        hasCameraPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        onPauseOrDispose { }
     }
 
     LaunchedEffect(Unit) {
@@ -136,15 +170,6 @@ fun NutritionLabelScannerScreen(
 
     // Scanned draft will be reviewed by user in the interactive review modal before applying
 
-
-    if (!hasCameraPermission) {
-        CameraPermissionDeniedContent(
-            onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) },
-            onNavigateBack = onNavigateBack,
-            modifier = modifier
-        )
-        return
-    }
 
     var cameraInstance by remember { mutableStateOf<Camera?>(null) }
     var imageCaptureUseCase by remember { mutableStateOf<ImageCapture?>(null) }
@@ -169,248 +194,298 @@ fun NutritionLabelScannerScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. CameraX PreviewView
-        AndroidView(
-            factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
-
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    try {
-                        val cameraProvider = cameraProviderFuture.get()
-
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
-                        }
-
-                        val resolutionSelector = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
-                            .setResolutionStrategy(
-                                androidx.camera.core.resolutionselector.ResolutionStrategy(
-                                    android.util.Size(1920, 1080),
-                                    androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                )
-                            )
-                            .build()
-                        val imageCapture = ImageCapture.Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                            .setTargetRotation(previewView.display?.rotation ?: 0)
-                            .setResolutionSelector(resolutionSelector)
-                            .build()
-                        imageCaptureUseCase = imageCapture
-
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                        cameraProvider.unbindAll()
-                        cameraInstance = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            imageCapture
+        if (hasCameraPermission) {
+            // 1. CameraX PreviewView
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                    } catch (e: Throwable) {
-                        e.printStackTrace()
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
                     }
-                }, ContextCompat.getMainExecutor(ctx))
 
-                previewView
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        try {
+                            val cameraProvider = cameraProviderFuture.get()
 
-        // 2. Framing Guide Overlay (with cutout and glowing green brackets)
-        ScannerFramingOverlay(
-            modifier = Modifier.fillMaxSize()
-        )
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
 
-        // Debug Spatial Grid & Token Overlay
-        if (isDebugMode) {
-            ScannerDebugOverlay(
-                debugData = uiState.draft?.debugData,
+                            val resolutionSelector = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                                .setResolutionStrategy(
+                                    androidx.camera.core.resolutionselector.ResolutionStrategy(
+                                        android.util.Size(1920, 1080),
+                                        androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                    )
+                                )
+                                .build()
+                            val imageCapture = ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                .setTargetRotation(previewView.display?.rotation ?: 0)
+                                .setResolutionSelector(resolutionSelector)
+                                .build()
+                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                            cameraProvider.unbindAll()
+                            cameraInstance = cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageCapture
+                            )
+                            // Only a bound camera can take the picture, so the shutter waits for this (BUG-038)
+                            imageCaptureUseCase = imageCapture
+                        } catch (e: Throwable) {
+                            // No back camera, or CameraX could not start: say so and offer a photo (BUG-038)
+                            viewModel.onCameraBindFailed(e.localizedMessage ?: e.javaClass.simpleName)
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+
+                    previewView
+                },
                 modifier = Modifier.fillMaxSize()
             )
-        }
 
-        // 3. Top Action Bar (Back button, Flash toggle, Title)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = AppSpacing.xl, start = AppSpacing.md, end = AppSpacing.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onNavigateBack,
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Color(0x66000000), CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White
+            // 2. Framing Guide Overlay (with cutout and glowing green brackets)
+            ScannerFramingOverlay(
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // The camera could not start: a photo of the label still works (BUG-038)
+            if (uiState.cameraUnavailable) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(AppSpacing.lg),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                ) {
+                    Text(
+                        text = "The camera could not start.",
+                        style = AppTypography.Header2,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                    MbButton(
+                        text = "Choose a photo",
+                        onClick = { galleryLauncher.launch("image/*") },
+                        enabled = !uiState.isAnalyzing && !uiState.hasOpenModal
+                    )
+                }
+            }
+
+            // Debug Spatial Grid & Token Overlay
+            if (isDebugMode) {
+                ScannerDebugOverlay(
+                    debugData = uiState.draft?.debugData,
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
-            Text(
-                text = "Nutrition Scanner",
-                style = AppTypography.Header2,
-                color = Color.White
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Photo from the gallery
+            // 3. Top Action Bar (Back button, Flash toggle, Title)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = AppSpacing.xl, start = AppSpacing.md, end = AppSpacing.md),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 IconButton(
-                    onClick = { galleryLauncher.launch("image/*") },
-                    // Also off while a camera capture is being handed over, before the overlay shows
-                    enabled = !uiState.isAnalyzing && !isCaptureInProgress,
+                    onClick = onNavigateBack,
+                    enabled = !uiState.hasOpenModal,
                     modifier = Modifier
-                        .padding(end = AppSpacing.xs)
                         .size(44.dp)
                         .background(Color(0x66000000), CircleShape)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Image,
-                        contentDescription = "Choose a photo",
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
                         tint = Color.White
                     )
                 }
 
-                // Debug Mode Toggle
-                IconButton(
-                    onClick = { isDebugMode = !isDebugMode },
-                    enabled = !uiState.isAnalyzing,
-                    modifier = Modifier
-                        .padding(end = AppSpacing.xs)
-                        .size(44.dp)
-                        .background(if (isDebugMode) Color(0xCC00E676) else Color(0x66000000), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Debug Overlay",
-                        tint = if (isDebugMode) Color.Black else Color.White
-                    )
-                }
-
-                IconButton(
-                    onClick = { viewModel.toggleTorch() },
-                    enabled = !uiState.isAnalyzing,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(Color(0x66000000), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = if (uiState.isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                        contentDescription = "Flash",
-                        tint = if (uiState.isTorchOn) AppColors.MacroCarbs else Color.White
-                    )
-                }
-            }
-        }
-
-        // 4. Instructions Banner
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 80.dp, start = AppSpacing.lg, end = AppSpacing.lg),
-            contentAlignment = Alignment.Center
-        ) {
-            Surface(
-                color = Color(0x99000000),
-                shape = RoundedCornerShape(14.dp)
-            ) {
                 Text(
-                    text = "Fill the box with the Nutrition Facts panel.",
-                    style = AppTypography.Body2,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
+                    text = "Nutrition Scanner",
+                    style = AppTypography.Header2,
+                    color = Color.White
                 )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Photo from the gallery
+                    IconButton(
+                        onClick = { galleryLauncher.launch("image/*") },
+                        // Also off while a camera capture is being handed over, before the overlay shows
+                        enabled = !uiState.isAnalyzing && !isCaptureInProgress && !uiState.hasOpenModal,
+                        modifier = Modifier
+                            .padding(end = AppSpacing.xs)
+                            .size(44.dp)
+                            .background(Color(0x66000000), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = "Choose a photo",
+                            tint = Color.White
+                        )
+                    }
+
+                    // Debug Mode Toggle
+                    IconButton(
+                        onClick = { isDebugMode = !isDebugMode },
+                        enabled = !uiState.isAnalyzing && !uiState.hasOpenModal,
+                        modifier = Modifier
+                            .padding(end = AppSpacing.xs)
+                            .size(44.dp)
+                            .background(if (isDebugMode) Color(0xCC00E676) else Color(0x66000000), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Debug Overlay",
+                            tint = if (isDebugMode) Color.Black else Color.White
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.toggleTorch() },
+                        enabled = !uiState.isAnalyzing && !uiState.hasOpenModal,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(Color(0x66000000), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                            contentDescription = "Flash",
+                            tint = if (uiState.isTorchOn) AppColors.MacroCarbs else Color.White
+                        )
+                    }
+                }
             }
-        }
 
-        // 5. Bottom Capture Button
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .padding(bottom = AppSpacing.xxl),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Hold steady and tap to scan",
-                style = AppTypography.Caption,
-                color = Color.White.copy(alpha = 0.8f)
-            )
-            Spacer(modifier = Modifier.height(AppSpacing.md))
-
-            // Shutter Button
-            val isShutterEnabled = !uiState.isAnalyzing && !isCaptureInProgress
+            // 4. Instructions Banner
             Box(
                 modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(if (isShutterEnabled) AppColors.Primary else AppColors.TextDisabled)
-                    .clickable(enabled = isShutterEnabled) {
-                        val capture = imageCaptureUseCase
-                        if (capture != null && !isCaptureInProgress) {
-                            isCaptureInProgress = true
-                            android.util.Log.d("MacroBaseScanner", "STAGE: CAPTURE_BUTTON_PRESSED")
-                            capture.takePicture(
-                                ContextCompat.getMainExecutor(context),
-                                object : ImageCapture.OnImageCapturedCallback() {
-                                    override fun onCaptureSuccess(image: ImageProxy) {
-                                        android.util.Log.d("MacroBaseScanner", "STAGE: CAPTURE_CALLBACK_STARTED (format=${image.format}, ${image.width}x${image.height})")
-                                        try {
-                                            // Copy the JPEG bytes and close the frame now; decoding runs off
-                                            // the main thread in the ViewModel (BUG-044)
-                                            val frame = jpegFrame(image)
-                                            if (frame != null) {
-                                                viewModel.processCameraFrame(frame.bytes, frame.rotationDegrees)
-                                            } else {
-                                                android.util.Log.e("MacroBaseScanner", "STAGE: DECODE_FAILED")
-                                                viewModel.onCameraCaptureError("Unable to decode captured frame. Please try again.")
-                                            }
-                                        } catch (t: Throwable) {
-                                            android.util.Log.e("MacroBaseScanner", "STAGE: CAPTURE_EXCEPTION: ${t.message}", t)
-                                            // Ensure ImageProxy is closed even on unexpected exceptions
-                                            try { image.close() } catch (_: Throwable) {}
-                                            viewModel.onCameraCaptureError(t.localizedMessage ?: "Processing error")
-                                        } finally {
-                                            isCaptureInProgress = false
-                                        }
-                                    }
-
-                                    override fun onError(exception: ImageCaptureException) {
-                                        android.util.Log.e("MacroBaseScanner", "STAGE: CAPTURE_ERROR: ${exception.message}", exception)
-                                        isCaptureInProgress = false
-                                        viewModel.onCameraCaptureError(exception.localizedMessage ?: "Capture error")
-                                    }
-                                }
-                            )
-                        }
-                    },
+                    .fillMaxWidth()
+                    .padding(top = 80.dp, start = AppSpacing.lg, end = AppSpacing.lg),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color.White),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    color = Color(0x99000000),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.CameraAlt,
-                        contentDescription = "Capture Label",
-                        tint = AppColors.PrimaryDark,
-                        modifier = Modifier.size(32.dp)
+                    Text(
+                        text = "Fill the box with the Nutrition Facts panel.",
+                        style = AppTypography.Body2,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = AppSpacing.md, vertical = AppSpacing.xs)
                     )
                 }
             }
+
+            // 5. Bottom Capture Button
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = AppSpacing.xxl),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Hold steady and tap to scan",
+                    style = AppTypography.Caption,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(AppSpacing.md))
+
+                // Shutter Button
+                val isShutterEnabled = shutterEnabled(uiState, cameraBound = imageCaptureUseCase != null, captureInProgress = isCaptureInProgress)
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(if (isShutterEnabled) AppColors.Primary else AppColors.TextDisabled)
+                        .clickable(enabled = isShutterEnabled) {
+                            val capture = imageCaptureUseCase
+                            if (capture != null && !isCaptureInProgress) {
+                                isCaptureInProgress = true
+                                android.util.Log.d("MacroBaseScanner", "STAGE: CAPTURE_BUTTON_PRESSED")
+                                capture.takePicture(
+                                    ContextCompat.getMainExecutor(context),
+                                    object : ImageCapture.OnImageCapturedCallback() {
+                                        override fun onCaptureSuccess(image: ImageProxy) {
+                                            android.util.Log.d("MacroBaseScanner", "STAGE: CAPTURE_CALLBACK_STARTED (format=${image.format}, ${image.width}x${image.height})")
+                                            try {
+                                                // Copy the JPEG bytes and close the frame now; decoding runs off
+                                                // the main thread in the ViewModel (BUG-044)
+                                                val frame = jpegFrame(image)
+                                                if (frame != null) {
+                                                    viewModel.processCameraFrame(frame.bytes, frame.rotationDegrees)
+                                                } else {
+                                                    android.util.Log.e("MacroBaseScanner", "STAGE: DECODE_FAILED")
+                                                    viewModel.onCameraCaptureError("Unable to decode captured frame. Please try again.")
+                                                }
+                                            } catch (t: Throwable) {
+                                                android.util.Log.e("MacroBaseScanner", "STAGE: CAPTURE_EXCEPTION: ${t.message}", t)
+                                                // Ensure ImageProxy is closed even on unexpected exceptions
+                                                try { image.close() } catch (_: Throwable) {}
+                                                viewModel.onCameraCaptureError(t.localizedMessage ?: "Processing error")
+                                            } finally {
+                                                isCaptureInProgress = false
+                                            }
+                                        }
+
+                                        override fun onError(exception: ImageCaptureException) {
+                                            android.util.Log.e("MacroBaseScanner", "STAGE: CAPTURE_ERROR: ${exception.message}", exception)
+                                            isCaptureInProgress = false
+                                            viewModel.onCameraCaptureError(exception.localizedMessage ?: "Capture error")
+                                        }
+                                    }
+                                )
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Capture Label",
+                            tint = AppColors.PrimaryDark,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+            }
+        } else {
+            // The modals and the gallery result below serve this screen too: a photo needs no camera (BUG-039)
+            val activity = context as? android.app.Activity
+            val button = permissionButton(
+                deniedOnce = cameraPermissionDenied,
+                showRationale = activity != null &&
+                    ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+            )
+            CameraPermissionDeniedContent(
+                opensSettings = button == PermissionButton.OPEN_SETTINGS,
+                onRequestPermission = {
+                    if (button == PermissionButton.OPEN_SETTINGS) {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                        )
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                },
+                onChoosePhoto = { galleryLauncher.launch("image/*") },
+                onNavigateBack = onNavigateBack,
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
         // 6. Analyzing Loading Overlay
@@ -464,13 +539,7 @@ fun NutritionLabelScannerScreen(
 
         // 7. Image Quality Check Warning Modal
         uiState.qualityError?.let { error ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x99000000))
-                    .padding(AppSpacing.lg),
-                contentAlignment = Alignment.Center
-            ) {
+            ScannerModal(onBack = { viewModel.dismissQualityError() }) {
                 Surface(
                     color = AppColors.Surface,
                     shape = AppShapes.Card,
@@ -519,13 +588,7 @@ fun NutritionLabelScannerScreen(
 
         // 8. No Text Detected Modal
         if (uiState.state is com.macrobase.app.domain.model.scanner.ScannerState.NoTextDetected) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x99000000))
-                    .padding(AppSpacing.lg),
-                contentAlignment = Alignment.Center
-            ) {
+            ScannerModal(onBack = { viewModel.retryCapture() }) {
                 Surface(
                     color = AppColors.Surface,
                     shape = AppShapes.Card,
@@ -581,13 +644,7 @@ fun NutritionLabelScannerScreen(
 
         // 9. Parse Failed (No Nutrition Information Identified) Modal
         if (uiState.state is com.macrobase.app.domain.model.scanner.ScannerState.ParseFailed) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x99000000))
-                    .padding(AppSpacing.lg),
-                contentAlignment = Alignment.Center
-            ) {
+            ScannerModal(onBack = { viewModel.retryCapture() }) {
                 Surface(
                     color = AppColors.Surface,
                     shape = AppShapes.Card,
@@ -657,13 +714,7 @@ fun NutritionLabelScannerScreen(
 
         // 11. Recognition Error Modal
         uiState.errorMessage?.let { errorMsg ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x99000000))
-                    .padding(AppSpacing.lg),
-                contentAlignment = Alignment.Center
-            ) {
+            ScannerModal(onBack = { viewModel.retryCapture() }) {
                 Surface(
                     color = AppColors.Surface,
                     shape = AppShapes.Card,
@@ -775,11 +826,47 @@ fun ScannerFramingOverlay(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * A scanner modal. Its scrim takes every touch, so nothing beneath starts a scan or leaves, and
+ * system Back does what the modal's own Retake or dismiss button does (BUG-037).
+ */
+@Composable
+private fun ScannerModal(onBack: () -> Unit, padding: Dp = AppSpacing.lg, content: @Composable BoxScope.() -> Unit) {
+    BackHandler(onBack = onBack)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0x99000000))
+    ) {
+        // Behind the content as a sibling, so the modal's own buttons and scrolling get their touches first
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                }
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentAlignment = Alignment.Center,
+            content = content
+        )
+    }
+}
+
 @Composable
 fun CameraPermissionDeniedContent(
     onRequestPermission: () -> Unit,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Android no longer asks, so the button opens the app's settings (BUG-039). */
+    opensSettings: Boolean = false,
+    /** A photo of the label needs no camera (BUG-039). */
+    onChoosePhoto: (() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
@@ -807,7 +894,11 @@ fun CameraPermissionDeniedContent(
             )
 
             Text(
-                text = "To scan nutrition labels locally on your device, MacroBase needs camera access. Images are processed 100% on-device and never uploaded.",
+                text = if (opensSettings) {
+                    "Camera access is off for MacroBase. Turn it on in Settings, or scan a photo of the label you already have."
+                } else {
+                    "To scan nutrition labels locally on your device, MacroBase needs camera access. Images are processed 100% on-device and never uploaded."
+                },
                 style = AppTypography.Body1,
                 color = AppColors.TextSecondary,
                 textAlign = TextAlign.Center
@@ -816,10 +907,19 @@ fun CameraPermissionDeniedContent(
             Spacer(modifier = Modifier.height(AppSpacing.sm))
 
             MbButton(
-                text = "Grant Camera Permission",
+                text = if (opensSettings) "Open Settings" else "Grant Camera Permission",
                 onClick = onRequestPermission,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (onChoosePhoto != null) {
+                MbButton(
+                    text = "Choose a photo",
+                    onClick = onChoosePhoto,
+                    kind = MbButtonKind.Secondary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             MbButton(
                 text = "Return to Manual Form",
@@ -882,13 +982,8 @@ fun NutritionLabelReviewModal(
         Triple("Fiber", shown.fiber, "fiber")
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0x99000000))
-            .padding(AppSpacing.md),
-        contentAlignment = Alignment.Center
-    ) {
+    // Back is Retake here, as the modal's own button, so it never leaves the scanner (BUG-037)
+    ScannerModal(onBack = onRetake, padding = AppSpacing.md) {
         Surface(
             color = AppColors.Surface,
             shape = AppShapes.Card,
