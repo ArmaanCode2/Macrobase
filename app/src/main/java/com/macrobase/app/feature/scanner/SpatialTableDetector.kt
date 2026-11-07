@@ -534,8 +534,10 @@ class SpatialTableDetector {
                 if (LabelRowFilters.hasFromLabel(textLower)) continue
 
                 for (syn in synonyms) {
-                    val regex = Regex("""\b${Regex.escape(syn)}\b""", RegexOption.IGNORE_CASE)
-                    if (regex.containsMatchIn(textLower) || textLower.startsWith(syn) || textLower.contains(" $syn")) {
+                    // A word may run into its number ("protein5g") but not into a longer word:
+                    // "cal" does not start "calcium"
+                    val regex = Regex("""(?<![a-z])${Regex.escape(syn)}(?![a-z])""", RegexOption.IGNORE_CASE)
+                    if (regex.containsMatchIn(textLower)) {
                         matchedLine = line
                         matchedSynonym = syn
                         break

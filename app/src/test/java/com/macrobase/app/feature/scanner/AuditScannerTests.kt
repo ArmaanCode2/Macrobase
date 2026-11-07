@@ -505,4 +505,332 @@ class AuditScannerTests {
         assertFalse(screen.contains("Icons.Default.CheckCircle"))
         assertTrue("a row that needs review still says so", screen.contains("text = \"Check\""))
     }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-035: OCR corrections reached the rows but not the basis, the serving or the header
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun aMisreadPer100LineIsStillPer100G() {
+        val draft = parse(
+            lines("Serving Size: 30g", "Approx. values Per 1OOg", "Energy 120 kcal", "Protein 5 g", "Carbohydrate 20 g", "Fat 2 g")
+        )
+
+        assertEquals(NutritionBasis.PER_100_G, draft.detectedBasis)
+        assertNull("nothing was printed per serving", draft.normalizationNote)
+        assertValue(120.0, draft.calories?.value, "calories")
+        assertValue(5.0, draft.protein?.value, "protein")
+    }
+
+    @Test
+    fun aMisreadPer100ColumnHeaderStillNamesItsColumn() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 30g" at 20),
+                    line(50, "Nutrients" at 20, "Per 1OOg" at 420, "Per Serving" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    misreadHeaderRows,
+                    firstTop = 90
+                )
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_100_G, draft.detectedBasis)
+        assertValue(400.0, draft.calories?.value, "calories")
+        assertValue(9.6, draft.protein?.value, "protein")
+        assertValue(2.9, draft.perServingValues["protein"]?.value, "protein per serving")
+    }
+
+    private val misreadHeaderRows = listOf(
+        listOf("Energy (kcal)", "400", "120"),
+        listOf("Protein (g)", "9.6", "2.9"),
+        listOf("Carbohydrate (g)", "60.5", "18.2"),
+        listOf("Total Fat (g)", "13.2", "4.0")
+    )
+
+    // With no gram weight the serving column cannot stand in: the misread header must still name its column
+    @Test
+    fun aMisreadPer100ColumnWithNoServingWeightKeepsItsOwnValues() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving size 1 scoop" at 20),
+                    line(50, "Nutrients" at 20, "Per 1OOg" at 420, "Per Serving" at 600)
+                ) + table(listOf(20, 420, 600), misreadHeaderRows, firstTop = 90)
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_100_G, draft.detectedBasis)
+        assertValue(9.6, draft.protein?.value, "protein")
+        assertValue(2.9, draft.perServingValues["protein"]?.value, "protein per serving")
+    }
+
+    // Serving lines now pass through the correction: "1oz" is an ounce, not 10 z
+    @Test
+    fun anOunceServingKeepsItsSize() {
+        assertEquals("Serving size 1oz (28g)", NutritionDigitCorrector.correctRowText("Serving size 1oz (28g)"))
+        assertEquals("12oz", NutritionDigitCorrector.correctRowText("12oz"))
+
+        val draft = parse(lines("Nutrition Facts", "Serving size 1oz (28g)", "Amount per serving", "Calories 150", "Total Fat 9g", "Protein 2g"))
+
+        assertValue(28.0, draft.servingGrams, "serving grams")
+        assertTrue(draft.normalizationNote.toString(), draft.normalizationNote!!.contains("1.0 (28.0g)"))
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-031: "per 100g" outside the table made per-serving values per 100 g
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun aPer100PhraseBelowTheTableLeavesItsValuesPerServing() {
+        val draft = parse(
+            lines(
+                "Nutrition Facts",
+                "Serving size 1 scoop",
+                "Amount per serving",
+                "Calories 120",
+                "Total Fat 1g 2%",
+                "Protein 24g 48%",
+                "Typical Amino Acid Profile per 100g of protein"
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_SERVING, draft.detectedBasis)
+        assertEquals(listOf(NutritionBasis.PER_SERVING), draft.outputBasisOptions)
+        assertValue(120.0, draft.calories?.value, "calories")
+        assertValue(24.0, draft.protein?.value, "protein")
+    }
+
+    @Test
+    fun aNetWeightOf100GIsNotAPer100Column() {
+        val draft = parse(
+            lines(
+                "Nutrition Facts",
+                "Net Wt. 100g",
+                "Serving size 1 scoop",
+                "Amount per serving",
+                "Calories 120",
+                "Total Fat 1g 2%",
+                "Protein 24g 48%"
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_SERVING, draft.detectedBasis)
+        assertEquals(listOf(NutritionBasis.PER_SERVING), draft.outputBasisOptions)
+        assertValue(24.0, draft.protein?.value, "protein")
+    }
+
+    // A serving-only column with a gram weight: the per-serving map keeps the number printed
+    @Test
+    fun aServingOnlyColumnKeepsItsOwnNumberPerServing() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 40g" at 20),
+                    line(50, "Nutrients" at 20, "Per Serving" at 420, "%RDA" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    listOf(
+                        listOf("Energy (kcal)", "200", "10%"),
+                        listOf("Protein (g)", "8", "16%"),
+                        listOf("Carbohydrate (g)", "24", "9%"),
+                        listOf("Total Fat (g)", "8", "12%")
+                    ),
+                    firstTop = 90
+                )
+            )
+        )
+
+        assertValue(20.0, draft.protein?.value, "protein per 100 g")
+        assertValue(8.0, draft.perServingValues["protein"]?.value, "protein per serving")
+        assertValue(8.0, draft.perServingValues["fat"]?.value, "fat per serving")
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-034: the column cross-check never ran on the spatial path
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun aServingColumnThatDisprovesThePer100ValueIsFlagged() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 30g" at 20),
+                    line(50, "Nutrients" at 20, "Per 100g" at 420, "Per Serving" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    listOf(
+                        listOf("Energy (kcal)", "390", "117"),
+                        listOf("Protein (g)", "10", "3"),
+                        listOf("Carbohydrate (g)", "70", "21"),
+                        // 7.7 read as 17.7: per serving it is 2.3, not 5.3
+                        listOf("Total Fat (g)", "17.7", "2.3")
+                    ),
+                    firstTop = 90
+                )
+            )
+        )
+
+        assertValue(17.7, draft.fat?.value, "fat")
+        assertTrue("fat should need review", draft.fat!!.needsReview)
+        assertTrue(draft.warnings.toString(), draft.warnings.any { it.contains("fat", ignoreCase = true) && it.contains("serving") })
+        assertFalse("protein agrees", draft.protein!!.needsReview)
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The calories row's "cal" also started "Calcium"
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun calciumIsNeverTheEnergyRow() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 30g" at 20),
+                    line(50, "Nutrients" at 20, "Per 100g" at 420, "Per Serving" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    listOf(
+                        listOf("Protein (g)", "10", "3"),
+                        listOf("Carbohydrate (g)", "70", "21"),
+                        listOf("Total Fat (g)", "7.7", "2.3"),
+                        listOf("Calcium (mg)", "120", "36")
+                    ),
+                    firstTop = 90
+                )
+            )
+        )
+
+        assertNull("no energy row was printed", draft.calories)
+        assertValue(120.0, draft.calcium?.value, "calcium")
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Review of the fixes above
+    // ---------------------------------------------------------------------------------------
+
+    // BUG-031: amino acid tables word their basis many ways, over one line or two
+    @Test
+    fun anAminoAcidTableBelowSaysNothingAboutTheBasis() {
+        val table = listOf("Nutrition Facts", "Serving size 1 scoop", "Amount per serving", "Calories 120", "Total Fat 1g 2%", "Protein 24g 48%")
+        for (amino in listOf(listOf("Amino acids per 100 g protein"), listOf("Amino Acid Composition", "(per 100g of protein)"))) {
+            val draft = parse(lines(*(table + amino).toTypedArray()))
+
+            assertEquals(amino.toString(), NutritionBasis.PER_SERVING, draft.detectedBasis)
+        }
+    }
+
+    // BUG-031: an ingredient paragraph with numbers ("sodium bicarbonate 500(ii)") and the maker's
+    // address above the table, which puts its header past the first 15 rows
+    @Test
+    fun anIngredientParagraphAboveThePer100TableDoesNotHideItsHeader() {
+        val draft = parse(
+            lines(
+                "INGREDIENTS: Wheat flour (62%), sugar,",
+                "edible vegetable oil (palm), invert syrup,",
+                "raising agents [sodium bicarbonate 500(ii)], salt,",
+                "milk solids, emulsifier (soy lecithin)",
+                "Allergens: Contains wheat, milk and soy",
+                "Mfd. by: Good Bakes Pvt. Ltd.",
+                "Plot 12, MIDC Industrial Area,",
+                "Pune 411001, Maharashtra",
+                "FSSAI Lic. No. 10012345000123",
+                "Customer care: 1800 123 4567",
+                "Best before 6 months from packing",
+                "Store in a cool and dry place",
+                "Net Qty: 200 g",
+                "MRP Rs. 40 (incl. of all taxes)",
+                "Batch No. and Pkd. on: see pack",
+                "Made in India",
+                "Nutrition Information per 100g",
+                "Energy 480 kcal",
+                "Protein 7 g",
+                "Carbohydrate 68 g",
+                "Total Fat 20 g"
+            )
+        )
+
+        assertEquals(NutritionBasis.PER_100_G, draft.detectedBasis)
+        assertValue(480.0, draft.calories?.value, "calories")
+    }
+
+    // BUG-031: a net weight of 100 g printed beside or above the per-serving header
+    @Test
+    fun aNetWeightNearThePerServingHeaderIsNotAPer100Column() {
+        val layouts = listOf(
+            listOf(line(50, "Serving size 1 scoop" at 20), line(90, "Amount per serving" at 20, "Net Wt. 100g" at 420)),
+            listOf(line(50, "Net Wt. 100g" at 420), line(90, "Amount per serving" at 20))
+        )
+        for ((i, header) in layouts.withIndex()) {
+            val draft = parse(
+                ocr(
+                    listOf(line(10, "Nutrition Facts" at 20)) + header + listOf(
+                        line(130, "Calories" at 20, "120" at 420),
+                        line(170, "Total Fat" at 20, "1g" at 420),
+                        line(210, "Protein" at 20, "24g" at 420)
+                    )
+                )
+            )
+
+            assertEquals("layout $i", NutritionBasis.PER_SERVING, draft.detectedBasis)
+            assertValue(24.0, draft.protein?.value, "layout $i protein")
+        }
+    }
+
+    // BUG-034: a serving column that is per serving with milk disagrees everywhere. That is one note
+    // about the column, not every per 100 g value marked wrong
+    @Test
+    fun aServingColumnWithMilkFlagsNoPer100Value() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 30g" at 20),
+                    line(50, "Nutrients" at 20, "Per 100g" at 420, "Per Serving*" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    listOf(
+                        listOf("Energy (kcal)", "380", "179"),
+                        listOf("Protein (g)", "8", "6.6"),
+                        listOf("Carbohydrate (g)", "80", "30.2"),
+                        listOf("Total Fat (g)", "2", "2.7"),
+                        listOf("Sugars (g)", "20", "12")
+                    ),
+                    firstTop = 90
+                ) + listOf(line(330, "*30g with 125ml semi-skimmed milk" at 20))
+            )
+        )
+
+        for (value in listOf(draft.calories, draft.protein, draft.carbs, draft.fat, draft.sugar)) {
+            assertFalse(value.toString(), value!!.needsReview)
+        }
+        assertEquals(draft.warnings.toString(), 1, draft.warnings.count { it.contains("does not match") })
+    }
+
+    // A two-column row with only its serving cell: the per-serving map keeps the printed number
+    @Test
+    fun aRowWithOnlyAServingCellKeepsItsServingNumber() {
+        val draft = parse(
+            ocr(
+                listOf(
+                    line(10, "Serving Size: 30g" at 20),
+                    line(50, "Nutrients" at 20, "Per 100g" at 420, "Per Serving" at 600)
+                ) + table(
+                    listOf(20, 420, 600),
+                    listOf(
+                        listOf("Energy (kcal)", "400", "120"),
+                        listOf("Protein (g)", "10", "3"),
+                        listOf("Carbohydrate (g)", "60", "18"),
+                        listOf("Total Fat (g)", "13.3", "4"),
+                        listOf("Sodium (mg)", "", "36")
+                    ),
+                    firstTop = 90
+                )
+            )
+        )
+
+        assertValue(36.0, draft.perServingValues["sodium"]?.value, "sodium per serving")
+        assertValue(120.0, draft.sodium?.value, "sodium per 100 g")
+    }
 }

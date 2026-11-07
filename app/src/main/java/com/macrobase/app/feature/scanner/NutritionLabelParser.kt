@@ -92,7 +92,9 @@ class NutritionLabelParser {
      */
     fun parse(ocrInput: OcrResult): NutritionLabelDraft {
         // "Calories from Fat 72" is neither the calories nor the fat (BUG-045)
-        val ocrResult = LabelRowFilters.withoutCaloriesFromFat(ocrInput)
+        // Every word's OCR misreads ("Per 1OOg") are corrected first, as the rows' always were, so
+        // the header, basis and serving read them too (BUG-035)
+        val ocrResult = withCorrectedWords(LabelRowFilters.withoutCaloriesFromFat(ocrInput))
         val rawLines = ocrResult.lines
         val fullText = ocrResult.fullText
         val warnings = mutableListOf<String>()
@@ -105,11 +107,15 @@ class NutritionLabelParser {
             rawLines
         }
 
-        // 2. Detect Basis (Per 100g, Per 100ml, Per Serving)
-        val rawBasis = detectBasis(unifiedLines, fullText)
+        val normalizedFullText = normalizeOcrMisreads(fullText)
+
+        // 2. Detect Basis (Per 100g, Per 100ml, Per Serving), from the text down to the table's last row (BUG-031)
+        // The OCR's own lines keep the reading order: a header row sorted by x can read "Per 100 Per ml"
+        val basisText = basisLines(rawLines).joinToString("\n") { it.text }
+        val rawBasis = detectBasis(unifiedLines, basisText)
 
         // 3. Detect Serving Size & Serving Mass
-        val servingInfo = detectServingInfo(unifiedLines, fullText)
+        val servingInfo = detectServingInfo(unifiedLines, normalizedFullText)
 
         // 4. Multi-Column Layout Analysis & 2D Spatial Table Grid Reconstruction
         val spatialDetector = SpatialTableDetector()
@@ -161,8 +167,6 @@ class NutritionLabelParser {
         val effectiveServingSize = servingInfo.servingSize ?: spatialResult.servingSize
         val effectiveServingUnit = servingInfo.servingUnit ?: spatialResult.servingUnit
         val effectiveServingDesc = servingInfo.servingDescription ?: spatialResult.servingDescription
-
-        val normalizedFullText = normalizeOcrMisreads(fullText)
 
         val per100gMap = mutableMapOf<String, ParsedNutrientValue>()
         val perServingMap = mutableMapOf<String, ParsedNutrientValue>()
@@ -240,7 +244,8 @@ class NutritionLabelParser {
                         sourceValue = cellServ.rawToken.numericValue,
                         isEstimated = cellServ.rawToken.wasDecimalRecovered || sLess
                     )
-                    perServingMap[key] = parsedServ
+                    // The per-serving map keeps the number printed; parsedServ may be per 100 g by now
+                    perServingMap[key] = parsedServ.copy(value = sEffective, basis = NutritionBasis.PER_SERVING, isDerived = false)
                     return parsedServ
                 }
             }
@@ -457,6 +462,57 @@ class NutritionLabelParser {
                             perServingMap[key] = correctedNutrient
                         }
                     }
+                }
+            }
+        }
+
+        // 5c. A serving column that disproves its per 100 g value, as the row path already checks.
+        // Runs after the decimal recovery, which may have explained the difference. When most of
+        // the column disagrees, it is per something else ("30 g with 125 ml milk"): one note about
+        // the column, and no value is marked (BUG-034)
+        if (servingGrams != null && servingGrams > 0.0) {
+            val checked = listOf(
+                "calories", "protein", "carbs", "fat", "saturatedFat", "transFat", "cholesterol",
+                "fiber", "sugar", "addedSugar", "sodium", "salt"
+            ).mapNotNull { key ->
+                val p100 = per100gMap[key] ?: return@mapNotNull null
+                val pServ = perServingMap[key] ?: return@mapNotNull null
+                if (p100.needsReview) null else Triple(key, p100, pServ)
+            }
+            val disagreeing = checked.filterNot { (_, p100, pServ) ->
+                NutritionNormalization.crossCheckServingVs100g(p100.value, pServ.value, servingGrams)
+            }
+            if (checked.size >= 2 && disagreeing.size * 2 > checked.size) {
+                warnings.add("The per serving column does not match per 100 g for a ${servingGrams}g serving. It may include something added, such as milk.")
+            } else {
+                fun flag(v: ParsedNutrientValue?) = v?.copy(
+                    needsReview = true,
+                    confidence = if (v.confidence == ConfidenceLevel.LOW) ConfidenceLevel.LOW else ConfidenceLevel.MEDIUM
+                )
+                for ((key, p100, pServ) in disagreeing) {
+                    per100gMap[key] = flag(p100)!!
+                    when (key) {
+                        "calories" -> calories = flag(calories)
+                        "protein" -> protein = flag(protein)
+                        "carbs" -> carbs = flag(carbs)
+                        "fat" -> fat = flag(fat)
+                        "saturatedFat" -> satFat = flag(satFat)
+                        "transFat" -> transFat = flag(transFat)
+                        "cholesterol" -> cholesterol = flag(cholesterol)
+                        "fiber" -> fiber = flag(fiber)
+                        "sugar" -> sugar = flag(sugar)
+                        "addedSugar" -> addedSugar = flag(addedSugar)
+                        "sodium" -> sodium = flag(sodium)
+                        "salt" -> salt = flag(salt)
+                    }
+                    val name = when (key) {
+                        "carbs" -> "Carbohydrates"
+                        "saturatedFat" -> "Saturated fat"
+                        "transFat" -> "Trans fat"
+                        "addedSugar" -> "Added sugar"
+                        else -> key.replaceFirstChar { it.uppercase() }
+                    }
+                    warnings.add("$name per serving (${pServ.value}) does not match ${p100.value} per 100 g for a ${servingGrams}g serving. Check both columns.")
                 }
             }
         }
@@ -1370,6 +1426,22 @@ class NutritionLabelParser {
     private fun isIngredientText(lower: String): Boolean =
         lower.contains("amino acid profile") || lower.contains("typical amino acid") || lower.contains("ingredients") || lower.contains("allergens")
 
+    /**
+     * The lines that can say what the table's values are per: everything down to the last line that
+     * names a nutrient, without ingredient text. An amino acid table or a note under the nutrients
+     * ("per 100g of protein") is not the table's basis (BUG-031). A name alone counts, since ML Kit
+     * often puts a wide table's label and value on separate lines.
+     */
+    private fun basisLines(lines: List<OcrLine>): List<OcrLine> {
+        val lastRow = lines.indexOfLast { line ->
+            val lower = line.text.lowercase(Locale.ROOT)
+            !isIngredientText(lower) && !LabelRowFilters.isDailyValueFootnote(lower) && !PER_100_PATTERN.containsMatchIn(lower) &&
+                ALL_NUTRIENT_WORDS.containsMatchIn(lower)
+        }
+        val table = if (lastRow >= 0) lines.take(lastRow + 1) else lines
+        return table.filterNot { isIngredientText(it.text.lowercase(Locale.ROOT)) }
+    }
+
     /** The row the nutrition table starts on: its header, or the first energy row with a number. */
     private fun tableStartIndex(rows: List<SpatialRow>): Int {
         val header = rows.indexOfFirst { row ->
@@ -1602,6 +1674,16 @@ class NutritionLabelParser {
             CHOLESTEROL_PATTERNS + FIBER_PATTERNS + SUGAR_PATTERNS + ADDED_SUGAR_PATTERNS.filterNot { it.contains(".*") } +
             SODIUM_PATTERNS + SALT_PATTERNS + POTASSIUM_PATTERNS + CALCIUM_PATTERNS + IRON_PATTERNS + "includes"
         ).sortedByDescending { it.length }.let { words -> Regex(words.joinToString("|", prefix = """\b(?:""", postfix = """)\b""")) }
+
+    /** [ocr] with every line and word through [normalizeOcrMisreads]; the full text stays as read, for review. */
+    private fun withCorrectedWords(ocr: OcrResult): OcrResult = ocr.copy(
+        lines = ocr.lines.map { line ->
+            line.copy(
+                text = normalizeOcrMisreads(line.text),
+                elements = line.elements.map { it.copy(text = normalizeOcrMisreads(it.text)) }
+            )
+        }
+    )
 
     private fun normalizeOcrMisreads(text: String): String {
         var normalized = NutritionDigitCorrector.correctRowText(text)

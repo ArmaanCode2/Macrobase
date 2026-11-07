@@ -75,8 +75,9 @@ object NutritionDigitCorrector {
         // e.g. "40O" -> "400", "3Og" -> "30g", "10O" -> "100", "0.O" -> "0.0", "O.5" -> "0.5"
         corrected = corrected.replace(Regex("""(?<=\s|^|\b)[Oo]\.([0-9]+)"""), "0.$1")
         corrected = corrected.replace(Regex("""([0-9]+)\.[Oo](?=\s|g|mg|kcal|kJ|%|$)"""), "$1.0")
-        corrected = corrected.replace(Regex("""(?<=\d)[Oo](?=\s|[a-zA-Z]|%|$)"""), "0")
-        corrected = corrected.replace(Regex("""\b([0-9]+)[Oo]([a-zA-Z]*)\b"""), "$10$2")
+        // "1oz" is an ounce, not "10z"
+        corrected = corrected.replace(Regex("""(?<=\d)[Oo](?![Zz])(?=\s|[a-zA-Z]|%|$)"""), "0")
+        corrected = corrected.replace(Regex("""\b([0-9]+)[Oo](?![Zz])([a-zA-Z]*)\b"""), "$10$2")
 
         // 3. Misread letter 'I' or 'l' for digit '1'
         // e.g. "I.5" -> "1.5", "l.2" -> "1.2", "l90" -> "190"

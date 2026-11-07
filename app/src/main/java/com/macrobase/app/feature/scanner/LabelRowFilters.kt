@@ -103,7 +103,9 @@ object LabelRowFilters {
         while (i < elements.size) {
             val current = bareWord(elements[i])
             val next = elements.getOrNull(i + 1)?.let(::bareWord).orEmpty()
-            val starts = current == "servings" || (current == "serving" && (next == "size" || next == "suggestion")) ||
+            // "Net Wt. 100g" names the pack: its "100g" is never the per 100 g column (BUG-031)
+            val netWeight = current == "net" && NET_WEIGHT_WORDS.any { next.startsWith(it) }
+            val starts = netWeight || current == "servings" || (current == "serving" && (next == "size" || next == "suggestion")) ||
                 (current == "total" && next.startsWith("serving"))
             if (!starts) {
                 i++
@@ -111,13 +113,21 @@ object LabelRowFilters {
             }
             phrase.add(elements[i])
             i++
-            while (i < elements.size && !isColumnWord(bareWord(elements[i])) && !isColumnGap(elements[i - 1], elements[i])) {
+            var amountRead = false
+            while (i < elements.size && !isColumnGap(elements[i - 1], elements[i]) &&
+                ((netWeight && !amountRead) || !isColumnWord(bareWord(elements[i])))
+            ) {
+                amountRead = amountRead || bareWord(elements[i]).any(Char::isDigit)
                 phrase.add(elements[i])
                 i++
+                // A net weight ends with its amount
+                if (netWeight && amountRead) break
             }
         }
         return phrase
     }
+
+    private val NET_WEIGHT_WORDS = listOf("wt", "weight", "qty", "quantity", "content")
 
     private fun bareWord(element: OcrElement) = word(element).trim(':', '.', ',', '(', ')', '*')
 
