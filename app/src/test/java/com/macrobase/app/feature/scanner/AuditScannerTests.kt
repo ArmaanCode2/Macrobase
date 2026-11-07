@@ -899,4 +899,81 @@ class AuditScannerTests {
         assertEquals(406.3, draft.calories!!.value, 0.1)
         assertValue(8.0, draft.protein?.value, "protein")
     }
+
+    // ---------------------------------------------------------------------------------------
+    // Review of Phases 6 and 7: BUG-032 when the header is one OCR element, so only the parser's
+    // own column layout knows the columns; and BUG-033's fallback gram pattern
+    // ---------------------------------------------------------------------------------------
+
+    /** The header as one element over both columns, as a line ML Kit did not split into words. */
+    private fun wholeHeader(top: Int) = OcrLine(
+        text = "Quantity per Serving Quantity per 100 g",
+        elements = emptyList(),
+        spatialBounds = NutritionLabelParser.SpatialBox(173, top, 680, top + WordLevelOcr.LINE_HEIGHT)
+    )
+
+    @Test
+    fun aKilojouleRowFollowsTheColumnsOfAOneElementHeader() {
+        val draft = parse(ocr(listOf(line(10, "Serving size: 40 g" at 20), wholeHeader(50)) + table(listOf(20, 360, 620), kilojouleRows, firstTop = 90)))
+
+        assertEquals(406.3, draft.calories!!.value, 0.1)
+        assertEquals(162.5, draft.perServingValues["calories"]!!.value, 0.1)
+        assertValue(8.0, draft.protein?.value, "protein")
+    }
+
+    @Test
+    fun aKilojouleAndKcalRowFollowsTheColumnsOfAOneElementHeader() {
+        val rows = listOf(
+            listOf("Energy", "680 kJ (162 kcal)", "1700 kJ (406 kcal)"),
+            listOf("Protein", "3.2 g", "8.0 g"),
+            listOf("Fat", "4.8 g", "12.0 g"),
+            listOf("Carbohydrate", "24.0 g", "60.0 g")
+        )
+        val draft = parse(ocr(listOf(line(10, "Serving size: 40 g" at 20), wholeHeader(50)) + table(listOf(20, 360, 620), rows, firstTop = 90)))
+
+        assertEquals(406.0, draft.calories!!.value, 0.5)
+        assertEquals(162.0, draft.perServingValues["calories"]!!.value, 0.5)
+    }
+
+    // Two 15 g pieces: no gram weight is better than half of it
+    @Test
+    fun aMultipackServingIsNotReadAsItsLastNumber() {
+        assertNull(parse(lines("Serving size 2x15g", "Energy 120 kcal", "Protein 3 g")).servingGrams)
+    }
+
+    @Test
+    fun aServingWeightAfterACommaIsStillRead() {
+        assertValue(40.0, parse(lines("Serving size 1 bar,40g", "Energy 200 kcal", "Protein 8 g")).servingGrams, "serving grams")
+    }
+
+    // "1,000 g" is the pack, with a thousands separator: never a 1 g serving
+    @Test
+    fun aPackWeightWithAThousandsSeparatorIsNotAOneGramServing() {
+        assertNull(parse(lines("33 servings, 1,000 g", "Energy 400 kcal", "Protein 10 g")).servingGrams)
+    }
+
+    // The table's own serving reading feeds its column checks, so it must read "12,5 g" too
+    @Test
+    fun theTableReadsADecimalCommaServingToo() {
+        val label = ocr(
+            listOf(
+                line(10, "Serving size 12,5 g" at 20),
+                line(50, "Nutrients" at 20, "Per 100g" at 420, "Per Serving" at 600)
+            ) + table(
+                listOf(20, 420, 600),
+                listOf(
+                    listOf("Energy (kcal)", "400", "50"),
+                    listOf("Protein (g)", "16", "2"),
+                    listOf("Carbohydrate (g)", "64", "8"),
+                    listOf("Total Fat (g)", "8", "1")
+                ),
+                firstTop = 90
+            )
+        )
+
+        assertEquals(12.5, SpatialTableDetector().detectAndReconstruct(label).servingMassG!!, 0.001)
+        val draft = parse(label)
+        assertValue(16.0, draft.protein?.value, "protein per 100 g")
+        assertValue(2.0, draft.perServingValues["protein"]?.value, "protein per serving")
+    }
 }

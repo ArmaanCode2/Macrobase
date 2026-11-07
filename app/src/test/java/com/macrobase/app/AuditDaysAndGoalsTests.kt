@@ -212,6 +212,42 @@ class DayGoalTests {
         assertEquals(FitnessGoal.CUTTING, goals.getGoals().fitnessGoal)
     }
 
+    // BUG-052: a first save that schedules a strategy must not change today's maintenance either:
+    // with the keys missing it was read from the calories this save had just written
+    @Test
+    fun aFirstSaveKeepsTodaysMaintenanceToo() = runBlocking {
+        clockDay = oct15
+        val cutting = Goal(1800.0, 50.0, 25.0, 25.0, FitnessGoal.CUTTING, 2300.0)
+
+        goals.updateGoals(cutting)
+        assertEquals(2000.0, goals.getGoals().maintenanceCalories, 0.0)
+        goals.updateGoals(cutting.copy(carbPercentage = 45.0, proteinPercentage = 30.0))
+
+        val today = goals.getGoals()
+        assertEquals(FitnessGoal.MAINTAINING, today.fitnessGoal)
+        assertEquals(2000.0, today.maintenanceCalories, 0.0)
+        assertEquals(2300.0, today.scheduledMaintenanceCalories!!, 0.0)
+    }
+
+    // BUG-047: the phone's amount is kept, and the result says how many logs that was
+    @Test
+    fun aMergeSaysHowManyLogsKeptThePhonesVersion() = runBlocking {
+        val day = oct12.toEpochDay()
+        db.waterDao().insertWaterLogs(listOf(WaterLogEntity(dateEpochDay = day, amountMl = 500.0, timestamp = 1_000L)))
+        val backup = MacroBaseBackupData(
+            manifest = BackupManifestDto(exportedAt = "2026-10-12T08:00:00Z", timeZone = "UTC", counts = BackupRecordCountsDto()),
+            waterEntries = listOf(WaterLogBackupDto(day, oct12.toString(), 250.0, 1_000L))
+        )
+        val preferences = PreferencesRepositoryImpl(
+            context,
+            PreferenceDataStoreFactory.create(scope = scope) { File(tempFolder.root, "prefs2.preferences_pb") }
+        )
+
+        val result = PortabilityRepositoryImpl(db, goals, preferences).importUserData(backup, ImportMode.MERGE)
+
+        assertTrue(result.message, result.message.contains("1 kept this phone's version"))
+    }
+
     // BUG-047: editing a water log keeps its time, so its old copy in a backup is the same log
     @Test
     fun mergingAWaterLogEditedSinceTheBackupKeepsThePhonesAmount() = runBlocking {
@@ -278,6 +314,23 @@ class CalendarTodayTests {
         assertEquals(1, after.dayCells.single { it.isToday && it.isCurrentMonth }.dayNumber)
     }
 
+    // Moved on to November on 31 October, the calendar is on the current month from 1 November,
+    // and from then on follows it as a calendar left on the current month does
+    @Test
+    fun aMonthMovedToThatBecomesCurrentFollowsTheCalendarAgain() = runBlocking {
+        val clock = MutableTestClock(LocalDate.of(2026, 10, 31), LocalTime.of(12, 0))
+        val vm = calendar(clock)
+        vm.onNextMonth()
+
+        clock.advanceBy(Duration.ofDays(1))
+        vm.onShown()
+        clock.advanceBy(Duration.ofDays(30))
+        vm.onShown()
+
+        val shown = withTimeout(5_000) { vm.uiState.first { it.displayedYearMonth == YearMonth.of(2026, 12) } }
+        assertEquals(1, shown.dayCells.single { it.isToday && it.isCurrentMonth }.dayNumber)
+    }
+
     // The screen being shown again is a resume, not only its first composition
     @Test
     fun theCalendarCatchesUpWheneverItIsShownAgain() {
@@ -300,6 +353,12 @@ class MacroRingTextTests {
         assertEquals(14.sp, fittingFontSize(MACRO_RING_FONT_SIZES, available = 100f) { it.value * 6f })
         assertEquals(10.sp, fittingFontSize(MACRO_RING_FONT_SIZES, available = 60f) { it.value * 6f })
         assertEquals("nothing fits: the smallest", MACRO_RING_FONT_SIZES.last(), fittingFontSize(MACRO_RING_FONT_SIZES, available = 10f) { it.value * 6f })
+    }
+
+    // At 7 sp a number that still does not fit shows that it is cut, never a silent part of it
+    @Test
+    fun aNumberThatStillDoesNotFitShowsItIsCut() {
+        assertTrue(mainSource("core/designsystem/components/MbMacroRing.kt").contains("overflow = TextOverflow.Ellipsis"))
     }
 
     @Test

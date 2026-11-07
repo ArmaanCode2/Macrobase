@@ -37,6 +37,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayOutputStream
@@ -109,6 +110,40 @@ class ExportTests {
         withTimeout(5_000) { vm.uiState.first { !it.isExporting } }
 
         assertNotSame("export", main, exportThread)
+    }
+
+    // The picker made the file before the archive was built: a failure before writing leaves it
+    // empty, named like a backup, so it is removed. A file with anything in it is never touched
+    @Test
+    fun aFailureBeforeWritingDeletesTheEmptyFile() = runBlocking {
+        var emptyDeleted = 0
+        var halfDeleted = 0
+        val vm = viewModel(Portability { throw IllegalStateException("database locked") })
+
+        vm.exportBackup(outputStreamSupplier = { ByteArrayOutputStream() }, discardOutput = { halfDeleted++; true }, discardIfEmpty = { emptyDeleted++; true })
+        val state = withTimeout(5_000) { vm.uiState.first { !it.isExporting } }
+
+        assertEquals(1, emptyDeleted)
+        assertEquals(0, halfDeleted)
+        assertTrue(state.exportErrorMessage, state.exportErrorMessage!!.contains("empty file was deleted"))
+    }
+
+    @Test
+    fun runningOutOfMemoryAlsoDeletesTheEmptyFile() = runBlocking {
+        var emptyDeleted = 0
+        val vm = viewModel(Portability { throw OutOfMemoryError("Failed to allocate") })
+
+        vm.exportBackup(outputStreamSupplier = { ByteArrayOutputStream() }, discardIfEmpty = { emptyDeleted++; true })
+        withTimeout(5_000) { vm.uiState.first { !it.isExporting } }
+
+        assertEquals(1, emptyDeleted)
+    }
+
+    // A provider that never opens the file must not trap the user behind the dialog
+    @Test
+    fun theExportDialogCanBeHidden() {
+        val path = "src/main/java/com/macrobase/app/feature/importexport/ImportExportScreen.kt"
+        assertTrue(listOf(File(path), File("app/$path")).first { it.isFile }.readText().contains("exportDialogHidden = true"))
     }
 
     // The export's dialog blocks Back as the restore's does, so its result is seen

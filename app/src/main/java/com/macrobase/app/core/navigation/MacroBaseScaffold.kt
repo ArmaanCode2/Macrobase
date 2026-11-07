@@ -1,5 +1,6 @@
 package com.macrobase.app.core.navigation
 
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
@@ -113,6 +114,10 @@ fun MacroBaseScaffold(
         LocalDockInset provides dockInset
     ) {
         Box(modifier = modifier.fillMaxSize().background(AppColors.Background)) {
+            // Home's saves and copies also run from the "+" sheet on any tab, so their message shows on every tab (BUG-022)
+            if (homeViewModel != null) {
+                WriteFailedDialog(homeViewModel.writes)
+            }
             if (!isScanner) MbAura()
 
             Scaffold(

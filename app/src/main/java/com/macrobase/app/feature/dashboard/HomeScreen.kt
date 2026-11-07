@@ -1,6 +1,5 @@
 package com.macrobase.app.feature.dashboard
 
-import com.macrobase.app.core.designsystem.components.WriteFailedDialog
 import com.macrobase.app.core.util.SafeWrites
 import kotlin.math.abs
 import com.macrobase.app.core.designsystem.components.rememberReducedMotion
@@ -193,6 +192,9 @@ internal fun macroTargetGrams(summary: DailyNutritionSummary): Triple<Double, Do
         HomeProfile(proteinPercentage = summary.proteinPercentage, carbPercentage = summary.carbPercentage, fatPercentage = summary.fatPercentage)
     )
 
+/** Copying reads the diary into the basket, so its failure is not a full disk (BUG-022). */
+internal const val COPY_FAILED_MESSAGE = "Couldn't copy these foods to the basket. Please try again."
+
 /** The water Home's quick add logs: 250 mL, or 8 fl oz with imperial units (the Water screen's first amounts). */
 internal fun quickAddWaterMl(unitSystem: UnitSystem): Double =
     if (unitSystem == UnitSystem.IMPERIAL) UnitConversions.flOzToMl(8.0) else 250.0
@@ -237,7 +239,7 @@ class HomeViewModel(
         initialValue = null
     )
 
-    /** The greeting's first name, the unit system and the macro split for the rings. */
+    /** The greeting's first name, the unit system and today's macro split; the rings use each day's own (BUG-020). */
     val homeProfile: StateFlow<HomeProfile> = combine(
         preferencesRepository?.observePreferences() ?: flowOf(UserPreferences()),
         getGoalsUseCase?.invoke() ?: flowOf(Goal())
@@ -255,13 +257,13 @@ class HomeViewModel(
         initialValue = HomeProfile()
     )
 
+    /** Saves, deletes and copies, and the message of the last one that failed (BUG-022). */
+    val writes = SafeWrites(viewModelScope)
+
     /**
      * Logs the quick-add amount of water to the day on screen, through the same use case as the
      * Water screen. [onAdded] runs once it is saved.
      */
-    /** Saves and deletes, and the message of the last one that failed (BUG-022). */
-    val writes = SafeWrites(viewModelScope)
-
     fun quickAddWater(onAdded: () -> Unit = {}) {
         val addWater = addWaterEntryUseCase ?: return
         val date = _selectedDate.value
@@ -333,7 +335,7 @@ class HomeViewModel(
 
     fun copyEntry(entry: DiaryEntry) {
         _revealedEntryId.value = null
-        writes.launch { addToBasket(entry) }
+        writes.launch(failedMessage = COPY_FAILED_MESSAGE) { addToBasket(entry) }
     }
 
     /**
@@ -342,7 +344,7 @@ class HomeViewModel(
      */
     fun copyMeal(meal: Meal) {
         _revealedEntryId.value = null
-        writes.launch { meal.entries.forEach { addToBasket(it) } }
+        writes.launch(failedMessage = COPY_FAILED_MESSAGE) { meal.entries.forEach { addToBasket(it) } }
     }
 
     /** The meal to log to now, by this ViewModel's clock. */
@@ -358,7 +360,7 @@ class HomeViewModel(
      */
     fun copyMealFrom(date: LocalDate, meal: MealType, toMeal: MealType = meal, onDone: () -> Unit = {}) {
         _revealedEntryId.value = null
-        writes.launch(onSaved = onDone) {
+        writes.launch(onSaved = onDone, failedMessage = COPY_FAILED_MESSAGE) {
             val entries = getDailyDiaryUseCase(date).first().meals.firstOrNull { it.type == meal }?.entries.orEmpty()
             val today = today()
             entries.forEach { addToBasket(it, date = today, mealType = toMeal) }
@@ -429,7 +431,6 @@ fun HomeScreen(
     val summary by viewModel.dailySummary.collectAsState()
     val profile by viewModel.homeProfile.collectAsState()
     val revealedEntryId by viewModel.revealedEntryId.collectAsState()
-    WriteFailedDialog(viewModel.writes)
 
     var selectedMealForInfo by remember { mutableStateOf<Meal?>(null) }
     var showDailySummary by remember { mutableStateOf(false) }
@@ -464,7 +465,6 @@ fun HomeScreen(
             item(key = "calories", contentType = "calories") {
                 CaloriesPanel(
                     summary = summary,
-                    profile = profile,
                     onDailySummary = { showDailySummary = true },
                     onSearch = onOpenSearch,
                     onScan = onScanLabel,
@@ -742,7 +742,6 @@ private fun AvatarRing(firstName: String, onClick: () -> Unit) {
 @Composable
 private fun CaloriesPanel(
     summary: DailyNutritionSummary,
-    profile: HomeProfile,
     onDailySummary: () -> Unit,
     onSearch: () -> Unit,
     onScan: () -> Unit,

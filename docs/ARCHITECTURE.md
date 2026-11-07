@@ -308,7 +308,7 @@ userQuantity REAL NOT NULL
   - Custom foods and recipes are matched by `uuid`. Identical records are skipped; newer records (`createdAt`) update existing rows.
   - Diary entries are deduplicated by `uuid`.
   - Body weight entries are merged by `dateEpochDay` (newer `createdAt` replaces).
-  - Water intake logs are deduplicated by `(dateEpochDay, timestamp, amountMl)`.
+  - Water intake logs are matched by `(dateEpochDay, timestamp)`, since editing a log keeps its time; this phone's amount is kept.
 - **Overwrite Mode (Destructive)**:
   - Explicit confirmation requested via prominent warning dialog.
   - Clears `diary_entries`, `custom_foods`, `recipes`, `weight_entries`, `water_logs` in `macrobase_user.db`.

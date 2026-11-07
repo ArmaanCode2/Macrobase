@@ -234,7 +234,7 @@ class SpatialTableDetector {
 
         // 1. Check for standard "Serving Size : 30g" or "Serving Size : 1 Scoop (36g)"
         val pattern = Pattern.compile(
-            """(?:serving\s*size|per\s*serve|per\s*portion|serve\s*size)[:\s]*([0-9]+(?:[.,][0-9]+)?|[0-9]+\/[0-9]+)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
+            """(?:serving\s*size|per\s*serve|per\s*portion|serve\s*size)[:\s]*([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?|[0-9]+\/[0-9]+)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)\s*(g|gm|gms|grams|ml)\))?""",
             Pattern.CASE_INSENSITIVE
         )
 
@@ -277,7 +277,7 @@ class SpatialTableDetector {
         }
 
         // 2. Cross-check against header text like "Per Serving (30g)"
-        val headerServingPattern = Pattern.compile("""per\s*(?:serving|serve)\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(?:g|gm|gms|grams)\)""", Pattern.CASE_INSENSITIVE)
+        val headerServingPattern = Pattern.compile("""per\s*(?:serving|serve)\s*\(([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)\s*(?:g|gm|gms|grams)\)""", Pattern.CASE_INSENSITIVE)
         for (line in lines.take(12)) {
             val m = headerServingPattern.matcher(line.text)
             if (m.find()) {

@@ -96,6 +96,11 @@ class NutritionLabelScannerViewModel(
         _uiState.value = _uiState.value.copy(cameraUnavailable = true)
     }
 
+    /** The camera bound, as after a rotation that worked this time: the camera message goes. */
+    fun onCameraBound() {
+        if (_uiState.value.cameraUnavailable) _uiState.value = _uiState.value.copy(cameraUnavailable = false)
+    }
+
     fun onPermissionDenied() {
         _uiState.value = _uiState.value.copy(state = ScannerState.CameraPermissionDenied)
     }

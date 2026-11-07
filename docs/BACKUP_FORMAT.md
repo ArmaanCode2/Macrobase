@@ -212,7 +212,7 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
 - **Recipes**: Matched by `uuid`. If identical $\rightarrow$ skipped. If different $\rightarrow$ newer record (`createdAt`) wins. If absent $\rightarrow$ inserted.
 - **Diary Entries**: Matched by `uuid`. If exists $\rightarrow$ skipped. If absent $\rightarrow$ inserted.
 - **Weight Entries**: Matched by `dateEpochDay`. If exists $\rightarrow$ newer record (`createdAt`) wins. If absent $\rightarrow$ inserted.
-- **Water Logs**: Matched by `(dateEpochDay, timestamp)`, since editing a log keeps its time. A log this phone already holds keeps this phone's amount; one whose amount differs counts as a conflict. New logs are inserted.
+- **Water Logs**: Matched by `(dateEpochDay, timestamp)`, since editing a log keeps its time. A log this phone already holds keeps this phone's amount, even when the backup's is newer (water logs carry no edit time); one whose amount differs counts as a conflict, and the result says how many. New logs are inserted.
 - **Goals & Preferences**: This phone's are kept when it has saved any: its current goal, strategy, any scheduled change and its profile stay, and the result says so. On a phone that has saved none, such as a fresh install, the backup fills them.
 - **Goal History**: A merge that keeps this phone's goals still takes the backup's `transitions` dated before this phone's first saved day, so imported days keep the goals they had and count in the rank. The backup's `2000-01-01` record replaces this phone's, and records from the first saved day on stay this phone's. A backup without `transitions` changes nothing, and merging the same backup again changes nothing more.
 

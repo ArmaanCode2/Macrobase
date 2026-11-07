@@ -304,7 +304,7 @@ class NutritionLabelParser {
             calories = extractEnergy(filteredRows, normalizedFullText, columns, basis, effectiveServingGrams, per100gMap, perServingMap, rdaMap)
                 ?: extractEnergy(rowsAboveTable, normalizedFullText, columns, basis, effectiveServingGrams, per100gMap, perServingMap, rdaMap)
         }
-        val caloriesKj = extractKjEnergy(filteredRows, normalizedFullText, columns, basis, per100gMap, perServingMap)
+        val caloriesKj = extractKjEnergy(filteredRows, normalizedFullText, columns, basis, per100gMap, perServingMap, servingGrams = effectiveServingGrams)
         var protein = resolveNutrient("protein", PROTEIN_PATTERNS, "g")
         var carbs = resolveNutrient("carbs", CARBS_PATTERNS, "g")
         var fat = resolveNutrient("fat", FAT_PATTERNS, "g")
@@ -350,6 +350,17 @@ class NutritionLabelParser {
                 sourceText = "${caloriesKj.value} kJ"
             )
             warnings.add("Calories converted from ${caloriesKj.value} kJ (${calories.value} kcal)")
+            // The serving column's kJ in kcal too, as a label printed in kcal has it (BUG-032)
+            val servingKj = perServingMap["caloriesKj"]
+            if (servingKj != null && perServingMap["calories"] == null) {
+                perServingMap["calories"] = servingKj.copy(
+                    value = (servingKj.value / KJ_TO_KCAL_FACTOR * 10.0).roundToLong() / 10.0,
+                    unit = "kcal",
+                    isEstimated = true,
+                    sourceValue = servingKj.value,
+                    sourceUnit = "kJ"
+                )
+            }
         }
 
         // 5. Table-Wide Serving Relationship Validation & Column Swap Correction
@@ -869,7 +880,7 @@ class NutritionLabelParser {
         var desc: String? = null
 
         val pattern = Pattern.compile(
-            """(?:serving\s*size|per\s*serve|per\s*portion|approx\.?\s*serving)[:\s]*([0-9]+\/[0-9]+|[0-9]+(?:[.,][0-9]+)?)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\))?""",
+            """(?:serving\s*size|per\s*serve|per\s*portion|approx\.?\s*serving)[:\s]*([0-9]+\/[0-9]+|[0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)?\s*([a-zA-Z]+)?(?:\s*\(([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)\s*(g|gm|gms|grams|ml)\))?""",
             Pattern.CASE_INSENSITIVE
         )
 
@@ -911,7 +922,7 @@ class NutritionLabelParser {
         // Header naming one unit of the food: "Per bar (40g)", "Per 1 cup (250 mL)" (BUG-020)
         if (size == null) {
             val perUnitPattern = Pattern.compile(
-                """\bper\s+([0-9]+/[0-9]+|[0-9]+(?:[.,][0-9]+)?)?\s*([a-z]+)\s*\(\s*([0-9]+(?:[.,][0-9]+)?)\s*(g|gm|gms|grams|ml)\s*\)""",
+                """\bper\s+([0-9]+/[0-9]+|[0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)?\s*([a-z]+)\s*\(\s*([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)\s*(g|gm|gms|grams|ml)\s*\)""",
                 Pattern.CASE_INSENSITIVE
             )
             for (line in lines) {
@@ -937,8 +948,9 @@ class NutritionLabelParser {
         }
 
         if (grams == null) {
-            // Not after a digit or separator, so "12,5 g" is never read as "5 g"
-            val gramPattern = Pattern.compile("""(?<![0-9.,])([0-9]+(?:[.,][0-9]+)?)\s*(?:g|gm|gms|grams)\b""", Pattern.CASE_INSENSITIVE)
+            // A whole number, never the end of another ("2x15g", or the "5 g" of "12,5 g"), and a
+            // decimal comma has one or two digits, so "1,000 g" is never 1 g
+            val gramPattern = Pattern.compile("""(?<![0-9A-Za-z])(?<![0-9][.,])([0-9]+(?:\.[0-9]+|,[0-9]{1,2})?)\s*(?:g|gm|gms|grams)\b""", Pattern.CASE_INSENSITIVE)
             for (line in lines) {
                 val t = line.text.lowercase(Locale.ROOT)
                 if ((t.contains("serving") || t.contains("serve") || t.contains("portion")) &&
@@ -1090,7 +1102,9 @@ class NutritionLabelParser {
             Pattern.CASE_INSENSITIVE
         )
 
-        for (row in rows) {
+        // With a column per basis, each column's kcal figure is read by the column logic below, as
+        // other nutrients are: this shortcut takes a row's first pair (BUG-032)
+        if (valueColumnCount(columns) < 2) for (row in rows) {
             // Commas stay as printed: "1,046 kJ" is a thousands separator, not 1.046 (BUG-022)
             val normalized = normalizeOcrMisreads(row.text)
             if ((normalized.contains("kj", ignoreCase = true) || normalized.contains("kilojoule", ignoreCase = true)) &&
@@ -1131,14 +1145,26 @@ class NutritionLabelParser {
         return extractNutrient(kcalRows, ENERGY_PATTERNS, "kcal", columns, basis, servingGrams, "calories", per100gCollector, perServingCollector, rdaCollector)
     }
 
+    private fun valueColumnCount(columns: StructuralColumnLayout): Int = columns.columns.count { it.type != ColumnType.RDA }
+
     private fun extractKjEnergy(
         rows: List<SpatialRow>,
         fullText: String,
         columns: StructuralColumnLayout,
         basis: NutritionBasis,
         per100gCollector: MutableMap<String, ParsedNutrientValue>? = null,
-        perServingCollector: MutableMap<String, ParsedNutrientValue>? = null
+        perServingCollector: MutableMap<String, ParsedNutrientValue>? = null,
+        servingGrams: Double? = null
     ): ParsedNutrientValue? {
+        // With a column per basis, each column's kJ figure goes to its own basis, as other
+        // nutrients' do; a label printed per serving first is common in kJ (BUG-032)
+        if (valueColumnCount(columns) >= 2) {
+            val kjOnlyRows = rows.filter { row ->
+                val text = normalizeOcrMisreads(row.text).lowercase(Locale.ROOT)
+                (text.contains("kj") || text.contains("kilojoule")) && !text.contains("kcal") && !Regex("""\bcal""").containsMatchIn(text)
+            }
+            return extractNutrient(kjOnlyRows, ENERGY_PATTERNS, "kJ", columns, basis, servingGrams, "caloriesKj", per100gCollector, perServingCollector)
+        }
         val kjPattern = Pattern.compile(
             "(?:(?:energy|energy\\s*value)[:\\s]*)?(${NutritionNumericParser.NUMBER_PATTERN})\\s*(?:kj|kilojoules)\\b",
             Pattern.CASE_INSENSITIVE

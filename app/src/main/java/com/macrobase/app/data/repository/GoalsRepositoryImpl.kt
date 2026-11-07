@@ -241,6 +241,11 @@ class GoalsRepositoryImpl(
             recordLiveGoalIfMissing(prefs, today)
             val currentFitnessGoal = FitnessGoal.fromString(prefs[Keys.FITNESS_GOAL])
             val currentMaintenance = prefs[Keys.MAINTENANCE_CALORIES] ?: (prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0)
+            // The strategy in force now is stored first, before this save's calories replace the
+            // fallback it is read from: a scheduled change must not start today, nor move today's
+            // maintenance (BUG-052)
+            if (prefs[Keys.FITNESS_GOAL] == null) prefs[Keys.FITNESS_GOAL] = currentFitnessGoal.name
+            if (prefs[Keys.MAINTENANCE_CALORIES] == null) prefs[Keys.MAINTENANCE_CALORIES] = currentMaintenance
             // The targets in force until now, read before they are overwritten (BUG-024)
             val oldCalories = prefs[Keys.DAILY_CALORIE_GOAL] ?: 2000.0
             val oldCarbs = prefs[Keys.CARB_PERCENTAGE] ?: 50.0
@@ -271,15 +276,6 @@ class GoalsRepositoryImpl(
                 prefs[Keys.SCHEDULED_FITNESS_GOAL] = goals.fitnessGoal.name
                 prefs[Keys.SCHEDULED_MAINTENANCE_CALORIES] = goals.maintenanceCalories
                 prefs[Keys.SCHEDULED_EFFECTIVE_DATE] = tomorrow.toString()
-            } else {
-                // Missing keys get the strategy in force now, never the one asked for: asking for
-                // the pending one must not start it today (BUG-052)
-                if (prefs[Keys.FITNESS_GOAL] == null) {
-                    prefs[Keys.FITNESS_GOAL] = currentFitnessGoal.name
-                }
-                if (prefs[Keys.MAINTENANCE_CALORIES] == null) {
-                    prefs[Keys.MAINTENANCE_CALORIES] = currentMaintenance
-                }
             }
 
             // History of every goal change, so each past day is scored against the goal it had

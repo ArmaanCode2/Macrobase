@@ -429,7 +429,9 @@ class PortabilityRepositoryImpl(
                     recordsSkipped = skipped,
                     recordsUpdated = updated,
                     conflictsResolved = conflicts,
-                    message = "Merge complete: $imported imported, $updated updated, $skipped skipped.$keptNote$settingsNote"
+                    // Records both sides hold where this phone's version was kept (BUG-047)
+                    message = "Merge complete: $imported imported, $updated updated, $skipped skipped." +
+                        (if (conflicts > 0) " $conflicts kept this phone's version." else "") + "$keptNote$settingsNote"
                 )
             }
         } catch (e: OutOfMemoryError) {

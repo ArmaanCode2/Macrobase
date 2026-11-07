@@ -137,8 +137,12 @@ class CalendarViewModel(
      * month it is now; one the user moved to another month stays there.
      */
     fun onShown() {
+        val month = YearMonth.now(clock)
+        // A month the user moved to that has since become the current one follows it from now on,
+        // as a tracker's picked day does (BUG-029)
+        if (_displayedYearMonth.value == month) followsCurrentMonth = true
+        if (followsCurrentMonth) _displayedYearMonth.value = month
         today.value = LocalDate.now(clock)
-        if (followsCurrentMonth) _displayedYearMonth.value = YearMonth.now(clock)
     }
 
     private fun calculateMonthState(

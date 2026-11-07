@@ -25,7 +25,12 @@ class SafeWrites(private val scope: CoroutineScope) {
         _error.value = null
     }
 
-    fun launch(onSaved: () -> Unit = {}, onFailed: () -> Unit = {}, write: suspend () -> Unit) {
+    fun launch(
+        onSaved: () -> Unit = {},
+        onFailed: () -> Unit = {},
+        failedMessage: String = WRITE_FAILED_MESSAGE,
+        write: suspend () -> Unit
+    ) {
         scope.launch {
             try {
                 write()
@@ -34,7 +39,7 @@ class SafeWrites(private val scope: CoroutineScope) {
             } catch (e: Exception) {
                 Log.w(TAG, "A write failed: ${e.message}", e)
                 onFailed()
-                _error.value = WRITE_FAILED_MESSAGE
+                _error.value = failedMessage
                 return@launch
             }
             onSaved()

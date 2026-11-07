@@ -239,6 +239,7 @@ fun NutritionLabelScannerScreen(
                             )
                             // Only a bound camera can take the picture, so the shutter waits for this (BUG-038)
                             imageCaptureUseCase = imageCapture
+                            viewModel.onCameraBound()
                         } catch (e: Throwable) {
                             // No back camera, or CameraX could not start: say so and offer a photo (BUG-038)
                             viewModel.onCameraBindFailed(e.localizedMessage ?: e.javaClass.simpleName)
@@ -475,18 +476,25 @@ fun NutritionLabelScannerScreen(
                 opensSettings = button == PermissionButton.OPEN_SETTINGS,
                 onRequestPermission = {
                     if (button == PermissionButton.OPEN_SETTINGS) {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-                        )
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                            )
+                        }
                     } else {
                         permissionLauncher.launch(Manifest.permission.CAMERA)
                     }
                 },
                 onChoosePhoto = { galleryLauncher.launch("image/*") },
                 onNavigateBack = onNavigateBack,
+                // Under an open modal its buttons are off, as the camera's are (BUG-037)
+                enabled = !uiState.hasOpenModal && !uiState.isAnalyzing,
                 modifier = Modifier.fillMaxSize()
             )
         }
+
+        // Back while analysing is its Cancel: the scanner stays open (BUG-037)
+        BackHandler(enabled = uiState.isAnalyzing) { viewModel.retryCapture() }
 
         // 6. Analyzing Loading Overlay
         AnimatedVisibility(
@@ -866,7 +874,8 @@ fun CameraPermissionDeniedContent(
     /** Android no longer asks, so the button opens the app's settings (BUG-039). */
     opensSettings: Boolean = false,
     /** A photo of the label needs no camera (BUG-039). */
-    onChoosePhoto: (() -> Unit)? = null
+    onChoosePhoto: (() -> Unit)? = null,
+    enabled: Boolean = true
 ) {
     Box(
         modifier = modifier
@@ -909,6 +918,7 @@ fun CameraPermissionDeniedContent(
             MbButton(
                 text = if (opensSettings) "Open Settings" else "Grant Camera Permission",
                 onClick = onRequestPermission,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -916,6 +926,7 @@ fun CameraPermissionDeniedContent(
                 MbButton(
                     text = "Choose a photo",
                     onClick = onChoosePhoto,
+                    enabled = enabled,
                     kind = MbButtonKind.Secondary,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -924,6 +935,7 @@ fun CameraPermissionDeniedContent(
             MbButton(
                 text = "Return to Manual Form",
                 onClick = onNavigateBack,
+                enabled = enabled,
                 kind = MbButtonKind.Secondary,
                 modifier = Modifier.fillMaxWidth()
             )

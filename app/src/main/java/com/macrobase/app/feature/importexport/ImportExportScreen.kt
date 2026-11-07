@@ -1,5 +1,6 @@
 package com.macrobase.app.feature.importexport
 
+import android.provider.OpenableColumns
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -112,7 +113,11 @@ class ImportExportViewModel(
      * half-written archive is left to be restored later (BUG-017). [discardOutput] returns
      * whether the file was deleted.
      */
-    fun exportBackup(outputStreamSupplier: () -> OutputStream?, discardOutput: () -> Boolean = { false }) {
+    fun exportBackup(
+        outputStreamSupplier: () -> OutputStream?,
+        discardOutput: () -> Boolean = { false },
+        discardIfEmpty: () -> Boolean = { false }
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true, exportSuccessMessage = null, exportErrorMessage = null) }
             // Leaving the screen does not stop the export, as with a restore: the file was created
@@ -123,7 +128,8 @@ class ImportExportViewModel(
                     val archive = ByteArrayOutputStream().also { exportUserDataUseCase.writeBackupArchive(it) }.toByteArray()
                     val stream = outputStreamSupplier()
                     if (stream == null) {
-                        _uiState.update { it.copy(isExporting = false, exportErrorMessage = "Failed to open destination file.") }
+                        val note = discardAfterFailure(writeStarted, discardOutput, discardIfEmpty)
+                        _uiState.update { it.copy(isExporting = false, exportErrorMessage = "Failed to open destination file.$note") }
                         return@withContext
                     }
                     stream.use { out ->
@@ -138,14 +144,12 @@ class ImportExportViewModel(
                     }
                 } catch (e: OutOfMemoryError) {
                     // More data than this phone's memory holds: a message, not a crash (BUG-049)
-                    val deleted = writeStarted && discardOutput()
-                    val note = if (deleted) " The incomplete file was deleted." else ""
+                    val note = discardAfterFailure(writeStarted, discardOutput, discardIfEmpty)
                     _uiState.update {
                         it.copy(isExporting = false, exportErrorMessage = PortabilityConfig.BACKUP_TOO_LARGE_TO_EXPORT_MESSAGE + note)
                     }
                 } catch (e: Exception) {
-                    val deleted = writeStarted && discardOutput()
-                    val note = if (deleted) " The incomplete file was deleted." else ""
+                    val note = discardAfterFailure(writeStarted, discardOutput, discardIfEmpty)
                     _uiState.update {
                         it.copy(
                             isExporting = false,
@@ -155,6 +159,17 @@ class ImportExportViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Removes what a failed export left, and says so: a half-written file, or, before anything
+     * was written, the file the picker created, but only when it is empty (BUG-048). The chosen
+     * file may be an older backup picked to replace, which [discardIfEmpty] never deletes.
+     */
+    private fun discardAfterFailure(writeStarted: Boolean, discardOutput: () -> Boolean, discardIfEmpty: () -> Boolean): String = when {
+        writeStarted -> if (discardOutput()) " The incomplete file was deleted." else ""
+        discardIfEmpty() -> " The empty file was deleted."
+        else -> ""
     }
 
     fun validateAndPreviewBackup(inputStreamSupplier: () -> InputStream?) {
@@ -266,7 +281,16 @@ fun ImportExportScreen(
                     runCatching { context.contentResolver.openOutputStream(uri, "wt") }.getOrNull()
                         ?: context.contentResolver.openOutputStream(uri)
                 },
-                discardOutput = { runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }.getOrDefault(false) }
+                discardOutput = { runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }.getOrDefault(false) },
+                // Only a file that is known to be empty: an unknown size keeps it
+                discardIfEmpty = {
+                    runCatching {
+                        val size = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+                        }
+                        size == 0L && DocumentsContract.deleteDocument(context.contentResolver, uri)
+                    }.getOrDefault(false)
+                }
             )
         }
     }
@@ -498,13 +522,19 @@ fun ImportExportScreen(
     }
 
     // Export in progress: it blocks Back and the header arrow, so its result is seen. An export
-    // that is left anyway still finishes (BUG-048)
-    if (uiState.isExporting) {
+    // that is left anyway still finishes (BUG-048). Hide lets the user out if a file provider never
+    // answers; the card still shows the export running
+    var exportDialogHidden by remember(uiState.isExporting) { mutableStateOf(false) }
+    if (uiState.isExporting && !exportDialogHidden) {
         AlertDialog(
             onDismissRequest = {},
             title = { Text(text = "Exporting your data", style = AppTypography.Header1) },
             text = { BusyRow(label = "Keep MacroBase open until this finishes.") },
-            confirmButton = {},
+            confirmButton = {
+                TextButton(onClick = { exportDialogHidden = true }) {
+                    Text("Hide", color = AppColors.TextSecondary)
+                }
+            },
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
             containerColor = AppColors.SheetFill,
             shape = AppShapes.Dialog

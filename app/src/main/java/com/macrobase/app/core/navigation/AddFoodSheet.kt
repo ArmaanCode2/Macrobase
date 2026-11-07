@@ -100,7 +100,8 @@ fun AddFoodSheet(
                 onClick = if (yesterdayMealIsEmpty) null else {
                     {
                         val target = meal
-                        go { homeViewModel.copyMealFrom(yesterday, target, toMeal = target, onDone = {}); onOpenBasket() }
+                        // The basket opens once the foods are in it; a failed copy shows its message instead (BUG-022)
+                        go { homeViewModel.copyMealFrom(yesterday, target, toMeal = target, onDone = onOpenBasket) }
                     }
                 },
                 showChevron = !yesterdayMealIsEmpty,

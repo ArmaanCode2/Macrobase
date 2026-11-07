@@ -36,6 +36,7 @@ import com.macrobase.app.domain.usecase.basket.AddFoodToBasketUseCase
 import com.macrobase.app.domain.usecase.basket.CommitSingleBasketItemUseCase
 import com.macrobase.app.domain.usecase.basket.RemoveBasketItemUseCase
 import com.macrobase.app.feature.customfoods.CustomFoodsViewModel
+import com.macrobase.app.feature.dashboard.COPY_FAILED_MESSAGE
 import com.macrobase.app.feature.dashboard.HomeViewModel
 import com.macrobase.app.feature.recipes.RecipesViewModel
 import com.macrobase.app.feature.water.WaterViewModel
@@ -43,6 +44,7 @@ import com.macrobase.app.feature.weight.WeightViewModel
 import com.macrobase.app.testutil.MutableTestClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -123,11 +125,12 @@ class WriteFailureTests {
         override fun decodeIngredients(text: String) = RecipeIngredientsJson.decode(text) ?: emptyList()
     }
 
-    private class Diary(var failing: Boolean = true) : DiaryRepository {
+    private class Diary(var failing: Boolean = true, val failingReads: Boolean = false) : DiaryRepository {
         override suspend fun addEntries(entries: List<DiaryEntry>) {}
         override suspend fun addEntry(entry: DiaryEntry) = 0L
         override suspend fun getDiaryForDate(date: LocalDate) = com.macrobase.app.domain.model.DailyNutritionSummary(date = date)
-        override fun observeDiaryForDate(date: LocalDate) = flowOf(com.macrobase.app.domain.model.DailyNutritionSummary(date = date))
+        override fun observeDiaryForDate(date: LocalDate) =
+            if (failingReads) flow { throw diskFull() } else flowOf(com.macrobase.app.domain.model.DailyNutritionSummary(date = date))
         override suspend fun getEntryById(entryId: Long): DiaryEntry? = null
         override suspend fun updateEntry(entry: DiaryEntry) {}
         override suspend fun deleteEntry(entryId: Long) { if (failing) throw diskFull() }
@@ -199,6 +202,40 @@ class WriteFailureTests {
         assertNull(vm.writes.error.value)
     }
 
+    // The dialog stays open while saving, so a second tap must not add a second log
+    @Test
+    fun aFailedWaterAddLetsItsDialogTryAgain() {
+        val vm = water(Water())
+        var saved = false
+        var failed = false
+
+        vm.addWater(250.0, onSaved = { saved = true }, onFailed = { failed = true })
+
+        assertFalse(saved)
+        assertTrue(failed)
+        val screen = source("feature/water/WaterScreen.kt")
+        assertTrue(screen.contains("enabled = !addingWater"))
+        assertTrue(screen.contains("onFailed = { addingWater = false }"))
+    }
+
+    // Copying reads the diary into the basket: it says so, and the basket opens only once it worked
+    @Test
+    fun aFailedCopyFromYesterdaySaysSoAndDoesNotOpenTheBasket() {
+        val vm = HomeViewModel(
+            getDailyDiaryUseCase = GetDailyDiaryUseCase(Diary(failingReads = true)),
+            deleteDiaryEntryUseCase = DeleteDiaryEntryUseCase(Diary()),
+            addFoodToBasketUseCase = AddFoodToBasketUseCase(basket),
+            clock = clock
+        )
+        var opened = false
+
+        vm.copyMealFrom(today.minusDays(1), com.macrobase.app.domain.model.MealType.BREAKFAST, onDone = { opened = true })
+
+        assertFalse(opened)
+        assertEquals(COPY_FAILED_MESSAGE, vm.writes.error.value)
+        assertTrue(source("core/navigation/AddFoodSheet.kt").contains("onDone = onOpenBasket)"))
+    }
+
     @Test
     fun aFailedCustomFoodSaveKeepsTheFormAndCanBeRetried() {
         val repo = Foods()
@@ -257,11 +294,14 @@ class WriteFailureTests {
     @Test
     fun everyScreenShowsTheMessageAndItsDialogsWaitForTheSave() {
         for (path in listOf(
-            "feature/water/WaterScreen.kt", "feature/weight/WeightScreen.kt", "feature/dashboard/HomeScreen.kt",
+            "feature/water/WaterScreen.kt", "feature/weight/WeightScreen.kt",
             "feature/customfoods/CustomFoodsScreen.kt", "feature/recipes/RecipesScreen.kt"
         )) {
             assertTrue(path, source(path).contains("WriteFailedDialog(viewModel.writes)"))
         }
+        // Home's actions also run from the "+" sheet on any tab, so its message shows over every tab
+        assertTrue(source("core/navigation/MacroBaseScaffold.kt").contains("WriteFailedDialog(homeViewModel.writes)"))
+        assertFalse(source("feature/dashboard/HomeScreen.kt").contains("WriteFailedDialog("))
         val weightScreen = source("feature/weight/WeightScreen.kt")
         assertTrue(weightScreen.contains("onSaved = { showLogDialog = false }"))
         assertTrue(weightScreen.contains("onSaved = { entryToEdit = null }"))

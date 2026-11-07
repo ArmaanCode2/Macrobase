@@ -1,5 +1,6 @@
 package com.macrobase.app.core.designsystem.components
 
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
@@ -106,7 +107,7 @@ fun MbMacroRing(
             val style = AppTypography.Header3.copy(fontSize = 14.sp, letterSpacing = (-0.01).em)
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
-            val available = with(density) { (Dimensions.MacroRing - Dimensions.MacroRingStroke * 2 - 8.dp).toPx() }
+            val available = with(density) { (Dimensions.MacroRing - Dimensions.MacroRingStroke * 2 - 4.dp).toPx() }
             val fontSize = remember(text, density) {
                 fittingFontSize(MACRO_RING_FONT_SIZES, available) { size ->
                     measurer.measure(text, style.copy(fontSize = size), maxLines = 1, softWrap = false).size.width.toFloat()
@@ -117,7 +118,9 @@ fun MbMacroRing(
                 style = style.copy(fontSize = fontSize),
                 color = AppColors.TextPrimary,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                // Past the smallest size the cut shows, never a silent part of the number
+                overflow = TextOverflow.Ellipsis
             )
         }
         Text(text = label, style = AppTypography.Caption, color = AppColors.TextSecondary)

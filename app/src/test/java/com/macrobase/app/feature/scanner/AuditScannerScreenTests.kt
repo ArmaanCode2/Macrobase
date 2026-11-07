@@ -55,6 +55,17 @@ class ScannerModalTests {
         assertFalse(shutterEnabled(ready, cameraBound = true, captureInProgress = true))
     }
 
+    // The denied screen sits under the same modals: its buttons are off while one is open
+    @Test
+    fun theDeniedScreenIsInertBehindAModal() {
+        assertTrue(scannerScreen().contains("enabled = !uiState.hasOpenModal && !uiState.isAnalyzing"))
+    }
+
+    @Test
+    fun backDuringAnalysisCancelsItAndStaysInTheScanner() {
+        assertTrue(scannerScreen().contains("BackHandler(enabled = uiState.isAnalyzing) { viewModel.retryCapture() }"))
+    }
+
     @Test
     fun everyModalBlocksTouchesAndMapsBackToItsOwnAction() {
         val screen = scannerScreen()
@@ -97,6 +108,18 @@ class CameraBindFailureTests {
         assertTrue("a retake does not bring the camera back", vm.uiState.value.cameraUnavailable)
     }
 
+    // Rotation binds the camera again; if that works, the message must go
+    @Test
+    fun aCameraThatBindsLaterClearsTheMessage() {
+        val vm = NutritionLabelScannerViewModel(RuntimeEnvironment.getApplication(), createOcrEngine = { NoOcr() })
+        vm.onCameraBindFailed("Camera in use")
+
+        vm.onCameraBound()
+
+        assertFalse(vm.uiState.value.cameraUnavailable)
+        assertTrue(scannerScreen().contains("viewModel.onCameraBound()"))
+    }
+
     @Test
     fun theShutterIsOffUntilTheCameraIsBound() {
         val ready = ScannerUiState(state = ScannerState.CameraReady)
@@ -136,6 +159,8 @@ class CameraPermissionTests {
         assertFalse(Regex("""\breturn\s+}\s+var cameraInstance""").containsMatchIn(screen))
         assertTrue(screen.contains("onChoosePhoto = { galleryLauncher.launch(\"image/*\") }"))
         assertTrue(screen.contains("Settings.ACTION_APPLICATION_DETAILS_SETTINGS"))
+        // A phone without a settings screen for apps must not crash on the button
+        assertTrue(Regex("""runCatching \{\s*context\.startActivity\(""").containsMatchIn(screen))
         assertTrue(screen.contains("LifecycleResumeEffect("))
     }
 }

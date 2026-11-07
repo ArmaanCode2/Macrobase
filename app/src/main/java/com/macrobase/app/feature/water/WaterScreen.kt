@@ -158,11 +158,11 @@ class WaterViewModel(
     /** Saves and deletes, and the message of the last one that failed (BUG-022). */
     val writes = SafeWrites(viewModelScope)
 
-    fun addWater(amountMl: Double, onSaved: () -> Unit = {}) {
+    fun addWater(amountMl: Double, onSaved: () -> Unit = {}, onFailed: () -> Unit = {}) {
         if (amountMl <= 0.0) return
         day.refresh()
         val date = day.selected.value
-        writes.launch(onSaved) { addWaterEntryUseCase(date, amountMl) }
+        writes.launch(onSaved, onFailed) { addWaterEntryUseCase(date, amountMl) }
     }
 
     fun updateWaterEntry(entry: WaterEntry, onSaved: () -> Unit = {}) {
@@ -373,6 +373,8 @@ fun WaterScreen(
     if (showCustomAmountDialog) {
         var inputAmount by remember { mutableStateOf("") }
         var errorMessage by remember { mutableStateOf<String?>(null) }
+        // Set while the log saves: the dialog stays open, and a second tap must not add a second log
+        var addingWater by remember { mutableStateOf(false) }
         val unitLabel = if (isImperial) "fl oz" else "mL"
 
         AlertDialog(
@@ -405,6 +407,7 @@ fun WaterScreen(
             confirmButton = {
                 MbButton(
                     text = "Add",
+                    enabled = !addingWater,
                     onClick = {
                         val ml = parseWaterInput(inputAmount, isImperial)
                         val problem = waterInputError(inputAmount, ml, isImperial)
@@ -412,7 +415,8 @@ fun WaterScreen(
                             errorMessage = problem
                             return@MbButton
                         }
-                        viewModel.addWater(ml, onSaved = { showCustomAmountDialog = false })
+                        addingWater = true
+                        viewModel.addWater(ml, onSaved = { showCustomAmountDialog = false }, onFailed = { addingWater = false })
                     }
                 )
             },
