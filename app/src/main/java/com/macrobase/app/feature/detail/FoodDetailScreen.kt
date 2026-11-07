@@ -336,7 +336,15 @@ class FoodDetailViewModel(
                     // and macros stay the logged snapshot even if the food changed since (AGENTS.md 1.4).
                     // Each nutrient follows the same rule as the check above, never a catalog 0.0.
                     val calculated = if (hasMissingSecondaryNutrients) {
-                        val current = calculateNutritionForServingUseCase(food, selectedServing, initialQty)
+                        // A portion of the same name that weighs something else now was re-weighed since
+                        // (cooked water, catalog 2.5.0): its grams are not the food's grams any more, so the
+                        // fill is scaled by the entry's own calories, as the rank fills old entries. Per gram
+                        // it would give an old, drier dosa half of each nutrient
+                        val reweighed = selectedServing !in catalogServings && selectedServing.hasKnownWeight &&
+                            catalogServings.any { it.hasKnownWeight && it.description.trim().equals(selectedServing.description.trim(), ignoreCase = true) }
+                        val byCalories = catalogNutrition?.takeIf { reweighed && it.calories > 0.0 && rawCalculated.calories > 0.0 }
+                            ?.let { it.scale(rawCalculated.calories / it.calories) }
+                        val current = byCalories ?: calculateNutritionForServingUseCase(food, selectedServing, initialQty)
                         fun fill(logged: Double?, catalog: Double?, recalculated: Double?) =
                             if (missing(logged, catalog)) recalculated else logged
                         rawCalculated.copy(
