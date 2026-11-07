@@ -1,2 +1,7 @@
 # Branded products left out of branded_foods.db, one per row: sourceId (OFF:<barcode>), food (checked), reason.
 sourceId,food,reason
+OFF:8901058015409,Milkybar Milk Chocolate,"63 kcal per 100 g, so the label was filled in per serving: Nestle Milkybar (OFF:8901058897159) in this catalog has 497. No category tag shows it."
+OFF:8901786030507,Everest Pani Puri Masala,"17.25 kcal per 100 g for a dry spice mix, so the label was filled in per serving: Catch Chat Masala in this catalog has 202 and Everest Tandoori Chicken Masala 214."
+OFF:8906055442166,Natural Tattva Himalayan Rock Salt,"3965.1 mg sodium per 100 g, a tenth of salt's: sodium is 39% of salt by weight."
+OFF:8904145911257,Ensure Vanilla Flavour,"6000 mg sodium per 100 g: Abbott Ensure Chocolate Flavour (OFF:8904145912957) in this catalog has 314. It is in Packaged foods, so no drinks ceiling sees it."
+OFF:8906006721753,LION Layina Dates,"666 mg sodium per 100 g: dates have 1 to 2 mg sodium and 656 to 696 mg potassium (USDA SR Legacy, Dates, medjool and deglet noor), so the potassium was typed as sodium."

@@ -38,7 +38,7 @@ FINGERPRINT_FILE = os.path.join(os.path.dirname(TARGET_DB), "built_in_foods.fing
 # Must equal BuiltInDatabaseManager.EXPECTED_DATABASE_VERSION (DatabaseIntegrationTests checks).
 # Installed phones replace their catalog only when it changes, so the build refuses new content
 # under a version already pinned in catalog_versions.csv.
-DATABASE_VERSION = "2.5.0"
+DATABASE_VERSION = "2.6.0"
 # The table layout; BuiltInDatabaseManager.EXPECTED_SCHEMA_VERSION mirrors it.
 SCHEMA_VERSION = "2"
 # Must equal BuiltInDatabaseManager.EXPECTED_DATASET_NAME, or the app refuses the catalog.
@@ -89,7 +89,9 @@ DEFAULT_BOUNDS_G = (1, 1000)
 
 # Plausibility limits per 100 g. A food outside them needs a row in data_exceptions.csv.
 FAT_LIMIT_G = 45.0  # deep-fried dishes counted with the whole pot of frying oil land at 50-90 g
-SODIUM_LIMIT_MG = 2500.0
+# Above every dish, sauce and chutney whose sodium holds (Green chilli sauce, 1,037 mg, is the highest); pickles, spice
+# blends and salted packaged foods above it carry an accepted row. At 2,500 a dish at 2,415 mg passed (BUG-045)
+SODIUM_LIMIT_MG = 1100.0
 MACRO_TOTAL_LIMIT_G = 102.0
 ENERGY_TOLERANCE = 0.25  # share of the larger of stated and macro-derived energy
 ENERGY_TOLERANCE_KCAL = 20.0

@@ -152,20 +152,28 @@ laddu, peda, tikki) are estimates worth weighing on real pieces.
 
 `branded_foods.db` is a second read-only catalog: packaged products sold in India, from Open Food Facts. Open Food Facts
 is under the Open Database Licence (ODbL 1.0), so this database is too, and it is kept apart from `built_in_foods.db`,
-whose INDB data cannot be relicensed. The app opens both and merges their search results.
+whose INDB data cannot be relicensed. The app opens both and merges their search results by how well each food
+matched (a query word's plural counts as the word, since the catalog names many foods in the plural), the main
+catalog first on a tie: "pistachio" finds Pistachios before a pistachio biscuit.
 
 - `import_branded_foods.py --snapshot off_india_top10000.jsonl` reads a snapshot of the 10,000 most scanned products
   sold in India (search.openfoodfacts.org), pinned by sha256 in `branded/sources.csv`, and writes
   `branded/branded_foods.csv`. It keeps a product only when its barcode was registered in India (GS1 890), it names
   a brand and a product, it states energy, protein, carbohydrate and fat per 100 g, its energy is within 20% (and
   20 kcal) of 4 x protein + 4 x carbohydrate without fibre + 2 x fibre + 9 x fat, within its category's usual range
-  and not below what a food of its kind has (a "ghee" at 194 kcal was filled in per serving), sugars and fibre fit in
-  its carbohydrate, and sodium is under 10 g per 100 g. A salted snack's sodium of 0 is taken as not filled in. Pack
+  and not below what a food of its kind has (a "ghee" at 194 kcal, dates at 83 or a cream cake at 84 were filled in
+  per serving), sugars and fibre fit in its carbohydrate, and sodium is under 10 g per 100 g and under its kind's
+  ceiling (`SODIUM_CEILINGS`: a lemon soda at 5,000 mg held salt typed as sodium, or a slip). A product at zero
+  energy, protein, carbohydrate and fat must be water, tea, coffee, a diet drink, salt, vinegar or creatine. A 0 the
+  rest of the label rules out is taken as not filled in and left blank: sodium in a salted snack, biscuit, cheese,
+  milk or egg, saturated fat beside 5 g of fat or more, fibre beside 40 g of starch, sugars in a glucose powder. Pack
   sizes and prices come out of names, names start with the brand, and of one product listed twice (two spellings, or
   one brand's identical label) the most scanned stays.
 - `build_branded.py` builds `branded_foods.db` and `branded_foods.fingerprint` from it, with the main catalog's tables,
   synonyms and checks, except that a label's fat or sodium may be above the main catalog's limits. Its ids never meet
-  the main catalog's. `branded/exclusions.csv` leaves out a product, and its version is pinned in
+  the main catalog's. A slash in a product's name does not split it into names: "MTR Idli/Dosa/Chilly Chutney
+  Powder" is not a food named "Dosa". `branded/exclusions.csv` leaves out a product the importer's rules cannot
+  see, with the reason, and its version is pinned in
   `branded/catalog_versions.csv`: bump `build_branded.DATABASE_VERSION` and
   `BuiltInDatabaseManager.BRANDED_DATABASE_VERSION` together.
 
@@ -195,7 +203,7 @@ These need a row in `data_exceptions.csv` when a food fails them:
 | `energy_vs_macros` | Stated kcal differs from 4 x protein + 4 x carbohydrate without fibre + 2 x fibre + 9 x fat by more than 25% (and 20 kcal) |
 | `macro_total` | Protein, carbs and fat add up to more than 102 g per 100 g |
 | `fat_level` | More than 45 g fat per 100 g |
-| `sodium_level` | More than 2,500 mg sodium per 100 g |
+| `sodium_level` | More than 1,100 mg sodium per 100 g: above every dish, sauce and chutney whose sodium holds (Green chilli sauce, 1,037 mg). Pickles, spice blends and salted packaged foods are `accepted` |
 | `portion_weight` | One unit of INDB's household portion is outside `PORTION_BOUNDS_G` for its unit (1 piece over 200 g, for example) |
 | `cooked_dish_water` | An INDB food named as a griddled or boiled dish (`COOKED_DISH`: dosa, cheela, chilla, uttapam, pesarattu, upma, daliya, poha, dal, rice) has under `COOKED_DISH_MIN_WATER_G` (45 g) of water per 100 g by difference. `energy_vs_macros` cannot see this, since a dish at dry weight still fits its macros. Breads, fried foods and sweets with those words in their names are `accepted` |
 

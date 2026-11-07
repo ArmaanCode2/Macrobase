@@ -236,6 +236,13 @@ class BuildTests(unittest.TestCase):
         self.assertIn("T:1 fails sodium_level", problems)
         self.assertNotIn("T:2 fails portion_weight", problems)  # 2 tall glasses of 450 g each
 
+    # BUG-045: a dish at 2414.77 mg passed the 2,500 mg limit sized for pickles
+    def test_a_dish_saltier_than_any_sauce_needs_an_exception(self):
+        rows = [food("T:1", "Chicken manchurian", sodiumMgPer100g="2414.77"), food("T:2", "Green chilli sauce", sodiumMgPer100g="1037")]
+        problems = problems_of(rows, curation())
+        self.assertIn("T:1 fails sodium_level: 2414.77 mg sodium per 100 g", problems)
+        self.assertNotIn("T:2 fails sodium_level", problems)
+
     def test_impossible_values_and_unparsable_cells_stop_the_build_outright(self):
         rows = [food("T:1", "Ghee", fat=101), food("T:2", "Roti", proteinGPer100g="lots"), food("T:3", " ", id="x")]
         problems = problems_of(rows, curation())
@@ -331,6 +338,14 @@ class BundledCatalogTests(unittest.TestCase):
 
     def test_a_cooked_rice_dish_is_not_at_dry_weight(self):
         self.assertLess(self.kcal("INDB:0117"), 200)
+
+    def test_a_boiled_wheat_dish_is_not_at_dry_weight(self):
+        self.assertLess(self.kcal("INDB:0776"), 150)
+
+    # BUG-045: INDB counts their soy sauce or salted water whole, and no source in the repository measures them
+    def test_dishes_with_their_cooking_salt_counted_whole_state_no_sodium(self):
+        for source_id in ("INDB:0848", "INDB:0856", "INDB:0056"):
+            self.assertIsNone(self.con.execute("SELECT sodium FROM foods WHERE source_id = ?", (source_id,)).fetchone()[0], source_id)
 
     def test_a_dosa_keeps_its_energy_and_gains_its_weight(self):
         grams = self.con.execute(

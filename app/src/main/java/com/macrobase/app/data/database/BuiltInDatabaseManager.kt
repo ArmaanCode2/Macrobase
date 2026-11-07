@@ -36,11 +36,11 @@ class BuiltInDatabaseManager(
 
     companion object {
         private const val TAG = "BuiltInDbManager"
-        const val EXPECTED_DATABASE_VERSION = "2.5.0"
+        const val EXPECTED_DATABASE_VERSION = "2.6.0"
         const val EXPECTED_SCHEMA_VERSION = "2"
         const val EXPECTED_DATASET_NAME = "macrobase_indian_foods_canonical"
         // tools/catalog/build_branded.py DATABASE_VERSION and dataset_name
-        const val BRANDED_DATABASE_VERSION = "1.0.0"
+        const val BRANDED_DATABASE_VERSION = "1.1.0"
         const val BRANDED_DATASET_NAME = "macrobase_branded_foods_off"
 
         /**

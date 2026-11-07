@@ -29,7 +29,7 @@ TARGET_DB = os.path.join(os.path.dirname(catalog.TARGET_DB), "branded_foods.db")
 FINGERPRINT_FILE = os.path.join(os.path.dirname(catalog.TARGET_DB), "branded_foods.fingerprint")
 VERSIONS_CSV = os.path.join(BRANDED_DIR, "catalog_versions.csv")
 # Must equal BuiltInDatabaseManager's branded catalog version and dataset name, or the app refuses the file
-DATABASE_VERSION = "1.0.0"
+DATABASE_VERSION = "1.1.0"
 IDENTITY = {"database_version": DATABASE_VERSION, "dataset_name": "macrobase_branded_foods_off",
             "dataset_version": "2026-10", "supported_providers": "OPEN_FOOD_FACTS"}
 # Checks a label must pass; fat_level and sodium_level are left to the label (ghee, pickles)
@@ -42,17 +42,21 @@ def popularity(scans):
     return 2 if scans >= 5 else 1 if scans >= 2 else 0
 
 
-def curation(rows):
+def curation(rows, exclusions=None):
+    """The curation build() takes for [rows]; [exclusions] in place of branded/exclusions.csv."""
+    if exclusions is None:
+        exclusions = catalog.read_curation("exclusions.csv", BRANDED_DIR)
+    excluded = {e.get("sourceId") for e in exclusions}
     return {
         "sources": catalog.read_curation("sources.csv", BRANDED_DIR),
-        "exclusions": catalog.read_curation("exclusions.csv", BRANDED_DIR),
+        "exclusions": exclusions,
         "overrides": [], "aliases": [], "exceptions": [], "corrections": [], "recipes": [], "recipe_ingredients": [],
         # The main catalog's spellings, so "biskut" finds what "biscuit" does; not every group has a product
         "synonyms": catalog.read_curation("synonyms.csv"), "every_synonym_used": False,
         # "MTR Idli/Dosa/Chilly Chutney Powder" is one product for several dishes, not a powder named "Dosa"
         "split_slash_names": False,
         "common_foods": [{"sourceId": r["sourceId"], "food": r["name"], "priority": str(popularity(int(r["scans"] or 0)))}
-                         for r in rows if popularity(int(r["scans"] or 0))],
+                         for r in rows if popularity(int(r["scans"] or 0)) and r["sourceId"] not in excluded],
     }
 
 

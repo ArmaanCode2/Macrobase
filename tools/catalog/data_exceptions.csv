@@ -45,6 +45,11 @@ INDB:0674,cooked_dish_water,40.5 g,accepted,Fried: its water is the vada class i
 INDB:0675,cooked_dish_water,40.5 g,accepted,Fried: its water is the vada class in corrections.csv.
 INDB:0893,cooked_dish_water,4.1 g,accepted,A fried crisp snack: its water is the sev class in corrections.csv.
 INDB:0452,cooked_dish_water,39.2 g,fix,"Poha looks too dry, but no measured dish in the repository is made this way, so the right water is not known."
-INDB:0776,cooked_dish_water,25.3 g,fix,"A cooked wheat dish near dry weight. The repository holds no measured cooked wheat dish, only raw semolina and bulgur."
-INDB:0777,cooked_dish_water,26.9 g,fix,"A cooked wheat dish near dry weight. The repository holds no measured cooked wheat dish, only raw semolina and bulgur."
+INDB:0777,cooked_dish_water,26.9 g,fix,"A cooked semolina dish near dry weight. The repository holds no measured cooked semolina dish; SR Legacy's cooked bulgur is a coarser wheat that takes up a different amount of water."
 INDB:0426,cooked_dish_water,10.5 g,fix,"Puranpoli looks too dry for a griddled flatbread, but the repository holds no measured one."
+INDB:0984,sodium_level,2488.32 mg,accepted,Salt-preserved pickle.
+INDB:1010,sodium_level,1281.94 mg,accepted,Salt-preserved pickle.
+INDB:1011,sodium_level,2067.33 mg,accepted,Salt-preserved pickle.
+USDA:168106,sodium_level,1745 mg,accepted,"Raw papad is salted dough, measured by USDA."
+USDA:170853,sodium_level,1671 mg,accepted,"Processed cheese is salted, measured by USDA."
+USDA:171177,sodium_level,1855 mg,accepted,"Dry instant noodles with their seasoning, measured by USDA."

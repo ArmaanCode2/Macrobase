@@ -21,24 +21,24 @@ categories (1) ────< foods (N) ────< servings (N)
 
 ### 1.1. Core Tables
 
-Built by `tools/catalog/build_catalog.py` (see `tools/catalog/README.md`). Row counts are for catalog 2.5.0.
+Built by `tools/catalog/build_catalog.py` (see `tools/catalog/README.md`). Row counts are for catalog 2.6.0.
 
 - **`categories`** (15 rows): `id (PK)`, `name (UNIQUE)`, `description`, `display_order`
 - **`foods`** (977 rows: 738 INDB recipes, 190 foods from USDA FoodData Central and UK CoFID 2021, and 49 MacroBase standard recipes worked out from them): `id (PK)`, `uuid (UNIQUE)`, `source_id`, `source_name`, `original_food_id`, `name`, `normalized_name`, `brand`, `category_id (FK)`, `food_type`, `serving_basis`, `calories`, `protein`, `carbohydrates`, `fat`, `fiber`, `sugar`, `saturated_fat`, `trans_fat`, `cholesterol`, `sodium`, `potassium`, `calcium`, `iron`, `magnesium`, `phosphorus`, `zinc`, `vitamin_a_rae`, `vitamin_c`, `vitamin_d_mcg`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate_b9`, `vitamin_b12`, `water`, `is_active`
 - **`nutrients`** (18 rows): `id (PK)`, `code (UNIQUE)`, `name`, `unit`, `tag`, `description`
-- **`food_nutrients`** (17,103 rows): `food_id (PK, FK)`, `nutrient_id (PK, FK)`, `amount`. Carbohydrate is total carbohydrate with fibre for every food that states its fibre
+- **`food_nutrients`** (17,100 rows): `food_id (PK, FK)`, `nutrient_id (PK, FK)`, `amount`. Carbohydrate is total carbohydrate with fibre for every food that states its fibre
 - **`servings`** (1,831 rows): `id (PK)`, `food_id (FK)`, `description`, `unit_type`, `quantity`, `gram_weight`, `is_default`, `sequence`
 - **`food_aliases`** (721 rows): `id (PK)`, `food_id (FK)`, `alias`, `alias_type`
 - **`food_search`** (977 rows): `food_id (PK, FK)`, `terms`, `name_terms`, `names`, `priority`. The words search matches and ranks by; Android's SQLite has no FTS5, so the catalog has no full-text table.
-- **`database_metadata`** (14 rows): `key (PK)`, `value` (`database_version: 2.5.0`, `schema_version: 2`)
+- **`database_metadata`** (14 rows): `key (PK)`, `value` (`database_version: 2.6.0`, `schema_version: 2`)
 
 ### 1.2. Branded Products Database (`branded_foods.db`)
 
-A second read-only asset with the same tables, built by `tools/catalog/build_branded.py` from Open Food Facts: 1,632
+A second read-only asset with the same tables, built by `tools/catalog/build_branded.py` from Open Food Facts: 1,615
 packaged products sold in India (barcodes registered in India, GS1 890), `food_type` `branded`, names starting with their brand. It is a
 separate file because Open Food Facts is under the Open Database Licence (ODbL 1.0), which this database therefore
 carries; the main catalog stays out of it. `database_metadata` has `dataset_name: macrobase_branded_foods_off` and
-`database_version: 1.0.0`. Its food ids never meet the main catalog's or the user ranges, and
+`database_version: 1.1.0`. Its food ids never meet the main catalog's or the user ranges, and
 `LocalFoodDatabaseProvider` searches and looks up both files.
 
 ---
@@ -132,7 +132,7 @@ Managed via **AndroidX Room** in `com.macrobase.app.data.database.UserDatabase`.
 ## 3. Versioning & Migration Strategy
 
 ### 3.1. Built-in Database Versioning
-- **Database Version**: Tracked in `database_metadata` (`database_version: 2.5.0`, `schema_version: 2`; the branded database `1.0.0`). `BuiltInDatabaseManager` replaces an installed catalog whose version differs from `EXPECTED_DATABASE_VERSION`, and the build refuses new content under a version already pinned in `tools/catalog/catalog_versions.csv`.
+- **Database Version**: Tracked in `database_metadata` (`database_version: 2.6.0`, `schema_version: 2`; the branded database `1.1.0`). `BuiltInDatabaseManager` replaces an installed catalog whose version differs from `EXPECTED_DATABASE_VERSION`, and the build refuses new content under a version already pinned in `tools/catalog/catalog_versions.csv`.
 - **Update Mechanism**: Asset database updates are handled atomically via `BuiltInDatabaseManager`. The database is opened strictly in read-only mode (`SQLiteDatabase.OPEN_READONLY`).
 
 ### 3.2. User Database Schema & Migration History

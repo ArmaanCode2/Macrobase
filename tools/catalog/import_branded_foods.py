@@ -67,7 +67,10 @@ ENERGY_TOLERANCE = 0.20  # tighter than the main catalog's 25%: these are label 
 ENERGY_RANGES = {"en:crisps": (400, 620), "en:potato-crisps": (400, 620), "en:biscuits": (350, 580),
                  "en:chocolates": (380, 620), "en:instant-noodles": (330, 520), "en:sodas": (0, 70),
                  "en:carbonated-drinks": (0, 70), "en:milks": (25, 120), "en:vegetable-oils": (800, 900),
-                 "en:peanut-butters": (480, 700), "en:breakfast-cereals": (300, 480)}
+                 "en:peanut-butters": (480, 700), "en:breakfast-cereals": (300, 480),
+                 # Dates at 83 kcal and a cream cake at 84 agree with their own energy, so only these show them per serving
+                 "en:dates": (200, 400), "en:cakes": (250, 550), "en:candies": (150, 600), "en:gummies": (150, 450),
+                 "en:spices": (150, 650)}
 # Pack sizes and prices typed into names: "750ml", "100 g", "20rs", "Rs. 10"
 PACK_IN_NAME = re.compile(r"\b\d+(?:\.\d+)?\s*(?:ml|l|ltr|litre|liter|g|gm|gms|gram|grams|kg|rs|/-)(?![a-z])\.?|\brs\.?\s*\d+\b", re.I)
 TRAILING_PRICE = re.compile(r"\s+\d{1,3}$")  # "Lays Salted Chips 30": the price
@@ -88,6 +91,25 @@ SALTY = re.compile(r"\b(chips|wafers|crisps|namkeen|bhujia|mixture|sev|chivda|ch
                    r"cookies?|crackers?|noodles?|pickle|achar|sauce|ketchup|bread|rusks?|papad|masala|salted|soup|pav|bun)\b")
 HAS_PROTEIN = re.compile(r"\b(noodles?|biscuits?|cookies?|chips|bhujia|namkeen|bread|atta|flour|dal|oats|muesli|pasta|paneer|"
                          r"milk|cheese|nuts?|peanuts?|makhana)\b")
+# Categories whose foods all have some sodium, for products whose names SALTY misses ("Hide & Seek", "Nissin Geki")
+SALTY_TAGS = {"en:biscuits", "en:biscuits-and-crackers", "en:cakes", "en:instant-noodles", "en:salty-snacks", "en:crisps",
+              "en:chips-and-fries", "en:breads", "en:cheeses", "en:milks", "en:yogurts", "en:eggs", "en:soups", "en:pickles"}
+# A glucose powder at 0 g sugars left its sugars blank
+GLUCOSE = re.compile(r"\b(glucose|glucon|dextrose)\b")
+# The only foods with no energy, protein, carbohydrate or fat; any other product at all zeros was not filled in
+ZERO_ENERGY = re.compile(r"\b(water|tea|coffee|diet|zero|salt|vinegar)\b")
+ZERO_ENERGY_TAGS = {"en:waters", "en:teas", "en:coffees", "en:instant-coffees", "en:diet-beverages", "en:diet-sodas",
+                    "en:salts", "en:vinegars", "en:creatine"}
+# The most sodium per 100 g these foods have, in mg; above it the label holds salt typed as sodium (2.54 times as
+# much) or a slip, such as a lemon soda at 5000 mg. Each is far above its kind's highest real label in the snapshot.
+# Pickles, sauces, spice mixes and soup powders keep the 10 g cap.
+SODIUM_CEILINGS = [
+    (None, {"en:sodas", "en:carbonated-drinks"}, 500),
+    (None, {"en:vegetable-oils"}, 100),
+    (None, {"en:chocolates", "en:candies", "en:confectioneries"}, 1500),
+    (re.compile(r"\b(flour|syrup)\b"), set(), 1000),
+    (re.compile(r"\b(noodles?|namkeen|bhujia|mixture|sev|chivda)\b"), set(), 3000),
+]
 MANUFACTURER = re.compile(r"\b(?:pvt|ltd|limited|private|company|corporation|industries)\b", re.I)
 
 
@@ -167,8 +189,24 @@ def product_row(p, header):
         return None, "too little energy for what it is: the label was filled in per serving"
     if protein == 0 and HAS_PROTEIN.search(named):
         return None, "no protein, which a food made of flour, pulses, milk or nuts has"
-    if values["sodiumMgPer100g"] == 0 and SALTY.search(named):
-        values["sodiumMgPer100g"] = None  # not filled in: a salted snack has some
+    if kcal == 0 and protein + carbs + fat == 0 and not (ZERO_ENERGY.search(named) or tags & ZERO_ENERGY_TAGS):
+        return None, "no energy or nutrients, which only water, tea, coffee, diet drinks, salt and vinegar have"
+    sodium = values["sodiumMgPer100g"] or 0
+    if any(sodium > most and ((pattern and pattern.search(named)) or tags & kinds) for pattern, kinds, most in SODIUM_CEILINGS):
+        return None, "more sodium than a food of its kind has: salt typed as sodium, or a slip"
+    # A 0 the rest of the label rules out was not filled in, so it is not stated (AGENTS.md 2.4). A value is 0 as the
+    # CSV stores it: a mixed nuts' saturated fat of 0.0000058 g is one
+    zero = {c for c, v in values.items() if v is not None and catalog.format_number(v) == "0"}
+    glucose = GLUCOSE.search(named) or "en:glucose" in tags
+    if "sodiumMgPer100g" in zero and (SALTY.search(named) or tags & SALTY_TAGS):
+        values["sodiumMgPer100g"] = None  # a salted snack, a biscuit, milk or an egg has some
+    if "saturatedFatGPer100g" in zero and fat >= 5:
+        values["saturatedFatGPer100g"] = None  # every fat is at least 6% saturated
+    # 40 g of starch (flour, rice, potato) comes with fibre; sugars and glucose have none
+    if "fiberGPer100g" in zero and carbs - (sugars or 0) >= 40 and not glucose:
+        values["fiberGPer100g"] = None
+    if "sugarsGPer100g" in zero and glucose:
+        values["sugarsGPer100g"] = None
     code = str(p.get("code", "")).strip()
     if not code.startswith("890") or not code.isdigit():
         return None, "barcode not registered in India (GS1 India's 890)"

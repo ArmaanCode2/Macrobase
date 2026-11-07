@@ -84,7 +84,7 @@ class DatabaseIntegrationTests {
         assertEquals(BuiltInDatabaseManager.EXPECTED_SCHEMA_VERSION, metadata["schema_version"])
         assertEquals("977", metadata["total_foods"])
         assertEquals("1831", metadata["total_servings"])
-        assertEquals("17103", metadata["total_food_nutrients"])
+        assertEquals("17100", metadata["total_food_nutrients"])  // 2.6.0 clears three INDB dishes' sodium (BUG-045)
     }
 
     @Test
