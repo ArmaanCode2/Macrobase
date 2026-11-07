@@ -41,6 +41,7 @@ import com.macrobase.app.feature.detail.FoodDetailViewModel
 import com.macrobase.app.feature.search.SearchViewModel
 import com.macrobase.app.feature.water.WaterViewModel
 import com.macrobase.app.feature.weight.WeightViewModel
+import com.macrobase.app.feature.weight.weightButtonLabel
 import com.macrobase.app.testutil.MutableTestClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -374,6 +375,19 @@ class TrackerDayRolloverTests {
         assertEquals(saturday, state.toDate)
     }
 
+    // The log button names this day, so it has to be the screen's today, not the device default
+    @Test
+    fun weightKnowsTodayByItsOwnClock() = runBlocking {
+        val vm = weightScreen()
+        vm.onSelectDate(friday)
+        assertEquals(friday, withTimeout(5_000) { vm.uiState.first { it.selectedDate == friday } }.today)
+
+        overnight()
+        vm.refreshDay()
+
+        assertEquals(saturday, withTimeout(5_000) { vm.uiState.first { it.selectedDate == saturday } }.today)
+    }
+
     @Test
     fun aPastDayPickedOnWeightStaysWhileItsRangeStillMoves() = runBlocking {
         val vm = weightScreen()
@@ -396,5 +410,28 @@ class TrackerDayRolloverTests {
         // Re-applied after a process restart or rotation, the route's day would undo the rollover
         assertFalse(graph.contains("androidx.compose.runtime.LaunchedEffect(dateEpochDayArg)"))
         assertEquals(2, Regex("""ApplyRouteDateOnce\(dateEpochDayArg,""").findAll(graph).count())
+    }
+}
+
+/** BUG-028: the button said "Edit Today" on every day with an entry, and saving replaced that day's. */
+class WeightButtonLabelTests {
+
+    private val today = LocalDate.of(2026, 10, 31)
+
+    @Test
+    fun onlyTodayIsCalledToday() {
+        assertEquals("Edit Today", weightButtonLabel(hasEntry = true, date = today, today = today))
+    }
+
+    @Test
+    fun aPastDayIsNamed() {
+        assertEquals("Edit Yesterday", weightButtonLabel(hasEntry = true, date = today.minusDays(1), today = today))
+        assertEquals("Edit Wednesday, 10/28", weightButtonLabel(hasEntry = true, date = today.minusDays(3), today = today))
+    }
+
+    @Test
+    fun aDayWithNoEntryIsLogged() {
+        assertEquals("Log Weight", weightButtonLabel(hasEntry = false, date = today, today = today))
+        assertEquals("Log Weight", weightButtonLabel(hasEntry = false, date = today.minusDays(3), today = today))
     }
 }

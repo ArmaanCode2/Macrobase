@@ -88,6 +88,7 @@ import com.macrobase.app.domain.usecase.AddWeightEntryUseCase
 import com.macrobase.app.domain.usecase.DeleteWeightEntryUseCase
 import com.macrobase.app.domain.usecase.GetWeightForDateUseCase
 import com.macrobase.app.domain.usecase.GetWeightHistoryUseCase
+import com.macrobase.app.feature.basket.basketDateLabel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -147,7 +148,8 @@ data class WeightUiState(
     val unitSystem: UnitSystem = UnitSystem.METRIC,
     val targetWeightKg: Double? = null,
     val selectedDateWeight: WeightEntry? = null,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val today: LocalDate = LocalDate.now()
 ) {
     val hasSufficientDataForGraph: Boolean
         get() = entries.size >= 2
@@ -183,7 +185,7 @@ class WeightViewModel(
         day.today
     ) { selDate, interval, customFrom, customTo, today ->
         val (from, to) = interval.dateRange(today, customFrom, customTo)
-        DateRangeParams(selDate, interval, from, to)
+        DateRangeParams(selDate, interval, from, to, today)
     }.flatMapLatest { params ->
         combine(
             getWeightHistoryUseCase(params.fromDate, params.toDate),
@@ -203,7 +205,8 @@ class WeightViewModel(
                 unitSystem = prefs.unitSystem,
                 targetWeightKg = prefs.targetWeightKg,
                 selectedDateWeight = dateEntry,
-                isLoading = false
+                isLoading = false,
+                today = params.today
             )
         }
     }.stateIn(
@@ -216,7 +219,8 @@ class WeightViewModel(
         val selectedDate: LocalDate,
         val interval: WeightTimeInterval,
         val fromDate: LocalDate,
-        val toDate: LocalDate
+        val toDate: LocalDate,
+        val today: LocalDate
     )
 
     private fun calculateMetrics(entries: List<WeightEntry>, targetWeightKg: Double?): WeightMetrics {
@@ -288,6 +292,10 @@ class WeightViewModel(
  * An interval's name for its chip, in sentence case ("1 Year" shows as "1 year"). The enum's
  * label stays as it is.
  */
+/** Saving replaces the entry of the day on screen, so the button names that day (BUG-028). */
+internal fun weightButtonLabel(hasEntry: Boolean, date: LocalDate, today: LocalDate): String =
+    if (hasEntry) "Edit ${basketDateLabel(date, today)}" else "Log Weight"
+
 internal fun weightIntervalChipLabel(interval: WeightTimeInterval): String =
     interval.label.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) }
 
@@ -453,7 +461,7 @@ fun WeightScreen(
         // 6. Log or edit the selected day
         val hasSelectedDateWeight = uiState.selectedDateWeight != null
         MbButton(
-            text = if (hasSelectedDateWeight) "Edit Today" else "Log Weight",
+            text = weightButtonLabel(hasSelectedDateWeight, uiState.selectedDate, uiState.today),
             // Midnight fires nothing on an open screen, so the dialog opens on the day it will save to
             onClick = {
                 viewModel.refreshDay()

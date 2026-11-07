@@ -8,10 +8,12 @@ import com.macrobase.app.feature.scanner.WordLevelOcr.lines
 import com.macrobase.app.feature.scanner.WordLevelOcr.ocr
 import com.macrobase.app.feature.scanner.WordLevelOcr.table
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * The audit's scanner findings, on OCR shaped as ML Kit reports it (see [WordLevelOcr]). Each test
@@ -489,5 +491,18 @@ class AuditScannerTests {
         val draft = per100("Protein 5 ml 12 g")
 
         assertValue(12.0, draft.protein?.value, "protein")
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // BUG-041: nothing compares the OCR passes, so a tick on a clean row claimed a check no one ran
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun aRowWithNothingToReviewClaimsNoCheck() {
+        val path = "src/main/java/com/macrobase/app/feature/scanner/NutritionLabelScannerScreen.kt"
+        val screen = listOf(File(path), File("app/$path")).first { it.isFile }.readText()
+
+        assertFalse(screen.contains("Icons.Default.CheckCircle"))
+        assertTrue("a row that needs review still says so", screen.contains("text = \"Check\""))
     }
 }

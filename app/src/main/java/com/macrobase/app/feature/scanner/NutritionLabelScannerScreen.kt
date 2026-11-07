@@ -55,7 +55,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.TextButton
@@ -1035,6 +1034,8 @@ fun NutritionLabelReviewModal(
                                             color = if (parsed != null) AppColors.TextPrimary else AppColors.TextDisabled
                                         )
 
+                                        // A clean row shows nothing: no check compares the OCR passes,
+                                        // so a tick would claim one (BUG-041)
                                         if (parsed != null) {
                                             if (parsed.needsReview) {
                                                 Surface(
@@ -1059,13 +1060,6 @@ fun NutritionLabelReviewModal(
                                                         )
                                                     }
                                                 }
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Default.CheckCircle,
-                                                    contentDescription = null,
-                                                    tint = AppColors.Success,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
                                             }
                                         }
 

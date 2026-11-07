@@ -6,9 +6,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import com.macrobase.app.domain.repository.rank.RankRepository
 import androidx.lifecycle.lifecycleScope
+import android.graphics.Color
 import android.util.Log
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.navigation.compose.rememberNavController
@@ -45,7 +47,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Dark only: by default the bars follow the phone's theme, so Light mode drew dark icons on
+        // the black app and a pale bar under three-button navigation (BUG-021)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+        )
 
         handleWidgetIntent(intent, isRecreated = savedInstanceState != null)
 

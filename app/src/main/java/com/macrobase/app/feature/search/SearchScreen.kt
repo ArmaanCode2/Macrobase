@@ -72,6 +72,7 @@ import com.macrobase.app.domain.model.state.FoodSearchUiState
 import com.macrobase.app.domain.repository.FoodRepository
 import com.macrobase.app.domain.usecase.SearchFoodsUseCase
 import com.macrobase.app.feature.dashboard.mealForTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,6 +118,7 @@ class SearchViewModel(
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             delay(DatabaseConfig.SEARCH_DEBOUNCE_MILLIS) // 250ms debounce per UI spec
 
+            // A newer keystroke cancels this query, which is no failed search (BUG-024)
             try {
                 val results = searchFoodsUseCase(trimmed, limit = 50)
                 _uiState.update {
@@ -126,12 +128,14 @@ class SearchViewModel(
                         errorMessage = null
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         searchResults = emptyList(),
                         isLoading = false,
-                        errorMessage = e.message ?: "Search failed"
+                        errorMessage = "Failed to perform search."
                     )
                 }
             }
@@ -153,6 +157,8 @@ class SearchViewModel(
                         )
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update { it.copy(isInitialLoading = false) }
             }
@@ -162,6 +168,8 @@ class SearchViewModel(
             try {
                 val recents = foodRepository.getRecentFoods(limit = 10)
                 _uiState.update { it.copy(recentFoods = recents) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (ignored: Exception) {}
         }
     }
