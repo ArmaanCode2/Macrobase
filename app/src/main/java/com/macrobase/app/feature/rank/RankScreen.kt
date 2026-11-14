@@ -141,6 +141,11 @@ fun RankScreen(
 
             LifestyleScoreSection(profile)
 
+            // This week against last week, with a tip or two for the lowest parts
+            uiState.weeklyReview?.let { review ->
+                WeeklyReviewCard(review = review, modifier = Modifier.padding(top = AppSpacing.sectionGap))
+            }
+
             RecentHistoryCard(
                 history = profile.recentHistory,
                 calorieZone = profile.calorieZone,

@@ -97,6 +97,7 @@ import com.macrobase.app.domain.usecase.rank.GetRankProfileUseCase
 import com.macrobase.app.domain.usecase.rank.CalculateLifestyleScoreUseCase
 import com.macrobase.app.domain.usecase.rank.DismissRankRulesNoticeUseCase
 import com.macrobase.app.domain.usecase.rank.DismissRankSeasonNoticeUseCase
+import com.macrobase.app.domain.usecase.rank.GetWeeklyReviewUseCase
 import com.macrobase.app.feature.rank.RankViewModel
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.factoryOf
@@ -264,6 +265,7 @@ val useCaseModule = module {
     singleOf(::GetRankProfileUseCase)
     singleOf(::DismissRankRulesNoticeUseCase)
     singleOf(::DismissRankSeasonNoticeUseCase)
+    singleOf(::GetWeeklyReviewUseCase)
     singleOf(::CalculateLifestyleScoreUseCase)
 }
 

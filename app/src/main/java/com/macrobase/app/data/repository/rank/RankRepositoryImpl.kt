@@ -303,6 +303,9 @@ class RankRepositoryImpl(
         preferencesRepository?.setSeenRankRulesVersion(RankScoringConfig.RULES_VERSION)
     }
 
+    override suspend fun withScoredNutrients(foods: List<LoggedFoodNutrients>): List<LoggedFoodNutrients> =
+        withCatalogNutrients(foods)
+
     override suspend fun dismissSeasonNotice(seasonStart: LocalDate) {
         preferencesRepository?.setSeenRankSeason(seasonStart.toEpochDay())
     }

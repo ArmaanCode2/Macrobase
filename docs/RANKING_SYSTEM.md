@@ -137,7 +137,7 @@ the RR bar and on the days that were held.
   best, when that season had one; dismissing it stores the season's start
   (`seen_rank_season_start`), so it returns only after the next reset. It is not in backups, so a
   restore on another phone shows it once more.
-- **Rank History (Statistics).** A fifth Statistics tab draws the rating after each day that ended
+- **Rank History (Statistics).** The last Statistics view, after Patterns, draws the rating after each day that ended
   (`RankProfile.ratingHistory`, every season, each replayed on its own) for 30 days, 90 days, this
   season or all. The height covers only the ranks the line reaches, with a line where each rank
   starts; a dashed "Reset" line marks the day a new season started; tapping the line names the
@@ -171,7 +171,45 @@ the RR bar and on the days that were held.
 
 ---
 
-## 5. Sources
+## 5. Weekly review
+
+The "This week" card on the Rank screen, between the score card and the history, reads these rules
+and changes nothing in them (`RULES_VERSION` stays 4).
+
+- **Weeks.** This week is the 7 days up to yesterday, last week the 7 before. Only ended days of the
+  rank history count: today never does, nor do days before the current season or before the first
+  day with a saved goal.
+- **Numbers.** The RR the week gave, missed days included; the logged days out of the days the rank
+  counted (7, fewer when the season began during the week); and, over the logged days, the average day score, calorie credit, protein, food quality and balance, each with
+  its change from last week. A week with nothing logged shows "-" for the averages.
+- **Early season.** When last week has fewer than 3 logged days, the card shows this week alone and
+  says when comparisons start.
+- **Tips.** At most two, for the lowest parts of this week under 70. Logging is a part too, scored
+  by the share of the week's counted days that were logged. Each tip quotes the user's number and
+  the rule's target:
+  - calories: the logged days outside the full-credit zone, with the zone in kcal. Each day is judged
+    against the zone of its own goal, so when the zone changed during the week no range is quoted;
+  - protein: grams a day against the goal;
+  - food quality: fiber per 1,000 kcal, saturated fat and sugar as a share of calories, sodium in mg
+    a day, each judged only when the foods stating it cover at least half the week's calories. The
+    tip names the judged measure that lost the most points on those foods, scored as section 2.2
+    scores a day. Only when no judged measure misses its target does it name one with too little
+    data, saying there isn't enough data to judge it;
+  - balance: carbs or fat, whichever is further from its goal, in percent;
+  - logging: the missed days, and that a missed day costs 20 RR.
+  The parts are scored day by day, so a week can score low while its average meets the target
+  (protein at or above the goal, carbs and fat within 20%, every judged quality measure at full
+  marks). That tip is left out and the next part gets the place.
+- **Data.** The tips read this week's foods from the diary with the nutrients the score used: an
+  entry's unstated nutrient is filled from the built-in food it logged, as for the score, and
+  amounts are known-only as in section 2.2. Each day's goal comes from the goal history. The week
+  ends the day before the rank's own today, so just after midnight it still matches the profile
+  on screen. If the review cannot be worked out, the card is left out and the screen stays.
+- The thresholds are in `WeeklyReviewConfig`; the targets come from `RankScoringConfig`.
+
+---
+
+## 6. Sources
 
 - Helms, Aragon & Fitschen (2014), *Evidence-based recommendations for natural bodybuilding contest
   preparation*, JISSN 11:20: weight loss of about 0.5 – 1% of body weight a week.

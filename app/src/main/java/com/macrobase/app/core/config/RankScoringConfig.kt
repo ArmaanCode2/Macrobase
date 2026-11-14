@@ -61,6 +61,18 @@ object RankScoringConfig {
     /** The score a measure gets when the day's foods do not state it. */
     const val UNKNOWN_SCORE = 50.0
 
+    // Full marks of each food quality measure (see qualityScore), and of the carb and fat balance
+    /** Fiber per 1,000 kcal at or above this, in grams. */
+    const val FIBER_FULL_MARKS_PER_1000_KCAL = 14.0
+    /** Saturated fat at or below this share of calories, in percent. */
+    const val SATURATED_FAT_FULL_MARKS_PERCENT = 10.0
+    /** Sodium a day at or below this, in mg. */
+    const val SODIUM_FULL_MARKS_MG = 2300.0
+    /** Total sugar at or below this share of calories, in percent. */
+    const val SUGAR_FULL_MARKS_PERCENT = 20.0
+    /** Carbs and fat each within this share of their goal. */
+    const val BALANCE_FULL_MARKS_WITHIN = 0.20
+
     /**
      * The day score each rating expects, rising smoothly through these points (rating to score),
      * so a steady day score settles inside a tier instead of flipping between two each day.
@@ -132,7 +144,7 @@ object RankScoringConfig {
     /** Carbs and fat each against their goal: full marks within 20%, none at 50% off. */
     fun balanceScore(carbsGrams: Double, carbTargetGrams: Double, fatGrams: Double, fatTargetGrams: Double): Double {
         fun side(actual: Double, target: Double) =
-            if (target <= 0.0) UNKNOWN_SCORE else ramp(abs(actual / target - 1.0), 0.2, 0.5, 100.0, 0.0)
+            if (target <= 0.0) UNKNOWN_SCORE else ramp(abs(actual / target - 1.0), BALANCE_FULL_MARKS_WITHIN, 0.5, 100.0, 0.0)
         return (side(carbsGrams, carbTargetGrams) + side(fatGrams, fatTargetGrams)) / 2.0
     }
 
@@ -149,16 +161,31 @@ object RankScoringConfig {
      */
     fun qualityScore(day: RankDayNutrients): Double {
         if (day.calories <= 0.0) return UNKNOWN_SCORE
-        val fiber = measure(day, day.fiber) { known -> ramp(known.amount / known.calories * 1000.0, 4.0, 14.0, 0.0, 100.0) }
-        val saturatedFat = measure(day, day.saturatedFat) { known ->
-            val percent = known.amount * 9.0 / known.calories * 100.0
-            if (percent <= 15.0) ramp(percent, 10.0, 15.0, 100.0, 40.0) else ramp(percent, 15.0, 20.0, 40.0, 0.0)
-        }
+        val fiber = measure(day, day.fiber) { known -> fiberScore(known.amount / known.calories * 1000.0) }
+        val saturatedFat = measure(day, day.saturatedFat) { known -> saturatedFatScore(known.amount * 9.0 / known.calories * 100.0) }
         // Sodium has a daily limit, so the known foods' sodium is scaled up to the whole day
-        val sodium = measure(day, day.sodium) { known -> ramp(known.amount / known.calories * day.calories, 2300.0, 4000.0, 100.0, 0.0) }
-        val sugar = measure(day, day.sugar) { known -> ramp(known.amount * 4.0 / known.calories * 100.0, 20.0, 35.0, 100.0, 0.0) }
+        val sodium = measure(day, day.sodium) { known -> sodiumScore(known.amount / known.calories * day.calories) }
+        val sugar = measure(day, day.sugar) { known -> sugarScore(known.amount * 4.0 / known.calories * 100.0) }
         return fiber * FIBER_SHARE + saturatedFat * SATURATED_FAT_SHARE + sodium * SODIUM_SHARE + sugar * SUGAR_SHARE
     }
+
+    /** Fiber, 0-100, from grams per 1,000 kcal: none at 4 g or less. */
+    fun fiberScore(gramsPer1000Kcal: Double): Double =
+        ramp(gramsPer1000Kcal, 4.0, FIBER_FULL_MARKS_PER_1000_KCAL, 0.0, 100.0)
+
+    /** Saturated fat, 0-100, from its share of calories in percent: 40 at 15%, none at 20%. */
+    fun saturatedFatScore(percentOfCalories: Double): Double =
+        if (percentOfCalories <= 15.0) {
+            ramp(percentOfCalories, SATURATED_FAT_FULL_MARKS_PERCENT, 15.0, 100.0, 40.0)
+        } else {
+            ramp(percentOfCalories, 15.0, 20.0, 40.0, 0.0)
+        }
+
+    /** Sodium, 0-100, from mg a day: none at 4,000 mg or more. */
+    fun sodiumScore(dailyMg: Double): Double = ramp(dailyMg, SODIUM_FULL_MARKS_MG, 4000.0, 100.0, 0.0)
+
+    /** Total sugar, 0-100, from its share of calories in percent: none at 35% or more. */
+    fun sugarScore(percentOfCalories: Double): Double = ramp(percentOfCalories, SUGAR_FULL_MARKS_PERCENT, 35.0, 100.0, 0.0)
 
     private inline fun measure(
         day: RankDayNutrients,
