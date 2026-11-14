@@ -81,7 +81,7 @@ Material 3 components (dialogs, date pickers, text fields) get a Jura typography
   - A full-width pill bar, 60 dp tall, 16 dp from the screen edges and the bottom inset, with the tabs Home, Foods, Stats, Rank and Profile.
   - The active tab is 98 dp wide and shows its label. A capsule slides behind it.
   - The round "+" (60 dp) sits above the bar's right end and opens the Add sheet.
-  - On screens with several views (Foods: Custom foods / Recipes; Stats: Calendar, Weight, Consistency, Averages, Rank history), a pill view switch fills the rest of the "+" row. With more than two views it scrolls and snaps the active view to the centre.
+  - On screens with several views (Foods: Custom foods / Recipes; Stats: Calendar, Weight, Consistency, Averages, Patterns, Rank history), a pill view switch fills the rest of the "+" row. With more than two views it scrolls and snaps the active view to the centre.
   - A fade behind the dock runs from transparent to the canvas black.
 - **Headers** (`MbHeader`): a back arrow, a centred 18 sp title and an optional action. They stay pinned and get the `HeaderBand` once content scrolls under them. Home, Search, Rank, Food Detail and the scanner draw their own tops.
 - **Sheets** (`MbSheet`): `#0A0D0B`, 28 dp top corners, an `Edge2` top line, a grab handle and a scrim. The title is at the top left with a close button; actions sit in a footer row.

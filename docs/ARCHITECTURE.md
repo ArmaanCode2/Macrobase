@@ -247,6 +247,7 @@ userQuantity REAL NOT NULL
   1. **Weight Stats**: Reuses the Phase 11 `WeightLineGraph` and 3-column metric strip (START, CURRENT, CHANGE) over configurable ranges.
   2. **Nutrition Consistency**: GitHub-style Weekly Matrix Heatmap (Sun–Sat rows $\times$ week columns) with interactive day inspection and Consistency Score.
   3. **Macro Averages**: Daily intake averages ($C, P, C, F$) and Target vs Actual split ratios ($P\% \times 4, C\% \times 4, F\% \times 9$).
+  4. **Patterns**: Up to four plain-language findings from the 28 days up to yesterday (lowest-protein meal, highest-calorie weekday, sugar peak weekday, sodium peak meal), found by the pure `findPatterns` (`domain/model/Patterns.kt`) with every threshold in `PatternsConfig`. It needs 10 counted days. Sugar and sodium are judged only on the foods that state them, and only where those cover 60% of the calories. The Averages switch "Finished days" makes it count finished days only.
 
 ### 6.2. High-Performance Range Queries
 - Rather than querying every meal item, `DiaryDao.observeDateNutritionSummaries(startEpochDay, endEpochDay)` executes a bounded aggregation query grouped by `dateEpochDay`:

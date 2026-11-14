@@ -21,6 +21,7 @@ import com.macrobase.app.domain.repository.DailyMacroAggregation
 import com.macrobase.app.domain.repository.DiaryRepository
 import com.macrobase.app.domain.repository.GoalsRepository
 import com.macrobase.app.domain.repository.LoggedFoodNutrients
+import com.macrobase.app.domain.repository.LoggedMealNutrients
 import com.macrobase.app.domain.repository.PreferencesRepository
 import com.macrobase.app.feature.widget.MacroBaseWidgetProvider
 import android.content.Context
@@ -227,6 +228,21 @@ class DiaryRepositoryImpl(
                     fiberGrams = it.loggedFiber,
                     sugarGrams = it.loggedSugar,
                     saturatedFatGrams = it.loggedSaturatedFat,
+                    sodiumMg = it.loggedSodium
+                )
+            }
+        }
+    }
+
+    override fun observeMealNutrients(startDate: LocalDate, endDate: LocalDate): Flow<List<LoggedMealNutrients>> {
+        return userDatabase.diaryDao().observeMealNutrients(startDate.toEpochDay(), endDate.toEpochDay()).map { rows ->
+            rows.map {
+                LoggedMealNutrients(
+                    date = LocalDate.ofEpochDay(it.dateEpochDay),
+                    mealType = MealType.fromString(it.mealType),
+                    calories = it.loggedCalories,
+                    proteinGrams = it.loggedProtein,
+                    sugarGrams = it.loggedSugar,
                     sodiumMg = it.loggedSodium
                 )
             }

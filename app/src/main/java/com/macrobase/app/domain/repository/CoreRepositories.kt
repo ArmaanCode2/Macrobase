@@ -4,6 +4,7 @@ import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.Goal
 import com.macrobase.app.domain.model.GoalBackupDto
 import com.macrobase.app.domain.model.MacroAveragesStatistics
+import com.macrobase.app.domain.model.PatternsReport
 import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.RecipeIngredient
 import com.macrobase.app.domain.model.UserPreferences
@@ -201,6 +202,12 @@ interface StatisticsRepository {
      * marked finished is left out, and so is a finished day with no food.
      */
     fun observeFinishedDayAverages(startDate: LocalDate, endDate: LocalDate, finishedDays: Set<LocalDate>): Flow<MacroAveragesStatistics>
+
+    /**
+     * The patterns of the days from [startDate] to [endDate] (domain/model/Patterns.kt). With
+     * [finishedDays], only those days count; null counts every day with food.
+     */
+    fun observePatterns(startDate: LocalDate, endDate: LocalDate, finishedDays: Set<LocalDate>?): Flow<PatternsReport>
 
     fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics>
     suspend fun getWeightStatistics(startDate: LocalDate, endDate: LocalDate): WeightStatistics

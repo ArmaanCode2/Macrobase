@@ -13,6 +13,8 @@ import com.macrobase.app.domain.model.HeatmapCellData
 import com.macrobase.app.domain.model.HeatmapWeek
 import com.macrobase.app.domain.model.MacroAveragesStatistics
 import com.macrobase.app.domain.model.Nutrition
+import com.macrobase.app.domain.model.PatternsReport
+import com.macrobase.app.domain.model.findPatterns
 import com.macrobase.app.domain.model.Recipe
 import com.macrobase.app.domain.model.RecipeIngredient
 import com.macrobase.app.domain.model.UserPreferences
@@ -447,6 +449,13 @@ class StatisticsRepositoryImpl(
     override suspend fun getMacroAverages(startDate: LocalDate, endDate: LocalDate): com.macrobase.app.domain.model.MacroAveragesStatistics {
         return observeMacroAverages(startDate, endDate).first()
     }
+
+    /** The patterns of a range, worked out on the calculation lane. */
+    override fun observePatterns(startDate: LocalDate, endDate: LocalDate, finishedDays: Set<LocalDate>?): Flow<PatternsReport> =
+        diaryRepository.observeMealNutrients(startDate, endDate)
+            .settledOnLane(calculationDispatcher)
+            .map { foods -> findPatterns(foods, finishedDays) }
+            .onLane(calculationDispatcher)
 
     private fun daysBetween(startDate: LocalDate, endDate: LocalDate): List<LocalDate> =
         generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()

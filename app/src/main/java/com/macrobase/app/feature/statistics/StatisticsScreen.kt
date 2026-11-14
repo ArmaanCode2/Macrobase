@@ -76,6 +76,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.macrobase.app.core.config.CalendarPerformanceConfig
+import com.macrobase.app.core.config.PatternsConfig
 import com.macrobase.app.core.designsystem.AppColors
 import com.macrobase.app.core.designsystem.AppShapes
 import com.macrobase.app.core.designsystem.AppSpacing
@@ -289,11 +290,14 @@ class StatisticsViewModel(
         if (!p.finishedOnly) {
             getStatisticsUseCase.observeMacroAverages(p.mFrom, p.mTo)
         } else {
-            preferencesRepository.observeFinishedDays()
-                .map { days -> days.filterTo(HashSet()) { !it.isBefore(p.mFrom) && !it.isAfter(p.mTo) } }
-                .distinctUntilChanged()
-                .flatMapLatest { days -> getStatisticsUseCase.observeFinishedDayAverages(p.mFrom, p.mTo, days) }
+            finishedDaysIn(p.mFrom, p.mTo).flatMapLatest { days -> getStatisticsUseCase.observeFinishedDayAverages(p.mFrom, p.mTo, days) }
         }
+
+    /** The finished days from [from] to [to]; a mark outside them does not change this. */
+    private fun finishedDaysIn(from: LocalDate, to: LocalDate): Flow<Set<LocalDate>> =
+        preferencesRepository.observeFinishedDays()
+            .map { days -> days.filterTo(HashSet()) { !it.isBefore(from) && !it.isAfter(to) } }
+            .distinctUntilChanged()
 
     private fun calculateWeightDateRange(
         interval: WeightTimeInterval,
@@ -348,14 +352,34 @@ class StatisticsViewModel(
         _macroInterval.value = interval
     }
 
-    /** Saves the Averages switch: true counts finished days only. */
+    /**
+     * The Patterns view: the 28 days up to yesterday, every logged day or the finished ones as the
+     * Averages switch says. Worked out only while the view collects this.
+     */
+    val patterns: StateFlow<PatternsUiState> = preferencesRepository.observeStatsFinishedDaysOnly()
+        .distinctUntilChanged()
+        .flatMapLatest { finishedOnly ->
+            val to = LocalDate.now(clock).minusDays(1)
+            val from = windowStart(to, PatternsConfig.WINDOW_DAYS)
+            val countedDays: Flow<Set<LocalDate>?> = if (finishedOnly) finishedDaysIn(from, to) else flowOf(null)
+            countedDays
+                .flatMapLatest { days -> getStatisticsUseCase.observePatterns(from, to, days) }
+                .map { report -> PatternsUiState(finishedDaysOnly = finishedOnly, report = report, isLoading = false) }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = PatternsUiState()
+        )
+
+    /** Saves the Logged days / Finished days switch of Averages and Patterns: true counts finished days only. */
     fun onSetFinishedDaysOnly(finishedOnly: Boolean) {
         writes.launch { preferencesRepository.setStatsFinishedDaysOnly(finishedOnly) }
     }
 }
 
-/** The five views in the dock's switch, in the app's order (design.txt C8). */
-internal val StatisticsViews = listOf("Calendar", "Weight", "Consistency", "Averages", "Rank history")
+/** The six views in the dock's switch, in the app's order (design.txt C8). */
+internal val StatisticsViews = listOf("Calendar", "Weight", "Consistency", "Averages", "Patterns", "Rank history")
 
 @Composable
 fun StatisticsScreen(
@@ -400,7 +424,8 @@ fun StatisticsScreen(
                     else -> MacroAveragesTab(uiState = uiState, viewModel = viewModel)
                 }
             }
-            4 -> RankHistoryTabRoute(viewModel = viewModel)
+            4 -> PatternsTabRoute(viewModel = viewModel)
+            5 -> RankHistoryTabRoute(viewModel = viewModel)
         }
     }
 

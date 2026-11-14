@@ -81,6 +81,10 @@ interface DiaryDao {
     // Per entry, so the rank can tell how much of a day's calories each nutrient covers
     @Query("SELECT dateEpochDay, foodId, foodName, loggedCalories, loggedProtein, loggedCarbs, loggedFat, loggedFiber, loggedSugar, loggedSaturatedFat, loggedSodium FROM diary_entries WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay")
     fun observeEntryNutrients(startEpochDay: Long, endEpochDay: Long): Flow<List<EntryNutrientRow>>
+
+    // Per entry with its meal, for the Stats patterns; unstated sugar and sodium stay null
+    @Query("SELECT dateEpochDay, mealType, loggedCalories, loggedProtein, loggedSugar, loggedSodium FROM diary_entries WHERE dateEpochDay BETWEEN :startEpochDay AND :endEpochDay")
+    fun observeMealNutrients(startEpochDay: Long, endEpochDay: Long): Flow<List<MealNutrientRow>>
 }
 
 data class EntryNutrientRow(
@@ -94,6 +98,15 @@ data class EntryNutrientRow(
     val loggedFiber: Double?,
     val loggedSugar: Double?,
     val loggedSaturatedFat: Double?,
+    val loggedSodium: Double?
+)
+
+data class MealNutrientRow(
+    val dateEpochDay: Long,
+    val mealType: String,
+    val loggedCalories: Double,
+    val loggedProtein: Double,
+    val loggedSugar: Double?,
     val loggedSodium: Double?
 )
 

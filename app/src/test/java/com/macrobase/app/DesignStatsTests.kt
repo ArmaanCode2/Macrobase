@@ -21,8 +21,8 @@ import java.time.LocalDate
 class DesignStatsTests {
 
     @Test
-    fun theDockListsTheFiveStatisticsViewsInTheAppsOrder() {
-        assertEquals(listOf("Calendar", "Weight", "Consistency", "Averages", "Rank history"), StatisticsViews)
+    fun theDockListsTheSixStatisticsViewsInTheAppsOrder() {
+        assertEquals(listOf("Calendar", "Weight", "Consistency", "Averages", "Patterns", "Rank history"), StatisticsViews)
     }
 
     @Test

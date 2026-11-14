@@ -5,6 +5,7 @@ import com.macrobase.app.domain.model.DailyNutritionSummary
 import com.macrobase.app.domain.model.DiaryEntry
 import com.macrobase.app.domain.model.MealType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 
@@ -32,6 +33,19 @@ data class LoggedFoodNutrients(
     val fiberGrams: Double? = null,
     val sugarGrams: Double? = null,
     val saturatedFatGrams: Double? = null,
+    val sodiumMg: Double? = null
+)
+
+/**
+ * One logged food as the Stats patterns read it: its day, its meal and the nutrients they judge.
+ * Sugar and sodium are null when the entry did not record them (AGENTS.md 2.4).
+ */
+data class LoggedMealNutrients(
+    val date: LocalDate,
+    val mealType: MealType,
+    val calories: Double,
+    val proteinGrams: Double,
+    val sugarGrams: Double? = null,
     val sodiumMg: Double? = null
 )
 
@@ -72,6 +86,12 @@ interface DiaryRepository {
      * Every food logged from [startDate] to [endDate]. A repository without per-food detail gives
      * one row per day with the day's totals and the secondary nutrients unknown.
      */
+    /**
+     * Every food logged from [startDate] to [endDate], with its meal. A repository without
+     * per-meal detail has none, so the patterns find nothing there.
+     */
+    fun observeMealNutrients(startDate: LocalDate, endDate: LocalDate): Flow<List<LoggedMealNutrients>> = flowOf(emptyList())
+
     fun observeLoggedFoodNutrients(startDate: LocalDate, endDate: LocalDate): Flow<List<LoggedFoodNutrients>> =
         observeNutritionAggregations(startDate, endDate).map { days ->
             days.map { LoggedFoodNutrients(it.date, 0L, "", it.calories, it.proteinGrams, it.carbsGrams, it.fatGrams) }
