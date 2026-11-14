@@ -36,6 +36,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.time.Instant
 import java.time.LocalDate
+import java.time.format.DateTimeParseException
 import java.util.TimeZone
 
 class PortabilityRepositoryImpl(
@@ -163,7 +164,8 @@ class PortabilityRepositoryImpl(
             heightCm = currentPrefs.heightCm,
             currentWeightKg = currentPrefs.currentWeightKg,
             targetWeightKg = currentPrefs.targetWeightKg,
-            dailyWaterGoalMl = currentPrefs.dailyWaterGoalMl
+            dailyWaterGoalMl = currentPrefs.dailyWaterGoalMl,
+            finishedDays = preferencesRepository.getFinishedDaysForBackup().sorted().map { it.toString() }
         )
 
         val manifest = BackupManifestDto(
@@ -262,6 +264,9 @@ class PortabilityRepositoryImpl(
                         preferencesRepository.updatePreferences(p.toPreferences(preferencesRepository.getPreferences()))
                         imported++
                     }
+                    // The backup's finished days in place of this phone's; a backup from before
+                    // format 1.5.0 has none
+                    preferencesRepository.restoreFinishedDays(finishedDaysOf(backupData), replace = true)
                 }
 
                 ImportResult(
@@ -413,6 +418,10 @@ class PortabilityRepositoryImpl(
                             imported++
                         }
                     }
+                    // Finished days are days, not profile: the backup's join this phone's even
+                    // when the profile is kept
+                    val finishedDays = finishedDaysOf(backupData)
+                    if (finishedDays.isNotEmpty()) preferencesRepository.restoreFinishedDays(finishedDays, replace = false)
                 }
 
                 val kept = when {
@@ -471,6 +480,16 @@ class PortabilityRepositoryImpl(
     }
 
     // Helper Entity Converters
+
+    /** The backup's finished days as dates; a damaged one is left out. */
+    private fun finishedDaysOf(backupData: MacroBaseBackupData): Set<LocalDate> =
+        backupData.preferences?.finishedDays.orEmpty().mapNotNull { text ->
+            try {
+                LocalDate.parse(text)
+            } catch (e: DateTimeParseException) {
+                null
+            }
+        }.toSet()
 
     /** The backup's profile fields over [current], so settings a backup does not carry are kept. */
     private fun UserPreferencesBackupDto.toPreferences(current: UserPreferences) = current.copy(

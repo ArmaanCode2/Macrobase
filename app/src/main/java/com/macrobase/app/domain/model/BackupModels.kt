@@ -192,7 +192,9 @@ data class UserPreferencesBackupDto(
     val heightCm: Double?,
     val currentWeightKg: Double?,
     val targetWeightKg: Double?,
-    val dailyWaterGoalMl: Double
+    val dailyWaterGoalMl: Double,
+    /** Format 1.5.0: ISO dates of the days marked "Done logging"; null in older backups. */
+    val finishedDays: List<String>? = null
 )
 
 /**

@@ -5,7 +5,7 @@
 MacroBase provides 100% offline data portability. Users own and control their personal nutrition and biometric data without accounts, servers, or cloud dependencies.
 
 - **Format Name**: `MacroBaseBackup`
-- **Format Version**: `1.4.0`
+- **Format Version**: `1.5.0`
 - **MIME Type**: `application/zip`
 - **Default Filename**: `MacroBase_Backup_YYYY-MM-DD.zip`
 - **Storage Strategy**: Decoupled from AndroidX Room internal SQLite schemas. Serialized as structured JSON documents within a standard ZIP archive.
@@ -40,7 +40,7 @@ The manifest contains metadata, schema compatibility, exact record counts, and S
 ```json
 {
   "format": "MacroBaseBackup",
-  "backupVersion": "1.4.0",
+  "backupVersion": "1.5.0",
   "appVersion": "1.2.5",
   "schemaVersion": 5,
   "exportedAt": "2026-08-19T07:15:30Z",
@@ -199,9 +199,12 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
   "heightCm": 180.0,
   "currentWeightKg": 82.5,
   "targetWeightKg": 78.0,
-  "dailyWaterGoalMl": 3000.0
+  "dailyWaterGoalMl": 3000.0,
+  "finishedDays": ["2026-11-12", "2026-11-13"]
 }
 ```
+
+- Format 1.5.0 added `finishedDays`: the days the user marked "Done logging" on Home, as ISO dates (`yyyy-MM-dd`), oldest first. Backups from earlier formats lack it and restore as no finished days. On restore a date that cannot be read, or one after today on the restoring phone, is left out. Apps that read format 1.x ignore the field.
 
 ---
 
@@ -213,13 +216,15 @@ Secondary nutrients: `null` means the food did not state the value, and `0.0` me
 - **Diary Entries**: Matched by `uuid`. If exists $\rightarrow$ skipped. If absent $\rightarrow$ inserted.
 - **Weight Entries**: Matched by `dateEpochDay`. If exists $\rightarrow$ newer record (`createdAt`) wins. If absent $\rightarrow$ inserted.
 - **Water Logs**: Matched by `(dateEpochDay, timestamp)`, since editing a log keeps its time. A log this phone already holds keeps this phone's amount, even when the backup's is newer (water logs carry no edit time); one whose amount differs counts as a conflict, and the result says how many. New logs are inserted.
-- **Goals & Preferences**: This phone's are kept when it has saved any: its current goal, strategy, any scheduled change and its profile stay, and the result says so. On a phone that has saved none, such as a fresh install, the backup fills them.
+- **Goals & Preferences**: This phone's are kept when it has saved any: its current goal, strategy, any scheduled change and its profile stay, and the result says so. On a phone that has saved none, such as a fresh install, the backup fills them. Finished days and the dismissed rank notices do not count as a saved profile.
+- **Finished Days**: The backup's `finishedDays` are added to this phone's, even when this phone's profile is kept. A backup without the field leaves this phone's finished days as they are.
 - **Goal History**: A merge that keeps this phone's goals still takes the backup's `transitions` dated before this phone's first saved day, so imported days keep the goals they had and count in the rank. The backup's `2000-01-01` record replaces this phone's, and records from the first saved day on stay this phone's. A backup without `transitions` changes nothing, and merging the same backup again changes nothing more.
 
 ### 5.2. OVERWRITE Mode (Destructive)
 - Requires explicit user confirmation via a prominent red warning dialog.
 - Clears all user tables (`diary_entries`, `custom_foods`, `recipes`, `weight_entries`, `water_logs`) in `macrobase_user.db`.
 - Inserts all backup records transactionally.
+- Replaces this phone's finished days with the backup's `finishedDays`. A backup without the field leaves no finished days.
 - **Built-in Catalog Guarantee**: `built_in_foods.db` is strictly untouched and unaffected.
 
 ---

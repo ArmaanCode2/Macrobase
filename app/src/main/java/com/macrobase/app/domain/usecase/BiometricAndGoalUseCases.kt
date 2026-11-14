@@ -186,6 +186,9 @@ class GetStatisticsUseCase(
         return statisticsRepository.getMacroAverages(startDate, endDate)
     }
 
+    fun observeFinishedDayAverages(startDate: LocalDate, endDate: LocalDate, finishedDays: Set<LocalDate>): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> =
+        statisticsRepository.observeFinishedDayAverages(startDate, endDate, finishedDays)
+
     fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics> {
         return statisticsRepository.observeWeightStatistics(startDate, endDate)
     }

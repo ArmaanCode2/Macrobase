@@ -23,6 +23,8 @@ MacroBase is built on a **100% Offline, Privacy-First Architecture**.
 | **Daily Calorie & Macro Goals** | Targets | Adherence scoring & dashboard bars | DataStore (`goals`) | **NO** | User can update at any time |
 | **Profile (First Name, Last Name, Height, Time Zone)** | Profile | Serving & unit display | DataStore (`prefs`) | **NO** | User can clear or update profile fields |
 | **Unit System Preference (Metric/Imperial)** | Preferences | Unit formatting | DataStore (`prefs`) | **NO** | User can toggle units freely |
+| **Finished Days ("Done logging" marks)** | Food Diary | Leaving half-logged days out of the Stats averages | DataStore (`prefs`, `finished_log_days`: ISO dates) | **NO** (only in a backup the user exports) | User can mark or unmark today or any past day on Home |
+| **Stats Day Filter (Logged days / Finished days)** | Preferences | Which days the Stats averages count | DataStore (`prefs`, `stats_finished_days_only`) | **NO** | User can switch it on the Averages view |
 
 ---
 

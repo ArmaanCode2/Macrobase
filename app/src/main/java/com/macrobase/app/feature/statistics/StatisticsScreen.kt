@@ -89,12 +89,14 @@ import com.macrobase.app.core.designsystem.components.MbDatePickerDialog
 import com.macrobase.app.core.designsystem.components.MbIcon
 import com.macrobase.app.core.designsystem.components.MbPanel
 import com.macrobase.app.core.designsystem.components.MbSheet
+import com.macrobase.app.core.designsystem.components.WriteFailedDialog
 import com.macrobase.app.core.designsystem.components.rememberIsScrolled
 import com.macrobase.app.core.designsystem.components.mbClickable
 import com.macrobase.app.core.navigation.DeclareDockViews
 import com.macrobase.app.core.navigation.LocalDockInset
 import com.macrobase.app.core.navigation.ReportContentScrolled
 import com.macrobase.app.core.util.DeviceClock
+import com.macrobase.app.core.util.SafeWrites
 import com.macrobase.app.domain.model.ConsistencyStatistics
 import com.macrobase.app.domain.model.HeatmapCellData
 import com.macrobase.app.domain.model.MacroAveragesStatistics
@@ -114,13 +116,16 @@ import com.macrobase.app.feature.weight.weightIntervalChipLabel
 import com.macrobase.app.feature.weight.WeightTimeInterval
 import com.macrobase.app.feature.weight.dateRange
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
@@ -169,8 +174,18 @@ data class StatisticsUiState(
     // Macro Averages Section
     val macroInterval: MacroInterval = MacroInterval.DAYS_30,
     val macroStats: MacroAveragesStatistics? = null,
+    /** True when the averages count only the days marked "Done logging" on Home. */
+    val finishedDaysOnly: Boolean = false,
     val isLoading: Boolean = false
 )
+
+/** The Averages view's text when no day counts. */
+internal fun averagesEmptyMessage(finishedDaysOnly: Boolean): String =
+    if (finishedDaysOnly) {
+        "Mark days as done on Home to see averages of finished days."
+    } else {
+        "Log meals in this period to see average macro distribution. Today counts once it ends."
+    }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatisticsViewModel(
@@ -196,14 +211,18 @@ class StatisticsViewModel(
     private val _macroInterval = MutableStateFlow(MacroInterval.DAYS_30)
     val macroInterval: StateFlow<MacroInterval> = _macroInterval.asStateFlow()
 
+    /** Saving the Averages switch, and its message if that fails. */
+    val writes = SafeWrites(viewModelScope)
+
     /**
      * The figures behind the Weight, Consistency and Averages views. The chosen view is not part of
      * this, so switching views neither restarts these queries nor waits for them.
      */
     private val statsData: StateFlow<StatisticsUiState> = combine(
         combine(_weightInterval, _weightCustomFrom, _weightCustomTo) { wInt, wFrom, wTo -> Triple(wInt, wFrom, wTo) },
-        combine(_consistencyInterval, _macroInterval) { cInt, mInt -> cInt to mInt }
-    ) { (wInt, wFrom, wTo), (cInt, mInt) ->
+        combine(_consistencyInterval, _macroInterval) { cInt, mInt -> cInt to mInt },
+        preferencesRepository.observeStatsFinishedDaysOnly().distinctUntilChanged()
+    ) { (wInt, wFrom, wTo), (cInt, mInt), finishedOnly ->
         val (weightFrom, weightTo) = calculateWeightDateRange(wInt, wFrom, wTo)
         val today = LocalDate.now(clock)
         // "30 Days" is today and the 29 before it, not 31 days (BUG-033)
@@ -213,12 +232,12 @@ class StatisticsViewModel(
         val lastEndedDay = today.minusDays(1)
         val mFrom = windowStart(lastEndedDay, mInt.days)
 
-        StatsParams(wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay)
+        StatsParams(wInt, weightFrom, weightTo, cInt, cFrom, today, mInt, mFrom, lastEndedDay, finishedOnly)
     }.flatMapLatest { p ->
         combine(
             getStatisticsUseCase.observeWeightStatistics(p.weightFrom, p.weightTo),
             getStatisticsUseCase.observeNutritionConsistency(p.cFrom, p.cTo),
-            getStatisticsUseCase.observeMacroAverages(p.mFrom, p.mTo),
+            macroAverages(p),
             preferencesRepository.observePreferences()
         ) { weightStats, consistencyStats, macroStats, prefs ->
             StatisticsUiState(
@@ -231,6 +250,7 @@ class StatisticsViewModel(
                 consistencyStats = consistencyStats,
                 macroInterval = p.mInt,
                 macroStats = macroStats,
+                finishedDaysOnly = p.finishedOnly,
                 isLoading = false
             )
         }
@@ -257,8 +277,23 @@ class StatisticsViewModel(
         val cTo: LocalDate,
         val mInt: MacroInterval,
         val mFrom: LocalDate,
-        val mTo: LocalDate
+        val mTo: LocalDate,
+        val finishedOnly: Boolean
     )
+
+    /**
+     * The averages for [p]: over every logged day, or over the finished ones only. A day marked
+     * or unmarked outside the range (today, say) does not work them out again.
+     */
+    private fun macroAverages(p: StatsParams): Flow<MacroAveragesStatistics> =
+        if (!p.finishedOnly) {
+            getStatisticsUseCase.observeMacroAverages(p.mFrom, p.mTo)
+        } else {
+            preferencesRepository.observeFinishedDays()
+                .map { days -> days.filterTo(HashSet()) { !it.isBefore(p.mFrom) && !it.isAfter(p.mTo) } }
+                .distinctUntilChanged()
+                .flatMapLatest { days -> getStatisticsUseCase.observeFinishedDayAverages(p.mFrom, p.mTo, days) }
+        }
 
     private fun calculateWeightDateRange(
         interval: WeightTimeInterval,
@@ -312,6 +347,11 @@ class StatisticsViewModel(
     fun onSelectMacroInterval(interval: MacroInterval) {
         _macroInterval.value = interval
     }
+
+    /** Saves the Averages switch: true counts finished days only. */
+    fun onSetFinishedDaysOnly(finishedOnly: Boolean) {
+        writes.launch { preferencesRepository.setStatsFinishedDaysOnly(finishedOnly) }
+    }
 }
 
 /** The five views in the dock's switch, in the app's order (design.txt C8). */
@@ -363,6 +403,8 @@ fun StatisticsScreen(
             4 -> RankHistoryTabRoute(viewModel = viewModel)
         }
     }
+
+    WriteFailedDialog(viewModel.writes)
 }
 
 /**
@@ -994,13 +1036,32 @@ private fun MacroAveragesTab(
             }
         }
     ) {
+        // Which days count: every logged day, or only those marked "Done logging" on Home
+        Row(
+            modifier = Modifier.selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MbChip(
+                text = "Logged days",
+                selected = !uiState.finishedDaysOnly,
+                onClick = { viewModel.onSetFinishedDaysOnly(false) }
+            )
+            MbChip(
+                text = "Finished days",
+                selected = uiState.finishedDaysOnly,
+                onClick = { viewModel.onSetFinishedDaysOnly(true) }
+            )
+        }
+        Spacer(modifier = Modifier.height(AppSpacing.sectionGap))
+
         if (stats == null || !stats.hasSufficientData) {
-            StatsMessagePanel(text = "Log meals in this period to see average macro distribution. Today counts once it ends.")
+            StatsMessagePanel(text = averagesEmptyMessage(uiState.finishedDaysOnly))
         } else {
+            val dayKind = if (uiState.finishedDaysOnly) "finished" else "logged"
             // 1. Average daily intake
             StatsSectionHeading(text = "Daily intake averages")
             Text(
-                text = "Based on ${stats.loggedDaysCount} logged days; today counts once it ends",
+                text = "Based on ${stats.loggedDaysCount} $dayKind days; today counts once it ends",
                 style = StatsNoteStyle,
                 color = AppColors.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp)

@@ -327,6 +327,31 @@ class HomeViewModel(
         }
     }
 
+    /** True when the day on screen is marked "Done logging". */
+    val isDayFinished: StateFlow<Boolean> = combine(
+        _selectedDate,
+        preferencesRepository?.observeFinishedDays() ?: flowOf(emptySet())
+    ) { date, finishedDays -> date in finishedDays }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    /**
+     * Marks the day on screen finished, or unmarks it if it was. A day still to come is never
+     * marked. The mark only steers averages: the day still takes new foods and keeps its mark.
+     */
+    fun onToggleDayFinished() {
+        val prefs = preferencesRepository ?: return
+        val date = _selectedDate.value
+        if (!canMarkDayFinished(date, today())) return
+        writes.launch {
+            val finished = date in prefs.observeFinishedDays().first()
+            prefs.setDayFinished(date, !finished)
+        }
+    }
+
     fun setRevealedEntry(entryId: Long?) {
         _revealedEntryId.value = entryId
     }
@@ -411,6 +436,9 @@ internal fun homeDayLabel(date: LocalDate, today: LocalDate): String = when (dat
     else -> DashboardDateFormatter.formatDashboardDate(date, today)
 }
 
+/** Home's "Done logging" control shows for today and past days, never for a day still to come. */
+internal fun canMarkDayFinished(date: LocalDate, today: LocalDate): Boolean = !date.isAfter(today)
+
 /** Whole calories with a thousands separator, as "2,000". */
 internal fun formatKcal(value: Double): String = String.format(Locale.US, "%,d", value.roundToInt())
 
@@ -434,6 +462,7 @@ fun HomeScreen(
     val summary by viewModel.dailySummary.collectAsState()
     val profile by viewModel.homeProfile.collectAsState()
     val revealedEntryId by viewModel.revealedEntryId.collectAsState()
+    val dayFinished by viewModel.isDayFinished.collectAsState()
 
     var selectedMealForInfo by remember { mutableStateOf<Meal?>(null) }
     var showDailySummary by remember { mutableStateOf(false) }
@@ -568,6 +597,17 @@ fun HomeScreen(
                 }
             }
 
+            // Below the last meal: "Done logging this day", or the day's mark with an undo
+            if (canMarkDayFinished(selectedDate, viewModel.today())) {
+                item(key = "finished", contentType = "finished") {
+                    DoneLoggingControl(
+                        finished = dayFinished,
+                        onToggle = { viewModel.onToggleDayFinished() },
+                        modifier = Modifier.padding(top = 18.dp)
+                    )
+                }
+            }
+
             // Water and weight: the tracker's icon, then its quick action
             item(key = "trackers", contentType = "trackers") {
                 Row(
@@ -637,6 +677,53 @@ fun HomeScreen(
             onDateSelected = { viewModel.onSelectDate(it) },
             onDismiss = { showDatePicker = false }
         )
+    }
+}
+
+/**
+ * The day's "Done logging" mark, kept quiet: an outlined chip-style button while unmarked, and a
+ * check with "Day finished" and an Undo tap once marked.
+ */
+@Composable
+private fun DoneLoggingControl(finished: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = Dimensions.MinTouchTarget),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (finished) {
+            MbIcon(icon = Ph.CheckCircleFill, contentDescription = null, size = 16.dp, tint = AppColors.Accent)
+            Text(
+                text = "Day finished",
+                style = AppTypography.Chip,
+                color = AppColors.ChipOnInk,
+                modifier = Modifier.padding(start = 6.dp)
+            )
+            Text(
+                text = "Undo",
+                style = AppTypography.Chip,
+                color = AppColors.TextSecondary,
+                modifier = Modifier
+                    .mbClickable(onClickLabel = "Mark this day as not finished", onClick = onToggle)
+                    .padding(horizontal = 12.dp, vertical = 14.dp)
+            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .height(40.dp)
+                    .mbClickable(onClickLabel = "Mark this day as finished", onClick = onToggle)
+                    .clip(AppShapes.PillButton)
+                    .border(1.dp, AppColors.ChipBorder, AppShapes.PillButton)
+                    .padding(horizontal = 15.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MbIcon(icon = Ph.CheckCircle.light, contentDescription = null, size = 16.dp, tint = AppColors.TextSecondary)
+                Text(text = "Done logging this day", style = AppTypography.Chip, color = AppColors.TextSecondary, maxLines = 1)
+            }
+        }
     }
 }
 

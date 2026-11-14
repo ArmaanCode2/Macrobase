@@ -4,18 +4,24 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.macrobase.app.core.util.DeviceClock
 import com.macrobase.app.domain.model.UnitSystem
 import com.macrobase.app.domain.model.UserPreferences
 import com.macrobase.app.domain.repository.PreferencesRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.time.Clock
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
 
 private val Context.dataStore by preferencesDataStore(
     name = "user_preferences",
@@ -24,7 +30,9 @@ private val Context.dataStore by preferencesDataStore(
 
 class PreferencesRepositoryImpl(
     private val context: Context,
-    private val store: DataStore<Preferences> = context.dataStore
+    private val store: DataStore<Preferences> = context.dataStore,
+    /** Today, for refusing a "Done logging" mark on a day still to come. */
+    private val clock: Clock = DeviceClock
 ) : PreferencesRepository {
 
     /** Every read goes through here, so an unreadable file means default settings, not a crash (BUG-053). */
@@ -41,6 +49,12 @@ class PreferencesRepositoryImpl(
         val WATER_GOAL_ML = doublePreferencesKey("water_goal_ml")
         val SEEN_RANK_RULES_VERSION = intPreferencesKey("seen_rank_rules_version")
         val SEEN_RANK_SEASON = longPreferencesKey("seen_rank_season_start")
+        /** ISO dates (2026-11-14) of the days marked "Done logging". */
+        val FINISHED_LOG_DAYS = stringSetPreferencesKey("finished_log_days")
+        val STATS_FINISHED_DAYS_ONLY = booleanPreferencesKey("stats_finished_days_only")
+
+        /** Stored here but not part of the profile, so they do not count as a saved one. */
+        val NOT_PROFILE: Set<Preferences.Key<*>> = setOf(SEEN_RANK_RULES_VERSION, SEEN_RANK_SEASON, FINISHED_LOG_DAYS, STATS_FINISHED_DAYS_ONLY)
     }
 
     override suspend fun getPreferences(): UserPreferences {
@@ -87,10 +101,10 @@ class PreferencesRepositoryImpl(
         if (value == null) prefs.remove(key) else prefs[key] = value
     }
 
-    // The rank notices are not part of the profile: a backup import must still restore a profile
-    // on a phone that has only dismissed them
+    // The rank notices, the finished days and the Stats switch are not part of the profile: a
+    // backup import must still restore a profile on a phone that has only those
     override suspend fun hasSavedPreferences(): Boolean =
-        data.first().asMap().keys.any { it != Keys.SEEN_RANK_RULES_VERSION && it != Keys.SEEN_RANK_SEASON }
+        data.first().asMap().keys.any { it !in Keys.NOT_PROFILE }
 
     override fun observeSeenRankRulesVersion(): Flow<Int> = data.map { it[Keys.SEEN_RANK_RULES_VERSION] ?: 0 }
 
@@ -102,5 +116,46 @@ class PreferencesRepositoryImpl(
 
     override suspend fun setSeenRankSeason(seasonStartEpochDay: Long) {
         store.edit { it[Keys.SEEN_RANK_SEASON] = seasonStartEpochDay }
+    }
+
+    override fun observeFinishedDays(): Flow<Set<LocalDate>> = finishedDaysFrom(data)
+
+    // A backup holds the stored days or fails, as for the profile (BUG-053)
+    override suspend fun getFinishedDaysForBackup(): Set<LocalDate> = finishedDaysFrom(store.data).first()
+
+    private fun finishedDaysFrom(source: Flow<Preferences>): Flow<Set<LocalDate>> =
+        source.map { prefs -> prefs[Keys.FINISHED_LOG_DAYS].orEmpty().mapNotNull(::parseDay).toSet() }
+
+    private fun parseDay(text: String): LocalDate? = try {
+        LocalDate.parse(text)
+    } catch (e: DateTimeParseException) {
+        null
+    }
+
+    override suspend fun setDayFinished(date: LocalDate, finished: Boolean): Boolean {
+        if (date.isAfter(LocalDate.now(clock))) return false
+        store.edit { prefs ->
+            val days = prefs[Keys.FINISHED_LOG_DAYS].orEmpty()
+            setFinishedDays(prefs, if (finished) days + date.toString() else days - date.toString())
+        }
+        return true
+    }
+
+    override suspend fun restoreFinishedDays(days: Set<LocalDate>, replace: Boolean) {
+        val today = LocalDate.now(clock)
+        val restored = days.filterNot { it.isAfter(today) }.map { it.toString() }.toSet()
+        store.edit { prefs ->
+            setFinishedDays(prefs, if (replace) restored else prefs[Keys.FINISHED_LOG_DAYS].orEmpty() + restored)
+        }
+    }
+
+    private fun setFinishedDays(prefs: MutablePreferences, days: Set<String>) {
+        if (days.isEmpty()) prefs.remove(Keys.FINISHED_LOG_DAYS) else prefs[Keys.FINISHED_LOG_DAYS] = days
+    }
+
+    override fun observeStatsFinishedDaysOnly(): Flow<Boolean> = data.map { it[Keys.STATS_FINISHED_DAYS_ONLY] ?: false }
+
+    override suspend fun setStatsFinishedDaysOnly(finishedOnly: Boolean) {
+        store.edit { it[Keys.STATS_FINISHED_DAYS_ONLY] = finishedOnly }
     }
 }

@@ -428,7 +428,8 @@ object BackupJsonSerializer {
   "heightCm": ${prefs.heightCm ?: "null"},
   "currentWeightKg": ${prefs.currentWeightKg ?: "null"},
   "targetWeightKg": ${prefs.targetWeightKg ?: "null"},
-  "dailyWaterGoalMl": ${prefs.dailyWaterGoalMl}
+  "dailyWaterGoalMl": ${prefs.dailyWaterGoalMl},
+  "finishedDays": ${prefs.finishedDays?.joinToString(", ", prefix = "[", postfix = "]") { "\"${escapeJson(it)}\"" } ?: "null"}
 }"""
     }
 
@@ -442,7 +443,9 @@ object BackupJsonSerializer {
             heightCm = obj.getDouble("heightCm"),
             currentWeightKg = obj.getDouble("currentWeightKg"),
             targetWeightKg = obj.getDouble("targetWeightKg"),
-            dailyWaterGoalMl = obj.getDouble("dailyWaterGoalMl") ?: 2500.0
+            dailyWaterGoalMl = obj.getDouble("dailyWaterGoalMl") ?: 2500.0,
+            // Format 1.5.0; absent (null) in older backups, which restore as no finished days
+            finishedDays = obj.getArray("finishedDays")?.mapNotNull { it as? String }
         )
     }
 

@@ -344,16 +344,29 @@ class StatisticsRepositoryImpl(
 
     /** Macro averages for a range, worked out on the calculation lane. */
     override fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> =
-        observeMacroAveragesFlow(startDate, endDate).onLane(calculationDispatcher)
+        observeMacroAveragesFlow(startDate, endDate) { true }.onLane(calculationDispatcher)
 
-    private fun observeMacroAveragesFlow(startDate: LocalDate, endDate: LocalDate): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
+    /** Macro averages over the finished days of a range, worked out on the calculation lane. */
+    override fun observeFinishedDayAverages(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        finishedDays: Set<LocalDate>
+    ): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> =
+        observeMacroAveragesFlow(startDate, endDate) { it in finishedDays }.onLane(calculationDispatcher)
+
+    /** The averages over the days with food for which [counts] holds. */
+    private fun observeMacroAveragesFlow(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        counts: (LocalDate) -> Boolean
+    ): Flow<com.macrobase.app.domain.model.MacroAveragesStatistics> {
         val days = daysBetween(startDate, endDate)
         return combine(
             diaryRepository.observeNutritionAggregations(startDate, endDate).settledOnLane(calculationDispatcher),
             goalsRepository.observeGoalsForDates(days),
             goalsRepository.observeGoals()
         ) { aggregations, dayGoals, currentGoal ->
-            val loggedDays = aggregations.filter { it.calories > 0.0 }
+            val loggedDays = aggregations.filter { it.calories > 0.0 && counts(it.date) }
             val count = loggedDays.size
             // The averages cover logged days only, so the targets come from those same days' goals;
             // with no logged day they are today's (BUG-049). The actual split is a share of all the

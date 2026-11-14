@@ -11,6 +11,7 @@ import com.macrobase.app.domain.model.WaterEntry
 import com.macrobase.app.domain.model.WeightEntry
 import com.macrobase.app.domain.model.WeightStatistics
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
@@ -158,6 +159,32 @@ interface PreferencesRepository {
      */
     fun observeSeenRankSeason(): Flow<Long> = flowOf(Long.MAX_VALUE)
     suspend fun setSeenRankSeason(seasonStartEpochDay: Long) {}
+
+    /**
+     * The days the user marked "Done logging", so averages can leave half-logged days out. Kept
+     * outside the profile like the rank notices: marking a day is not saving a profile.
+     * Repositories without marks report none.
+     */
+    fun observeFinishedDays(): Flow<Set<LocalDate>> = flowOf(emptySet())
+
+    /**
+     * Marks [date] finished, or unmarks it when [finished] is false. A day after today cannot be
+     * marked: that returns false and changes nothing.
+     */
+    suspend fun setDayFinished(date: LocalDate, finished: Boolean): Boolean = false
+
+    /** The finished days for a backup: fails when they cannot be read, never reports none. */
+    suspend fun getFinishedDaysForBackup(): Set<LocalDate> = observeFinishedDays().first()
+
+    /**
+     * A backup's finished days: [replace] puts them in place of this phone's (Replace), otherwise
+     * they are added to them (Merge). A day after today is left out.
+     */
+    suspend fun restoreFinishedDays(days: Set<LocalDate>, replace: Boolean) {}
+
+    /** True when the statistics count finished days only; false, the default, counts every logged day. */
+    fun observeStatsFinishedDaysOnly(): Flow<Boolean> = flowOf(false)
+    suspend fun setStatsFinishedDaysOnly(finishedOnly: Boolean) {}
 }
 
 /**
@@ -168,6 +195,13 @@ interface StatisticsRepository {
     suspend fun getNutritionConsistency(startDate: LocalDate, endDate: LocalDate): ConsistencyStatistics
     fun observeMacroAverages(startDate: LocalDate, endDate: LocalDate): Flow<MacroAveragesStatistics>
     suspend fun getMacroAverages(startDate: LocalDate, endDate: LocalDate): MacroAveragesStatistics
+
+    /**
+     * [observeMacroAverages] over the days in [finishedDays] only: a logged day the user has not
+     * marked finished is left out, and so is a finished day with no food.
+     */
+    fun observeFinishedDayAverages(startDate: LocalDate, endDate: LocalDate, finishedDays: Set<LocalDate>): Flow<MacroAveragesStatistics>
+
     fun observeWeightStatistics(startDate: LocalDate, endDate: LocalDate): Flow<WeightStatistics>
     suspend fun getWeightStatistics(startDate: LocalDate, endDate: LocalDate): WeightStatistics
 }

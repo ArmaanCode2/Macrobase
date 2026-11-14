@@ -14,7 +14,9 @@ object PortabilityConfig {
     // "unknown", so their zeros are read back as unknown (BackupJsonSerializer.legacyZerosAsUnknown).
     // 1.4.0: custom foods also carry saturated fat (null when not stated). Additive: apps reading
     // 1.x ignore it, and older backups restore it as unknown.
-    const val BACKUP_FORMAT_VERSION = "1.4.0"
+    // 1.5.0: preferences.json also carries finishedDays, the days marked "Done logging". Additive:
+    // apps reading 1.x ignore it, and older backups restore as no finished days.
+    const val BACKUP_FORMAT_VERSION = "1.5.0"
     // The app that wrote the backup, shown on the import preview. Follows versionName in app/build.gradle.kts
     const val CURRENT_APP_VERSION = com.macrobase.app.BuildConfig.VERSION_NAME
     const val DATABASE_SCHEMA_VERSION = DatabaseConfig.USER_DATABASE_VERSION
